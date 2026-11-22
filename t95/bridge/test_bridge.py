@@ -679,9 +679,15 @@ class EndToEndTest(unittest.TestCase):
         cls.apc = FakeController(os.path.join(cls.dir, "apc"))
         cls.keys = FakeController(os.path.join(cls.dir, "keys"))
         cls.http = free_port()
+        cls.ir = os.path.join(cls.dir, "lirc")
+        os.mkfifo(cls.ir)
+        cls.irw = os.open(cls.ir, os.O_RDWR | os.O_NONBLOCK)
+        with open(os.path.join(cls.dir, "state.json"), "w") as f:   # remote: play/stop on two buttons
+            json.dump({"ir": {"all": {"play/tap": 0x2FE1C, "stop/tap": 0x2FE1D}}}, f)
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--http-port", str(cls.http),
-             "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
+             "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--ir-lirc", cls.ir,
+             "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
             stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         BridgeTest.http = cls.http
         BridgeTest.wait_health(lambda h: h["control"] == 1 and len(h["controllers"]) == 2, 10)
@@ -745,6 +751,25 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(kinds, ["apc40 (driving)", "keys"])
         print("\n  end to end ping (pty, desktop): %s" % h["ping_ms"])
         c.close()
+
+    def test_e2b_remote_play_stop_reach_the_daisy(self):
+        """Remote play/stop become APC40 PLAY/STOP presses on the driving
+        APC40's port; the real firmware code starts and stops the transport"""
+        playing = lambda c: [l for l in c.lines if l.startswith("S ")][-1].split()[1]
+        press = lambda scan: (os.write(self.irw, struct.pack("QHHIQ", 0, 0, 10, 0, scan)), time.sleep(0.4))
+        BridgeTest.wait_health(lambda h: any(x["kind"] == "apc40 (driving)" for x in h["controllers"]), 8)
+        sel = SseClient(self.http, path="/events?view=selector")
+        self.assertTrue(sel.wait_for(lambda c: any(l.startswith("S ") for l in c.lines)))
+        press(0x2FE1C)              # no ApcBox page open: the Daisy isn't touched
+        time.sleep(0.5)
+        self.assertEqual(playing(sel), "0")
+        box = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(box.wait_for(lambda c: any(l.startswith("S ") for l in c.lines)))
+        press(0x2FE1C)
+        self.assertTrue(box.wait_for(lambda c: playing(c) == "1"), "remote play didn't start the Daisy")
+        press(0x2FE1D)
+        self.assertTrue(box.wait_for(lambda c: playing(c) == "0"), "remote stop didn't stop it")
+        sel.close(); box.close()
 
     def test_e3_page_runs_in_a_browser(self):
         """The page itself: no script errors, bridge mode, controller chip.

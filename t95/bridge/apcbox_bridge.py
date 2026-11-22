@@ -85,6 +85,10 @@ IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
               "play", "stop", "next", "prev", "vol_up", "vol_down"]
 IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
 IR_PROFILES = ["all", "selector", "apcbox"]
+# Remote actions the bridge plays on the Daisy itself, as presses of the
+# APC40's own buttons (note, channel 0) on the T95 port of the APC40 that
+# drives the box. Only while a browser shows the ApcBox page.
+APC_BUTTONS = {"play": 0x5B, "stop": 0x5C}
 MODULES = [
     {"id": "apcbox", "name": "ApcBox groovebox", "url": "/apcbox", "ready": True,
      "about": "Daisy: 16 tracks, samples and 303s, APC40 + keyboards"},
@@ -599,6 +603,10 @@ class IrReader:
             a = self.decide(c.view, phase)
             if a:
                 c.push(sse_event("ir", {"action": a, "phase": phase}))
+        if any(c.view == "apcbox" for c in self.b.clients):
+            a = self.decide("apcbox", phase)
+            if a in APC_BUTTONS:
+                self.b.apc_button(APC_BUTTONS[a])
 
     def decide(self, view, phase):
         st, scan = self.b.state, self.scan
@@ -930,6 +938,24 @@ class Bridge:
     def announce_port(self, p):
         p.announced = now()
         self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
+
+    def apc_port(self):
+        """T95 port of the APC40 driving the box (P line), or None"""
+        try:
+            active = int(self.p_line.split()[5])
+        except (AttributeError, IndexError, ValueError):
+            return None
+        return active if active in self.ports else None
+
+    def apc_button(self, note):
+        """Press and release one APC40 button, as if on the APC40 itself"""
+        p = self.apc_port()
+        if p is None:
+            log.info("remote: no APC40 on the T95 is driving the box, button %02x ignored", note)
+            return False
+        self.ctl_send(b"%sM%d %02x%02x7f\n" % (ESC, p, 0x90, note))
+        self.ctl_send(b"%sM%d %02x%02x00\n" % (ESC, p, 0x80, note))
+        return True
 
     def pong(self, line):
         sent = self.pings.pop(line[2:].strip(), None)

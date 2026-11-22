@@ -105,8 +105,11 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
   (any button, for the setup page) and `irlearned`.
 - Kept in `state.json` (systemd `StateDirectory`, `/var/lib/apcbox-bridge`):
   last module, countdown, bindings. Survives restarts and reboots.
-- Remote actions that need the Daisy (play, stop, the encoder) don't do
-  anything yet: they need a firmware UI command (step 3b).
+- play and stop work on the Daisy while a browser shows the ApcBox page:
+  the bridge presses the APC40's own PLAY / STOP buttons on the port of the
+  APC40 that drives the box. So only when that APC40 is on the T95; with it
+  on the Daisy's USB-A they're ignored (logged). The encoder and the rest
+  need a firmware UI command (step 3b).
 - Anyone on the network can change the bindings and the last module (the
   POST endpoints). Fine on a home network; don't expose port 8040 further.
 
