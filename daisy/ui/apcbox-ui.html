@@ -106,6 +106,10 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
 .toolbar label { color: var(--dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
 .empty { color: var(--dim); padding: 30px 10px; text-align: center; }
 .hidden { display: none !important; }
+.step.selrow { filter: brightness(1.3); }
+/* TV (the T95 kiosk): no animated fades or filters, they repaint every frame on the Mali */
+body.tv .tname, body.tv .tname.hit { transition: none; }
+body.tv .step.selrow, body.tv .row-sel .step { filter: none; box-shadow: inset 0 0 0 1px #6b5a1f; }
 body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
 </style>
 </head>
@@ -388,8 +392,16 @@ function log(text, cls) {
   if (cls) div.className = cls;
   const t = new Date();
   div.textContent = `${t.toTimeString().slice(0, 8)}  ${text}`;
+  logQueue.push(div);
+  if (logQueue.length > 400) logQueue.shift();
+}
+/* Once per frame: reading the scroll position forces a layout, so not per line */
+const logQueue = [];
+function flushLog() {
+  if (!logQueue.length) return;
   const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
-  logEl.appendChild(div);
+  logEl.append(...logQueue);
+  logQueue.length = 0;
   while (logEl.childNodes.length > 400) logEl.removeChild(logEl.firstChild);
   if (atBottom) logEl.scrollTop = logEl.scrollHeight;
 }
@@ -442,19 +454,33 @@ $("apc").append(el("div", "apcsep"));
 const TB_COLORS = ["var(--red)", "var(--blue)", "var(--orange)", "var(--orange)", "var(--green)"];
 for (let i = 0; i < 40; i++) { const l = el("div", "led tb"); l.style.setProperty("--k", TB_COLORS[Math.floor(i / 8)]); $("apc").append(l); apcLeds.push(l); }
 
+/* Writes that skip themselves when nothing changed: on the T95's Mali every
+   DOM write costs style and layout, and the page used to redo all of them up
+   to 60 times a second */
+const txt = (e, v) => { v = String(v); if (e._t !== v) { e._t = v; e.textContent = v; } };
+const setCls = (e, c) => { if (e._c !== c) { e._c = c; e.className = c; } };
+const sty = (e, prop, v) => { const k = "_s" + prop; if (e[k] !== v) { e[k] = v; e.style[prop] = v; } };
 function kv(container, pairs) {
+  const key = JSON.stringify(pairs);
+  if (container._kv === key) return;
+  container._kv = key;
   container.textContent = "";
   for (const [k, v] of pairs) container.append(el("span", "k", k), el("span", "", v));
 }
-const setBar = (b, v) => { b.style.width = (v / 127 * 100) + "%"; };
+const setBar = (b, v) => sty(b, "width", (v / 127 * 100) + "%");
 
 /* ---------------- render ---------------- */
 let dirty = true;
-function chip(id, text, cls) { const c = $(id); c.textContent = text; c.className = "chip " + (cls || ""); }
+function chip(id, text, cls) { const c = $(id); txt(c, text); setCls(c, "chip " + (cls || "")); }
 
+const FRAME_MS = new URLSearchParams(location.search).has("tv") ? 66 : 33; // 15 / 30 fps: a step at 120 BPM is 125 ms
+let lastFrame = 0;
 function render() {
   requestAnimationFrame(render);
   const now = performance.now();
+  if (now - lastFrame < FRAME_MS) return;
+  lastFrame = now;
+  flushLog();
   for (let t = 0; t < NT; t++) if (st.trig[t] !== lastTrig[t]) { lastTrig[t] = st.trig[t]; hitUntil[t] = now + 90; dirty = true; }
   if (!dirty && !hitUntil.some(h => h > now - 100)) return;
   dirty = false;
@@ -478,11 +504,11 @@ function render() {
        st.demo ? "warn" : st.link ? (st.gotData ? "ok" : "warn") : "bad");
   chip("c-apc", st.apcUp ? "APC40: running" : st.apcPresent ? "APC40: enumerating" : "APC40: not plugged", st.apcUp ? "ok" : st.apcPresent ? "warn" : "bad");
   chip("c-sd", st.sd ? "SD: ok" : "SD: none", st.sd ? "ok" : "warn");
-  $("transport").textContent = st.play ? "▶" : "■";
-  $("transport").style.color = st.play ? "var(--green)" : "var(--dim)";
-  $("bpm").textContent = st.bpm ? st.bpm.toFixed(1) : "-";
-  $("stepno").textContent = st.play ? (st.step + 1) + "/16" : "-";
-  $("pattern").textContent = patName(st.pat) + (st.queued >= 0 ? " → " + patName(st.queued) : "");
+  txt($("transport"), st.play ? "▶" : "■");
+  sty($("transport"), "color", st.play ? "var(--green)" : "var(--dim)");
+  txt($("bpm"), st.bpm ? st.bpm.toFixed(1) : "-");
+  txt($("stepno"), st.play ? (st.step + 1) + "/16" : "-");
+  txt($("pattern"), patName(st.pat) + (st.queued >= 0 ? " → " + patName(st.queued) : ""));
   chip("c-rec", st.rec ? (st.play ? "● RECORDING" : "● REC armed") : "REC off", st.rec ? "bad" : "");
   chip("c-metro", st.metro ? "click on" : "click off", st.metro ? "ok" : "");
   chip("c-shift", "SHIFT", st.shift ? "warn" : "");
@@ -493,30 +519,30 @@ function render() {
   $("c-set").classList.toggle("hidden", st.openSet < 0 && !st.dirty && !st.setOp);
   $("c-set").textContent = st.setOp === 1 ? "saving set..." : st.setOp === 2 ? "loading set..."
     : (st.openSet >= 0 ? `set ${String(st.openSet + 1).padStart(2, "0")}` : "set: not saved") + (st.dirty ? " *" : "");
-  $("cputxt").textContent = `${st.cpuAvg.toFixed(0)}% / max ${st.cpuMax.toFixed(0)}%`;
-  $("cpuavg").style.width = Math.min(100, st.cpuAvg) + "%";
-  $("cpuavg").style.background = st.cpuAvg > 80 ? "var(--red)" : st.cpuAvg > 60 ? "var(--yellow)" : "var(--green)";
-  $("cpumax").style.left = Math.min(98, st.cpuMax) + "%";
+  txt($("cputxt"), `${st.cpuAvg.toFixed(0)}% / max ${st.cpuMax.toFixed(0)}%`);
+  sty($("cpuavg"), "width", Math.min(100, st.cpuAvg) + "%");
+  sty($("cpuavg"), "background", st.cpuAvg > 80 ? "var(--red)" : st.cpuAvg > 60 ? "var(--yellow)" : "var(--green)");
+  sty($("cpumax"), "left", Math.min(98, st.cpuMax) + "%");
   if (st.limit !== lastLimit) { lastLimit = st.limit; limitUntil = now + 400; }
-  $("c-clip").className = "chip warn" + (now > limitUntil ? " hidden" : "");
+  setCls($("c-clip"), "chip warn" + (now > limitUntil ? " hidden" : ""));
   $("c-nan").classList.toggle("hidden", !st.nan);
-  $("c-nan").textContent = `DSP RESET ×${st.nan}`;
+  txt($("c-nan"), `DSP RESET ×${st.nan}`);
   $("c-drop").classList.toggle("hidden", !st.dropped);
   $("c-reset").classList.toggle("hidden", !st.resetting);
-  $("c-tpage").textContent = "strips: " + (st.tpage ? "9-16" : "1-8");
+  txt($("c-tpage"), "strips: " + (st.tpage ? "9-16" : "1-8"));
   $("c-lrec").classList.toggle("hidden", !st.lrec);
-  if (st.lrec) $("c-lrec").textContent = st.lrec === 1 ? `ARMED track ${st.lrecTrack + 1}` : `SAMPLING track ${st.lrecTrack + 1} · bar ${st.lrecBars + 1}`;
+  if (st.lrec) txt($("c-lrec"), st.lrec === 1 ? `ARMED track ${st.lrecTrack + 1}` : `SAMPLING track ${st.lrecTrack + 1} · bar ${st.lrecBars + 1}`);
   $("c-in").classList.toggle("hidden", !(st.lrec || st.inMon));
-  $("c-inlvl").style.width = Math.min(100, st.inPeak || 0) + "%";
-  $("c-inlvl").style.background = (st.inPeak || 0) > 90 ? "var(--red)" : "var(--green)";
+  sty($("c-inlvl"), "width", Math.min(100, st.inPeak || 0) + "%");
+  sty($("c-inlvl"), "background", (st.inPeak || 0) > 90 ? "var(--red)" : "var(--green)");
   $("c-ver").classList.toggle("hidden", !st.ver || st.ver === REPORT_VERSION);
 
   /* sequencer */
-  $("seqpat").textContent = patName(st.gridPat);
+  txt($("seqpat"), patName(st.gridPat));
   stepHdr.forEach((h, s) => h.classList.toggle("now", !!st.play && s === st.step));
   for (let t = 0; t < NT; t++) {
     const r = rows[t], tp = st.tracks[t];
-    r.name.textContent = st.names[t];
+    txt(r.name, st.names[t]);
     r.name.title = st.names[t];
     r.name.classList.toggle("hit", hitUntil[t] > now);
     r.name.classList.toggle("loading", !!(st.loading >> t & 1));
@@ -524,7 +550,7 @@ function render() {
     r.s.classList.toggle("on", !!(st.solo >> t & 1));
     r.r.classList.toggle("on", !!(st.roll >> t & 1));
     const xs = ["", "A", "B"][st.xside[t] || 0];
-    if (r.x.textContent !== xs) { r.x.textContent = xs; r.x.classList.toggle("on", !!xs); }
+    if (r.x.textContent !== xs) { txt(r.x, xs); r.x.classList.toggle("on", !!xs); }
     const synth = !!(st.synth >> t & 1), nh = st.notes[t];
     for (let s = 0; s < NS; s++) {
       const v = st.grid[t * NS + s];
@@ -541,25 +567,25 @@ function render() {
       c.classList.toggle("ph", !!st.play && s === st.step);
     }
     setBar(r.vol.firstChild, tp[0]);
-    r.pan.firstChild.style.left = `calc(${tp[1] / 127 * 100}% - 2px)`;
+    sty(r.pan.firstChild, "left", `calc(${tp[1] / 127 * 100}% - 2px)`);
     setBar(r.rev.firstChild, tp[2]);
     setBar(r.dly.firstChild, tp[3]);
     const off = (t >> 3) !== st.tpage;
     if (r._off !== off) { r._off = off; r.all.forEach(e => e.classList.toggle("offpage", off)); }
     const sel = t === st.sel;
-    r.name.style.outline = sel ? "1px solid var(--yellow)" : "";
-    r.no.style.color = sel ? "var(--yellow)" : "";
-    r.steps.forEach(c => c.style.filter = sel ? "brightness(1.3)" : "");
+    sty(r.name, "outline", sel ? "1px solid var(--yellow)" : "");
+    sty(r.no, "color", sel ? "var(--yellow)" : "");
+    if (r._sel !== sel) { r._sel = sel; r.steps.forEach(c => c.classList.toggle("selrow", sel)); }
   }
 
   /* selected track */
   const tp = st.tracks[st.sel];
-  $("selname").textContent = `${st.sel + 1} · ${st.names[st.sel]}`;
+  txt($("selname"), `${st.sel + 1} · ${st.names[st.sel]}`);
   if (st.synth >> st.sel & 1) {
     const a = st.acid[st.sel];
-    ACID.forEach(([n, f], k) => { devKnobs[k].n.textContent = n; devKnobs[k].v.textContent = f(a[k]); setBar(devKnobs[k].b, a[k]); });
+    ACID.forEach(([n, f], k) => { txt(devKnobs[k].n, n); txt(devKnobs[k].v, f(a[k])); setBar(devKnobs[k].b, a[k]); });
   } else
-    DEV.forEach(([n, f], k) => { devKnobs[k].n.textContent = n; devKnobs[k].v.textContent = f(tp[4 + k]); setBar(devKnobs[k].b, tp[4 + k]); });
+    DEV.forEach(([n, f], k) => { txt(devKnobs[k].n, n); txt(devKnobs[k].v, f(tp[4 + k])); setBar(devKnobs[k].b, tp[4 + k]); });
 
   /* track knob page */
   pageEls.forEach((e, i) => e.classList.toggle("on", i === st.page));
@@ -578,9 +604,9 @@ function render() {
                    [g[5], pct(g[5])], [g[6], pct(g[6])], [g[7], pct(g[7])]];
       [raw, val] = map[k];
     }
-    K.n.textContent = name; K.v.textContent = val; setBar(K.b, raw);
+    txt(K.n, name); txt(K.v, val); setBar(K.b, raw);
   }
-  $("pagehint").textContent = "PAN / SEND A / SEND B / SEND C";
+  txt($("pagehint"), "PAN / SEND A / SEND B / SEND C");
 
   /* patterns and fx */
   const bank = st.bank || 0;
@@ -589,20 +615,20 @@ function render() {
     if (b === bank) cls += " green";
     else if (b === st.pat >> 3) cls += " green blink";
     else if (st.bankMask >> b & 1) cls += " yellow";
-    t.className = cls;
+    setCls(t, cls);
   });
   patTiles.forEach((t, i) => {
     const p = bank * 8 + i;
-    t.textContent = patName(p);
+    txt(t, patName(p));
     let cls = "tile";
     if (st.copy && p === st.copySrc) cls += " yellow blink";
     else if (p === st.pat) cls += " green";
     else if (p === st.queued) cls += " green blink";
     else if (st.nonempty >> i & 1) cls += " yellow";
-    t.className = cls;
+    setCls(t, cls);
   });
   fxTiles.forEach((t, f) => {
-    t.className = "tile " + ((st.fxLat >> f & 1) ? "red blink" : (st.fxOn >> f & 1) ? "red" : "yellow");
+    setCls(t, "tile " + ((st.fxLat >> f & 1) ? "red blink" : (st.fxOn >> f & 1) ? "red" : "yellow"));
   });
 
   /* master */
@@ -614,7 +640,7 @@ function render() {
 
   /* kits */
   const [kpage, nkits, loaded, loadingKit] = st.kit;
-  $("kitpage").textContent = `page ${kpage + 1} of ${Math.max(1, Math.ceil(nkits / 5))} · UP/DOWN`;
+  txt($("kitpage"), `page ${kpage + 1} of ${Math.max(1, Math.ceil(nkits / 5))} · UP/DOWN`);
   kv($("kits"), st.kitNames.map(([name, k], i) => [
     `SCENE ${i + 1}`,
     name === "-" ? "-" : name + (k === loadingKit ? "  (loading)" : k === loaded ? "  ◀ loaded" : ""),
@@ -632,7 +658,7 @@ function render() {
   for (let i = 0; i < 80; i++) {
     const w = st.want[i] || "0", s = st.sent[i];
     const l = apcLeds[i];
-    l.className = "led" + (i >= 40 ? " tb b" + w : " c" + w) + (st.apcUp && s !== undefined && s !== w && st.want ? " miss" : "");
+    setCls(l, "led" + (i >= 40 ? " tb b" + w : " c" + w) + (st.apcUp && s !== undefined && s !== w && st.want ? " miss" : ""));
   }
 }
 
