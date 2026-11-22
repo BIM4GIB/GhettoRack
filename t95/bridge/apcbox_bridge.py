@@ -18,6 +18,15 @@ keepalives (ESC K) and pings (ESC P). Python 3 standard library only.
                 round-trip times to the Daisy
   /caps         JSON: what this server supports (the page reads it to hide
                 the Mac build's /ui and /tft.bmp controls)
+  /             module selector and IR remote setup (t95/ui/selector.html)
+  /apcbox       the ApcBox page
+  /state        JSON: modules, last module, IR profiles; POST /select,
+                /settings, /ir/learn, /ir/forget, /ir/cancel change it
+
+IR remote: the kernel decodes the remote (rc core, NEC) into input events;
+the bridge reads the raw scancodes (MSC_SCAN), so no keymap is involved.
+Buttons are bound to actions per profile (one per view, plus "all"), learnt
+from the setup page, and sent to browsers as "ir" events for their view.
 
 The Daisy is found by USB VID/PID (and optionally serial) under /sys, not by
 tty index; controllers by their USB device under /sys/class/sound, not by
@@ -27,10 +36,12 @@ See t95/bridge/README.md.
 import argparse
 import asyncio
 import collections
+import fcntl
 import glob
 import json
 import logging
 import os
+import struct
 import sys
 import termios
 import time
@@ -52,6 +63,26 @@ OUT_SYSEX_MAX = 16        # sysex messages waiting for one controller
 KEEPALIVE_S = 0.5         # the Daisy drops T95 controllers after 2 s without one
 PING_S = 1.0
 PING_KEEP = 300
+
+# IR remote
+EV_MSC, MSC_SCAN = 0x04, 0x04
+EVIOCGRAB = 0x40044590    # _IOW('E', 0x90, int)
+IR_EVENT = struct.Struct("llHHi")    # struct input_event (64-bit time)
+IR_RELEASE_S = 0.2        # no repeat frame for this long: button released (NEC repeats ~110 ms)
+IR_HOLD_S = 0.5
+IR_REPEAT_S = 0.11
+IR_LEARN_S = 15.0
+IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
+              "play", "stop", "next", "prev", "vol_up", "vol_down"]
+IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
+IR_PROFILES = ["all", "selector", "apcbox"]
+MODULES = [
+    {"id": "apcbox", "name": "ApcBox groovebox", "url": "/apcbox", "ready": True,
+     "about": "Daisy: 16 tracks, samples and 303s, APC40 + keyboards"},
+    {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "about": "later"},
+    {"id": "clock", "name": "Network clock", "url": None, "ready": False, "about": "later"},
+]
+POST_MAX = 4096
 
 # Line types whose second field says which track/slot they describe
 KEYED = {"T", "N", "Q", "A", "KN"}
@@ -316,9 +347,10 @@ def sse_event(name, obj):
 class Client:
     """One browser. Its own bounded queue: a slow one can't hold up anyone."""
 
-    def __init__(self, writer, peer):
+    def __init__(self, writer, peer, view=""):
         self.writer = writer
         self.peer = peer
+        self.view = view            # selector, apcbox...: picks the IR profile
         self.q = collections.deque()
         self.qbytes = 0
         self.wake = asyncio.Event()
@@ -339,6 +371,248 @@ class Client:
             self.q.append(chunk)
             self.qbytes += len(chunk)
         self.wake.set()
+
+
+# ---------------------------------------------------------------- state, IR
+
+class State:
+    """What survives a restart: last module, autostart, IR bindings.
+    Written atomically; a missing or broken file means defaults."""
+
+    def __init__(self, path):
+        self.path = path
+        self.data = {"last": None, "autostart_s": 5,
+                     "ir": {p: {} for p in IR_PROFILES}}
+        try:
+            with open(path) as f:
+                d = json.load(f)
+            if isinstance(d, dict):
+                self.data["last"] = d.get("last") if d.get("last") in [m["id"] for m in MODULES] else None
+                a = d.get("autostart_s", 5)
+                self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
+                for prof, binds in (d.get("ir") or {}).items():
+                    if prof in IR_PROFILES and isinstance(binds, dict):
+                        self.data["ir"][prof] = {k: v for k, v in binds.items() if self.valid(k, v)}
+        except (OSError, ValueError):
+            pass
+
+    @staticmethod
+    def valid(key, v):
+        action, _, press = key.partition("/")
+        return (action in IR_ACTIONS and press in ("tap", "hold")
+                and isinstance(v, int) and 0 <= v < 1 << 32)
+
+    def save(self):
+        if not self.path:
+            return
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(self.data, f, indent=1)
+            os.replace(tmp, self.path)
+        except OSError as e:
+            log.warning("saving %s: %s", self.path, e)
+
+    def bind(self, profile, action, press, scan):
+        binds = self.data["ir"][profile]
+        for k in [k for k, v in binds.items() if v == scan and k.endswith("/" + press)]:
+            del binds[k]                # one action per button and press, per profile
+        binds[action + "/" + press] = scan
+        self.save()
+
+    def forget(self, profile, action, press):
+        self.data["ir"][profile].pop(action + "/" + press, None)
+        self.save()
+
+    def action_for(self, view, scan, press):
+        """The action a button does in a view; the "all" profile fills gaps"""
+        for prof in (view, "all"):
+            for k, v in self.data["ir"].get(prof, {}).items():
+                if v == scan and k.endswith("/" + press):
+                    return k.split("/")[0]
+        return None
+
+
+def find_ir(root=""):
+    """(event device, name) of the first IR receiver (rc core) or (None, None)"""
+    for ev in sorted(glob.glob(root + "/sys/class/rc/rc*/input*/event*")):
+        name = ""
+        try:
+            name = open(os.path.join(os.path.dirname(ev), "name")).read().strip()
+        except OSError:
+            pass
+        return "/dev/input/" + os.path.basename(ev), name
+    return None, None
+
+
+class IrReader:
+    """Scancodes in, tap / hold / repeat out.
+
+    The rc core sends MSC_SCAN for the first frame and for every repeat frame
+    (~110 ms apart for NEC) while a button is held, then nothing. So: a new
+    scancode = pressed; no frame for IR_RELEASE_S = released."""
+
+    def __init__(self, bridge):
+        self.b = bridge
+        self.fd = None
+        self.path = None
+        self.name = None
+        self.buf = b""
+        self.scan = None            # button currently down
+        self.down_t = 0.0
+        self.held = False
+        self.timers = []
+        self.release_timer = None
+        self.swallow = False
+        self.presses = 0
+        self.last_scan = None
+        self.learning = None        # (profile, action, press, deadline)
+
+    def info(self):
+        return {"device": self.path, "name": self.name, "presses": self.presses,
+                "last_scan": None if self.last_scan is None else "%x" % self.last_scan,
+                "learning": None if not self.learning else
+                {"profile": self.learning[0], "action": self.learning[1], "press": self.learning[2]}}
+
+    def cancel_timers(self):
+        for t in self.timers:
+            t.cancel()
+        self.timers = []
+
+    def on_readable(self):
+        try:
+            data = os.read(self.fd, IR_EVENT.size * 64)
+        except BlockingIOError:
+            return
+        except OSError:
+            data = b""
+        if not data:
+            self.close()
+            return
+        self.buf += data
+        while len(self.buf) >= IR_EVENT.size:
+            _, _, typ, code, value = IR_EVENT.unpack_from(self.buf)
+            self.buf = self.buf[IR_EVENT.size:]
+            if typ == EV_MSC and code == MSC_SCAN:
+                self.frame(value & 0xFFFFFFFF)
+
+    def frame(self, scan):
+        loop = asyncio.get_running_loop()
+        self.last_scan = scan
+        if scan != self.scan:
+            if self.scan is not None:
+                self.release()
+            self.scan, self.down_t, self.held = scan, now(), False
+            self.presses += 1
+            self.b.broadcast(sse_event("irraw", {"scan": "%x" % scan}))
+            if self.learning:
+                prof, action, press, _ = self.learning
+                self.learning = None
+                self.b.state.bind(prof, action, press, scan)
+                log.info("IR: %s/%s in profile %s = %x", action, press, prof, scan)
+                self.b.broadcast(sse_event("irlearned", {"profile": prof, "action": action,
+                                                          "press": press, "scan": "%x" % scan}))
+                self.swallow = True  # this press only teaches, repeats and release included
+                self.cancel_timers()
+            else:
+                self.cancel_timers()
+                self.timers = [loop.call_later(IR_HOLD_S, self.hold)]
+                self.emit("down")
+        # every frame, first or repeat, pushes the release back
+        if self.release_timer:
+            self.release_timer.cancel()
+        self.release_timer = loop.call_later(IR_RELEASE_S, self.release)
+
+    def hold(self):
+        if self.scan is None:
+            return
+        self.held = True
+        self.emit("hold")
+        self.timers.append(asyncio.get_running_loop().call_later(IR_REPEAT_S, self.repeat))
+
+    def repeat(self):
+        if self.scan is None:
+            return
+        self.emit("repeat")
+        self.timers.append(asyncio.get_running_loop().call_later(IR_REPEAT_S, self.repeat))
+
+    def release(self):
+        if self.release_timer:
+            self.release_timer.cancel()
+            self.release_timer = None
+        if self.scan is None:
+            return
+        self.emit("up")
+        self.cancel_timers()
+        self.scan = None
+        self.swallow = False
+
+    def emit(self, phase):
+        """Each browser gets the action its own view binds to this button"""
+        if self.swallow:
+            return
+        for c in list(self.b.clients):
+            a = self.decide(c.view, phase)
+            if a:
+                c.push(sse_event("ir", {"action": a, "phase": phase}))
+
+    def decide(self, view, phase):
+        st, scan = self.b.state, self.scan
+        tap = st.action_for(view, scan, "tap")
+        hold = st.action_for(view, scan, "hold")
+        quick = tap in IR_REPEATABLE and not hold   # arrows: act on press, repeat while held
+        if phase == "down":
+            return tap if quick else None
+        if phase == "hold":
+            return hold
+        if phase == "repeat":
+            return tap if quick else None
+        if phase == "up":
+            if quick:
+                return None
+            if self.held and hold:
+                return None                     # the hold already acted
+            return tap
+        return None
+
+    def close(self):
+        if self.fd is not None:
+            asyncio.get_running_loop().remove_reader(self.fd)
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            log.info("IR receiver %s gone", self.path)
+        self.release()
+        self.fd = None
+        self.path = None
+
+    async def task(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            if self.learning and now() > self.learning[3]:
+                self.learning = None
+                self.b.broadcast(sse_event("irlearned", {"timeout": True}))
+            if self.fd is None:
+                if self.b.args.ir:
+                    path, name = (self.b.args.ir if os.path.exists(self.b.args.ir) else None), "test"
+                else:
+                    path, name = find_ir()
+                if path:
+                    try:
+                        self.fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+                        try:
+                            # Exclusive: if the kernel maps the remote to keys, the kiosk's
+                            # compositor would see them too and every press would act twice
+                            fcntl.ioctl(self.fd, EVIOCGRAB, 1)
+                        except OSError:
+                            pass        # not an evdev device (tests)
+                        self.path, self.name, self.buf = path, name, b""
+                        loop.add_reader(self.fd, self.on_readable)
+                        log.info("IR receiver %s (%s)", path, name)
+                    except OSError as e:
+                        log.warning("open %s: %s", path, e)
+            await asyncio.sleep(RESCAN_S)
 
 
 # ---------------------------------------------------------------- bridge
@@ -373,6 +647,14 @@ class Bridge:
                                for x in (args.midi or []))
         with open(args.ui, "rb") as f:
             self.page = f.read()
+        self.selector = b"<!doctype html><title>no selector</title><a href=/apcbox>ApcBox</a>"
+        try:
+            with open(args.selector, "rb") as f:
+                self.selector = f.read()
+        except (OSError, TypeError):
+            log.warning("no selector page at %s", args.selector)
+        self.state = State(args.state)
+        self.ir = IrReader(self)
 
     # -- status
     def status(self):
@@ -394,6 +676,7 @@ class Bridge:
             "serial_dropped": self.serial_dropped,
             "controllers": [p.info(self.kinds()) for p in sorted(self.ports.values(), key=lambda p: p.num)],
             "ping_ms": self.ping_stats(),
+            "ir": self.ir.info(),
         }
 
     def kinds(self):
@@ -425,9 +708,53 @@ class Bridge:
                 "jitter": round(jitter, 2)}
 
     def announce(self):
-        ev = sse_event("bridge", self.status())
+        self.broadcast(sse_event("bridge", self.status()))
+
+    def broadcast(self, chunk):
         for c in list(self.clients):
-            c.push(ev)
+            c.push(chunk)
+
+    def state_json(self):
+        return {"modules": MODULES, "last": self.state.data["last"],
+                "autostart_s": self.state.data["autostart_s"],
+                "ir": {"profiles": self.state.data["ir"], "actions": IR_ACTIONS,
+                       "profile_names": IR_PROFILES, **self.ir.info()}}
+
+    def post(self, path, body):
+        """(code, json) for a POST. Small JSON bodies only."""
+        try:
+            d = json.loads(body.decode() or "{}")
+            if not isinstance(d, dict):
+                raise ValueError
+        except ValueError:
+            return 400, {"error": "JSON object expected"}
+        if path == "/select":
+            m = d.get("module")
+            if m not in [x["id"] for x in MODULES if x["ready"]]:
+                return 400, {"error": "unknown or unready module"}
+            self.state.data["last"] = m
+            self.state.save()
+            return 200, {"ok": True}
+        if path == "/settings":
+            a = d.get("autostart_s")
+            if not isinstance(a, int) or not 0 <= a <= 60:
+                return 400, {"error": "autostart_s: 0-60"}
+            self.state.data["autostart_s"] = a
+            self.state.save()
+            return 200, {"ok": True}
+        if path in ("/ir/learn", "/ir/forget"):
+            prof, action, press = d.get("profile"), d.get("action"), d.get("press", "tap")
+            if prof not in IR_PROFILES or action not in IR_ACTIONS or press not in ("tap", "hold"):
+                return 400, {"error": "profile, action, press (tap/hold) expected"}
+            if path == "/ir/forget":
+                self.state.forget(prof, action, press)
+            else:
+                self.ir.learning = (prof, action, press, now() + IR_LEARN_S)
+            return 200, {"ok": True}
+        if path == "/ir/cancel":
+            self.ir.learning = None
+            return 200, {"ok": True}
+        return 404, {"error": "not found"}
 
     # -- serial side
     def ask_dump(self):
@@ -751,40 +1078,58 @@ class Bridge:
             method, target = head.split(b"\r\n", 1)[0].decode("latin-1").split(" ")[:2]
         except ValueError:
             method, target = "", ""
-        path = target.split("?", 1)[0]
+        path, _, query = target.partition("?")
+        params = dict(kv.partition("=")[::2] for kv in query.split("&") if kv)
         try:
-            if method != "GET":
-                await self.reply(writer, 405, "text/plain", b"GET only\n")
-            elif path in ("/", "/index.html", "/apcbox-ui.html"):
+            if method == "POST":
+                n = 0
+                for h in head.decode("latin-1").split("\r\n")[1:]:
+                    k, _, v = h.partition(":")
+                    if k.strip().lower() == "content-length":
+                        n = int(v.strip() or 0)
+                if n > POST_MAX:
+                    raise ValueError
+                body = await asyncio.wait_for(reader.readexactly(n), 10) if n else b""
+                code, out = self.post(path, body)
+                await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
+            elif method != "GET":
+                await self.reply(writer, 405, "text/plain", b"GET or POST\n")
+            elif path in ("/", "/index.html"):
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.selector)
+            elif path in ("/apcbox", "/apcbox-ui.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.page)
+            elif path == "/state":
+                await self.reply(writer, 200, "application/json", json.dumps(self.state_json(), indent=1).encode() + b"\n")
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
-                caps = {"source": "daisy-bridge", "bridge": 2, "control": False, "midi": True, "ui": False, "tft": False}
+                caps = {"source": "daisy-bridge", "bridge": 3, "control": False, "midi": True, "ir": True,
+                        "selector": "/", "ui": False, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")
             elif path == "/events":
-                await self.stream(reader, writer, peer)
+                await self.stream(reader, writer, peer, params.get("view", "")[:32])
                 return
             else:
                 await self.reply(writer, 404, "text/plain", b"not found\n")
-        except (ConnectionError, asyncio.TimeoutError):
+        except (ConnectionError, asyncio.TimeoutError, asyncio.IncompleteReadError, ValueError):
             pass
         writer.close()
 
     @staticmethod
     async def reply(writer, code, ctype, body):
-        reason = {200: "OK", 404: "Not Found", 405: "Method Not Allowed", 503: "Service Unavailable"}[code]
+        reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed",
+                  503: "Service Unavailable"}[code]
         writer.write(("HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n"
                       "Cache-Control: no-store\r\nConnection: close\r\n\r\n" % (code, reason, ctype, len(body))).encode() + body)
         await asyncio.wait_for(writer.drain(), 10)
 
-    async def stream(self, reader, writer, peer):
+    async def stream(self, reader, writer, peer, view=""):
         if len(self.clients) >= MAX_CLIENTS:
             self.rejected += 1
             await self.reply(writer, 503, "text/plain", b"too many clients\n")
             writer.close()
             return
-        c = Client(writer, peer)
+        c = Client(writer, peer, view)
         self.clients.add(c)
 
         async def watch_eof():
@@ -840,7 +1185,8 @@ async def main_async(args):
     server = await asyncio.start_server(b.handle_http, args.host, args.http_port, limit=16384)
     log.info("serving http://%s:%d/", args.host, args.http_port)
     async with server:
-        await asyncio.gather(server.serve_forever(), b.serial_task(), b.midi_task(), b.control_task())
+        await asyncio.gather(server.serve_forever(), b.serial_task(), b.midi_task(), b.control_task(),
+                             b.ir.task())
 
 
 def main(argv=None):
@@ -856,6 +1202,11 @@ def main(argv=None):
     ap.add_argument("--ui", default=os.path.join(here, "apcbox-ui.html")
                     if os.path.exists(os.path.join(here, "apcbox-ui.html"))
                     else os.path.join(here, "..", "..", "daisy", "ui", "apcbox-ui.html"))
+    ap.add_argument("--selector", default=next((p for p in (os.path.join(here, "selector.html"),
+                    os.path.join(here, "..", "ui", "selector.html")) if os.path.exists(p)), None))
+    ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
+                    "state.json"), help="where the last module and IR bindings are kept")
+    ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,

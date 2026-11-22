@@ -81,6 +81,30 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
   Daisy main loop and back (min/avg/p99/max/jitter). It doesn't include the
   controller's own USB delay or the audio output.
 
+## Module selector and the remote
+
+- `/` is the selector (`t95/ui/selector.html`): modules (ApcBox ready, the
+  others later), the remote setup, the start-up countdown. `/apcbox` is the
+  ApcBox page; under the bridge it has a "Modules" button back.
+- The IR receiver is found under `/sys/class/rc/rc*/input*/event*`, opened
+  exclusively (so the kiosk doesn't also see its keys) and read for raw
+  scancodes (`MSC_SCAN`). The udev rule turns NEC decoding on.
+- A button is bound per profile: `all`, `selector`, `apcbox`. A view's own
+  profile wins; `all` fills the gaps. Each button can have a tap action and
+  a hold action (half a second). Arrows and volume act on press and repeat
+  while held, unless they also have a hold action.
+- Learn from the page: press "learn" next to an action, then the button.
+  That press only teaches. Learning times out after 15 s.
+- Browsers say their view when they connect (`/events?view=selector`) and
+  get `ir` events for it: `{"action": "ok", "phase": "up"}`. Also `irraw`
+  (any button, for the setup page) and `irlearned`.
+- Kept in `state.json` (systemd `StateDirectory`, `/var/lib/apcbox-bridge`):
+  last module, countdown, bindings. Survives restarts and reboots.
+- Remote actions that need the Daisy (play, stop, the encoder) don't do
+  anything yet: they need a firmware UI command (step 3b).
+- Anyone on the network can change the bindings and the last module (the
+  POST endpoints). Fine on a home network; don't expose port 8040 further.
+
 ## Behaviour
 
 - Finds the Daisy by USB VID `1209` / PID `0001` under `/sys`, not by tty
@@ -101,10 +125,16 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 
 | Path | What |
 |---|---|
-| `/` | `daisy/ui/apcbox-ui.html`. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
+| `/` | The module selector (`t95/ui/selector.html`) |
+| `/apcbox` | `daisy/ui/apcbox-ui.html`. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |
 | `/health` | JSON: `daisy`, `port`, `serial`, `data_age_s`, `lines`, `bad_lines`, `connects`, `clients`, `client_resyncs`, `rejected_clients`, `control`, `serial_out_bytes`, `serial_dropped`, `controllers` (port, name, kind, counters), `ping_ms` |
-| `/caps` | `{"source": "daisy-bridge", "midi": true, "control": false, "ui": false, "tft": false}` |
+| `/caps` | `{"source": "daisy-bridge", "midi": true, "ir": true, "selector": "/", "control": false, "ui": false, "tft": false}` |
+| `/state` | JSON: modules, last, autostart_s, IR profiles, actions, receiver, learning |
+| `POST /select` | `{"module": "apcbox"}`: remember the last module |
+| `POST /settings` | `{"autostart_s": 0-60}` |
+| `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
+| `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 
 ## Tests
 
@@ -121,11 +151,14 @@ nothing sent before `P`, names and keepalive after, running status, clock
 bytes mid-message, sysex in pieces, LEDs out in order and not to browsers,
 LED coalescing when a controller stalls, controller and Daisy hotplug, a
 Daisy that stops reading while a keyboard floods, ping, discovery against a
-T95-shaped `/sys` tree. Passing on a desktop says nothing about the real
+T95-shaped `/sys` tree. Remote (fake input device): learning, per-view
+actions, tap/hold, repeat, bad requests, state across a restart, and the
+selector page in a browser (learn, ok opens the module, boot countdown,
+home from the ApcBox page, a button cancels the countdown). Passing on a desktop says nothing about the real
 T95 with a real Daisy: latency, CPU load and long runs still need measuring there.
 
 ## Not here yet
 
 Knobs, pads and pitch bend on the keyboards (notes only so far), MIDI clock
-in/out, kiosk, IR, sample transfer. No real-time priority: add it only if
+in/out, remote control of the Daisy itself (step 3b), sample transfer. No real-time priority: add it only if
 the ping figures on the T95 say so.

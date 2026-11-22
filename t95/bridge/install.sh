@@ -25,11 +25,13 @@ python3 -c 'import asyncio, termios' 2>/dev/null || { echo "needs python3: sudo 
 mkdir -p "$DEST"
 install -m 644 "$HERE/apcbox_bridge.py" "$DEST/apcbox_bridge.py"
 install -m 644 "$REPO/daisy/ui/apcbox-ui.html" "$DEST/apcbox-ui.html"
+install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
 install -m 644 "$HERE/99-apcbox.rules" /etc/udev/rules.d/99-apcbox.rules
 install -m 644 "$HERE/apcbox-bridge.service" /etc/systemd/system/apcbox-bridge.service
 
 udevadm control --reload
 udevadm trigger --action=add --subsystem-match=tty
+udevadm trigger --action=add --subsystem-match=rc
 systemctl daemon-reload
 systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service

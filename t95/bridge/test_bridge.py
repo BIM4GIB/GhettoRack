@@ -18,6 +18,7 @@ import errno
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,13 +90,14 @@ class FakeDaisy:
 class SseClient:
     """Reads /events on a thread; keeps default-event lines and bridge events"""
 
-    def __init__(self, port, rcvbuf=None, read=True):
+    def __init__(self, port, rcvbuf=None, read=True, path="/events"):
         self.sock = socket.socket()
         if rcvbuf:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, rcvbuf)
         self.sock.connect(("127.0.0.1", port))
-        self.sock.sendall(b"GET /events HTTP/1.1\r\nHost: x\r\n\r\n")
+        self.sock.sendall(b"GET %s HTTP/1.1\r\nHost: x\r\n\r\n" % path.encode())
         self.lines, self.events, self.status = [], [], None
+        self.named = []             # (event, data) for other named events
         self.lock = threading.Lock()
         self.closed = False
         if read:
@@ -130,8 +132,10 @@ class SseClient:
                     with self.lock:
                         if ev == "bridge":
                             self.events.append(json.loads(data[0]))
-                        else:
+                        elif ev == "message":
                             self.lines.append(data[0])
+                        else:
+                            self.named.append((ev, json.loads(data[0])))
         except OSError:
             pass
         self.closed = True
@@ -167,7 +171,7 @@ class BridgeTest(unittest.TestCase):
         cls.http = free_port()
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
-             "--http-port", str(cls.http), "--ui", UI, "--no-midi"],
+             "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json")],
             stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.wait_health(lambda h: h["daisy"], 10)
 
@@ -211,6 +215,9 @@ class BridgeTest(unittest.TestCase):
 
     def test_t2_pages(self):
         code, ctype, body = self.get("/")
+        self.assertEqual(code, 200)
+        self.assertIn(b"GHETTORACK", body)          # the module selector
+        code, ctype, body = self.get("/apcbox")
         self.assertEqual(code, 200)
         self.assertIn(b"APCBOX", body)
         caps = json.loads(self.get("/caps")[2])
@@ -440,7 +447,7 @@ class MidiTest(unittest.TestCase):
         cls.http = free_port()
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
-             "--http-port", str(cls.http), "--ui", UI,
+             "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
              "--midi", cls.apc.link + "=APC40 mkII-ish APC40", "--midi", cls.keys.link + "=LPK25"],
             stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         BridgeTest.http = cls.http
@@ -674,7 +681,7 @@ class EndToEndTest(unittest.TestCase):
         cls.http = free_port()
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--http-port", str(cls.http),
-             "--ui", UI, "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
+             "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
             stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         BridgeTest.http = cls.http
         BridgeTest.wait_health(lambda h: h["control"] == 1 and len(h["controllers"]) == 2, 10)
@@ -752,7 +759,7 @@ class EndToEndTest(unittest.TestCase):
             errors = []
             pg.on("pageerror", lambda e: errors.append(str(e)))
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            pg.goto("http://127.0.0.1:%d/" % self.http)
+            pg.goto("http://127.0.0.1:%d/apcbox" % self.http)
             pg.wait_for_timeout(2500)
             chips = pg.eval_on_selector_all("header .chip:not(.hidden)", "es => es.map(e => e.textContent)")
             hidden_tft = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
@@ -762,6 +769,197 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("Daisy: connected", chips)
         self.assertTrue(any(c.startswith("T95 controllers: APC40 1 (driving)") and "keys 2" in c for c in chips), chips)
         self.assertTrue(hidden_tft)
+
+
+
+class IrTest(unittest.TestCase):
+    """The remote: a FIFO stands in for the input device; frames are real
+    struct input_event records, repeats every 110 ms like NEC"""
+
+    EV = struct.Struct("llHHi")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.fifo = os.path.join(cls.dir, "ir")
+        os.mkfifo(cls.fifo)
+        cls.w = os.open(cls.fifo, os.O_RDWR | os.O_NONBLOCK)   # a writer is always there
+        cls.state = os.path.join(cls.dir, "state.json")
+        cls.http = free_port()
+        cls.start()
+
+    @classmethod
+    def start(cls):
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+             "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir", cls.fifo],
+            stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["ir"]["device"] == cls.fifo, 10)
+
+    @classmethod
+    def stop(cls):
+        cls.proc.terminate()
+        cls.proc.wait(5)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.stop()
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def post(self, path, body):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.http, path), data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def state_now(self):
+        return json.loads(BridgeTest.get("/state")[2])
+
+    def press(self, scan, secs=0.0):
+        """One button: a frame, repeat frames every 110 ms for secs, then let go"""
+        end = time.time() + secs
+        while True:
+            os.write(self.w, self.EV.pack(0, 0, 4, 4, scan) + self.EV.pack(0, 0, 0, 0, 0))
+            if time.time() >= end:
+                break
+            time.sleep(0.11)
+        time.sleep(0.35)            # released (no frame for 200 ms)
+
+    def irs(self, c):
+        return [d["action"] for e, d in list(c.named) if e == "ir"]
+
+    def test_i1_learn(self):
+        c = SseClient(self.http, path="/events?view=selector")
+        self.assertTrue(c.wait_for(lambda c: c.events))
+        code, _ = self.post("/ir/learn", {"profile": "selector", "action": "up"})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.state_now()["ir"]["learning"]["action"], "up")
+        self.press(0x2FE0A, 0.4)    # held while learning: repeats must not act
+        self.assertTrue(c.wait_for(lambda c: any(e == "irlearned" for e, _ in c.named)))
+        self.assertEqual(self.state_now()["ir"]["profiles"]["selector"]["up/tap"], 0x2FE0A)
+        self.assertEqual(self.irs(c), [], "the learning press also acted")
+        self.assertIsNone(self.state_now()["ir"]["learning"])
+        c.close()
+
+    def test_i2_views_get_their_own_actions(self):
+        self.post("/ir/learn", {"profile": "all", "action": "ok"}); self.press(0x2FE0B)
+        self.post("/ir/learn", {"profile": "apcbox", "action": "home"}); self.press(0x2FE0C)
+        a = SseClient(self.http, path="/events?view=selector")
+        b = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(a.wait_for(lambda c: c.events) and b.wait_for(lambda c: c.events))
+        self.press(0x2FE0B)
+        self.press(0x2FE0C)
+        self.assertTrue(b.wait_for(lambda c: len(self.irs(c)) >= 2))
+        time.sleep(0.2)
+        self.assertEqual(self.irs(a), ["ok"])              # "all" fills in; home is apcbox-only
+        self.assertEqual(self.irs(b), ["ok", "home"])
+        a.close(); b.close()
+
+    def test_i3_hold(self):
+        self.post("/ir/learn", {"profile": "selector", "action": "home", "press": "hold"}); self.press(0x2FE0B)
+        a = SseClient(self.http, path="/events?view=selector")
+        b = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(a.wait_for(lambda c: c.events) and b.wait_for(lambda c: c.events))
+        self.press(0x2FE0B, 0.9)    # long press
+        self.assertTrue(b.wait_for(lambda c: self.irs(c)))
+        time.sleep(0.2)
+        self.assertEqual(self.irs(a), ["home"], "selector: the hold action, and no tap after it")
+        self.assertEqual(self.irs(b), ["ok"], "apcbox has no hold for it: a long press is a tap")
+        self.press(0x2FE0B)         # short press: the tap
+        self.assertTrue(a.wait_for(lambda c: self.irs(c) == ["home", "ok"]))
+        a.close(); b.close()
+
+    def test_i4_arrows_repeat(self):
+        a = SseClient(self.http, path="/events?view=selector")
+        self.assertTrue(a.wait_for(lambda c: c.events))
+        t0 = time.time()
+        self.press(0x2FE0A, 1.2)    # "up" from i1, held
+        n = self.irs(a).count("up")
+        self.assertGreaterEqual(n, 6, "held arrow should repeat (got %d)" % n)
+        a.close()
+
+    def test_i5_bad_requests(self):
+        self.assertEqual(self.post("/ir/learn", {"profile": "nope", "action": "up"})[0], 400)
+        self.assertEqual(self.post("/ir/learn", {"profile": "all", "action": "rm -rf"})[0], 400)
+        self.assertEqual(self.post("/select", {"module": "dj"})[0], 400)   # not ready
+        self.assertEqual(self.post("/settings", {"autostart_s": 999})[0], 400)
+        self.assertEqual(self.post("/nothing", {})[0], 404)
+        req = urllib.request.Request("http://127.0.0.1:%d/select" % self.http, data=b"x" * 10000, method="POST")
+        with self.assertRaises(Exception):
+            urllib.request.urlopen(req, timeout=5)
+
+    def test_i6_forget_and_survive_restart(self):
+        self.assertEqual(self.post("/select", {"module": "apcbox"})[0], 200)
+        self.assertEqual(self.post("/settings", {"autostart_s": 3})[0], 200)
+        self.post("/ir/forget", {"profile": "selector", "action": "home", "press": "hold"})
+        before = self.state_now()
+        self.assertNotIn("home/hold", before["ir"]["profiles"]["selector"])
+        type(self).stop()
+        type(self).start()
+        after = self.state_now()
+        self.assertEqual(after["last"], "apcbox")
+        self.assertEqual(after["autostart_s"], 3)
+        self.assertEqual(after["ir"]["profiles"], before["ir"]["profiles"])
+
+    def test_i7_pages_in_a_browser(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.post("/select", {"module": "apcbox"})
+        self.post("/settings", {"autostart_s": 1})
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page()
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            # A phone opening the selector: no countdown, modules listed, learn from the table
+            pg.goto("http://127.0.0.1:%d/" % self.http)
+            pg.wait_for_timeout(1500)
+            names = pg.eval_on_selector_all(".module .name", "es => es.map(e => e.textContent)")
+            self.assertEqual(names, ["ApcBox groovebox", "Numark DJ", "Network clock"])
+            self.assertFalse(pg.is_visible("#countdown"))
+            pg.click("#tabs button:text-is('apcbox')")    # the apcbox profile tab
+            pg.click("#binds tr:nth-child(3) button:has-text('learn') >> nth=0")  # left, tap
+            pg.wait_for_timeout(300)
+            self.assertTrue(pg.is_visible("#learn"))
+            self.press(0x2FE0D)
+            pg.wait_for_timeout(800)
+            cell = pg.inner_text("#binds tr:nth-child(3) td:nth-child(2)")
+            self.assertEqual(cell, "2fe0d")
+            # Remote on a freshly opened selector: the first module has focus, ok opens it
+            pg.goto("http://127.0.0.1:%d/" % self.http)
+            pg.wait_for_timeout(1000)
+            self.press(0x2FE0B)         # "ok" (profile all)
+            pg.wait_for_timeout(1500)
+            self.assertTrue(pg.url.endswith("/apcbox"), pg.url)
+            # The kiosk at boot: counts down, then opens the last module with the TV layout
+            pg.goto("http://127.0.0.1:%d/?boot=1&tv=1" % self.http)
+            pg.wait_for_timeout(400)
+            self.assertTrue(pg.is_visible("#countdown"))
+            pg.wait_for_timeout(2500)
+            self.assertTrue(pg.url.endswith("/apcbox?tv=1"), pg.url)
+            self.assertTrue(pg.eval_on_selector("body", "e => e.classList.contains('tv')"))
+            self.assertTrue(pg.is_visible("#modules"))
+            # home on the remote (apcbox profile) goes back to the selector
+            self.press(0x2FE0C)
+            pg.wait_for_timeout(1200)
+            self.assertIn("/?tv=1", pg.url)
+            # Any button during the countdown keeps you on the selector
+            pg.goto("http://127.0.0.1:%d/?boot=1" % self.http)
+            pg.wait_for_timeout(300)
+            self.press(0x2FE0A)
+            pg.wait_for_timeout(1800)
+            self.assertFalse(pg.url.endswith("/apcbox"), pg.url)
+            b.close()
+        self.assertEqual(errors, [], "script errors")
 
 
 if __name__ == "__main__":

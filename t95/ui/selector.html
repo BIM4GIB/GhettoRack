@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhettoRack</title>
+<style>
+/* Same palette as daisy/ui/apcbox-ui.html */
+:root {
+  --bg: #0e0f10; --panel: #17191b; --line: #2a2d31; --text: #d9dcdf; --dim: #7d848c;
+  --green: #35d05a; --red: #ff4b3e; --yellow: #ffb833; --off: #26292d;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; }
+body.tv { zoom: 1.5; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #121416; }
+h1 { font-size: 17px; margin: 0; letter-spacing: .08em; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 5px; background: var(--off); color: var(--dim); white-space: nowrap; }
+.chip.ok { background: #183d24; color: #8ff0a8; }
+.chip.warn { background: #4a2a10; color: #ffc27a; }
+.chip.bad { background: #4a1714; color: #ff9d94; }
+main { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+h2 { margin: 22px 0 10px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+button { background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: #2d3237; }
+button:disabled { opacity: .45; cursor: default; }
+.focus, button:focus-visible, .module:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.modules { display: flex; flex-direction: column; gap: 10px; }
+.module { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 16px 18px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); font-size: 17px; }
+.module .name { font-weight: 600; flex: 1; }
+.module .about { color: var(--dim); font-size: 13px; }
+.module.last .name::after { content: "  last used"; color: var(--dim); font-weight: 400; font-size: 12px; }
+.module:disabled .name { color: var(--dim); }
+.banner { margin-top: 14px; padding: 12px 14px; border-radius: 8px; background: #1f2a1f; border: 1px solid #2c7a45; display: none; }
+.banner.on { display: block; }
+.banner.learn { background: #2a2310; border-color: #8a6a1f; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tabs button.sel { background: #1f5130; border-color: #2c7a45; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+td, th { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+th { color: var(--dim); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+td.code { font-family: var(--mono); color: var(--dim); width: 90px; }
+td.code.set { color: #8ff0a8; }
+td.acts { white-space: nowrap; }
+td.acts button { padding: 4px 9px; font-size: 12px; }
+.hint { color: var(--dim); font-size: 13px; }
+input[type=number] { width: 64px; background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 5px 6px; font: inherit; }
+@media (max-width: 560px) { td.code { width: 56px; } td, th { padding: 5px 3px; } .module { font-size: 15px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>GHETTORACK</h1>
+  <span id="c-daisy" class="chip">Daisy: ?</span>
+  <span id="c-ctl" class="chip">controllers: ?</span>
+  <span id="c-ir" class="chip">remote: ?</span>
+</header>
+<main>
+  <h2>Modules</h2>
+  <div id="modules" class="modules"></div>
+  <div id="countdown" class="banner"></div>
+
+  <h2>Remote</h2>
+  <div class="row">
+    <span class="hint">Profile</span>
+    <span id="tabs" class="row tabs"></span>
+    <span class="hint" id="lastcode"></span>
+  </div>
+  <p class="hint">"all" works everywhere; a view's own profile wins where both set a button.
+    Tap = short press, hold = half a second. Arrows repeat while held unless they also have a hold action.</p>
+  <div id="learn" class="banner learn"></div>
+  <table>
+    <thead><tr><th>Action</th><th>Tap</th><th></th><th>Hold</th><th></th></tr></thead>
+    <tbody id="binds"></tbody>
+  </table>
+
+  <h2>Start-up</h2>
+  <div class="row">
+    <span class="hint">On boot, start the last module after</span>
+    <input id="autostart" type="number" min="0" max="60"> <span class="hint">seconds (0 = stay here)</span>
+    <button id="saveauto">Save</button>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const tv = params.has("tv"), boot = params.has("boot");
+if (tv) document.body.classList.add("tv");
+let st = null, profile = "all", countdown = null;
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+async function load() {
+  st = await (await fetch("/state")).json();
+  render();
+}
+
+function moduleUrl(m) { return m.url + (tv ? "?tv=1" : ""); }
+async function open(m) {
+  if (!m.ready) return;
+  stopCountdown();
+  await post("/select", { module: m.id }).catch(() => {});
+  location.href = moduleUrl(m);
+}
+
+function render() {
+  const box = $("modules");
+  box.textContent = "";
+  for (const m of st.modules) {
+    const b = document.createElement("button");
+    b.className = "module" + (m.id === st.last ? " last" : "");
+    b.disabled = !m.ready;
+    b.innerHTML = `<span class="name"></span><span class="about"></span>`;
+    b.querySelector(".name").textContent = m.name;
+    b.querySelector(".about").textContent = m.about;
+    b.onclick = () => open(m);
+    box.appendChild(b);
+  }
+  const tabs = $("tabs");
+  tabs.textContent = "";
+  for (const p of st.ir.profile_names) {
+    const b = document.createElement("button");
+    b.textContent = p;
+    b.className = p === profile ? "sel" : "";
+    b.onclick = () => { profile = p; render(); };
+    tabs.appendChild(b);
+  }
+  const binds = st.ir.profiles[profile] || {};
+  const tb = $("binds");
+  tb.textContent = "";
+  for (const a of st.ir.actions) {
+    const tr = document.createElement("tr");
+    const td = t => { const e = document.createElement("td"); e.textContent = t; tr.appendChild(e); return e; };
+    td(a.replace("_", " "));
+    for (const press of ["tap", "hold"]) {
+      const code = binds[a + "/" + press];
+      const c = td(code === undefined ? "-" : code.toString(16));
+      c.className = "code" + (code === undefined ? "" : " set");
+      const cell = td("");
+      cell.className = "acts";
+      const lb = document.createElement("button");
+      lb.textContent = "learn";
+      lb.onclick = () => learn(a, press);
+      cell.appendChild(lb);
+      if (code !== undefined) {
+        const fb = document.createElement("button");
+        fb.textContent = "clear";
+        fb.style.marginLeft = "4px";
+        fb.onclick = async () => { await post("/ir/forget", { profile, action: a, press }); load(); };
+        cell.appendChild(fb);
+      }
+    }
+    tb.appendChild(tr);
+  }
+  $("autostart").value = st.autostart_s;
+  chip("c-ir", st.ir.device ? "remote: " + (st.ir.name || "found") : "remote: no receiver", st.ir.device ? "ok" : "warn");
+  showLearning(st.ir.learning);
+}
+
+function chip(id, text, cls) { const c = $(id); c.textContent = text; c.className = "chip " + (cls || ""); }
+
+async function learn(action, press) {
+  await post("/ir/learn", { profile, action, press });
+  showLearning({ profile, action, press });
+}
+function showLearning(l) {
+  const b = $("learn");
+  b.classList.toggle("on", !!l);
+  if (!l) return;
+  b.innerHTML = "";
+  b.append(`Press the remote button for ${l.action.replace("_", " ")} (${l.press}) in profile "${l.profile}"... `);
+  const c = document.createElement("button");
+  c.textContent = "cancel";
+  c.onclick = async () => { await post("/ir/cancel", {}); b.classList.remove("on"); };
+  b.appendChild(c);
+}
+
+$("saveauto").onclick = async () => {
+  const v = Math.max(0, Math.min(60, parseInt($("autostart").value, 10) || 0));
+  await post("/settings", { autostart_s: v });
+  load();
+};
+
+/* Boot: start the last module unless someone presses something */
+function startCountdown() {
+  const m = st.modules.find(x => x.id === st.last && x.ready);
+  if (!boot || !m || !st.autostart_s) return;
+  let left = st.autostart_s;
+  const b = $("countdown");
+  const tick = () => {
+    if (left <= 0) { open(m); return; }
+    b.textContent = `Starting ${m.name} in ${left}... press any button to stay here`;
+    b.classList.add("on");
+    left--;
+  };
+  tick();
+  countdown = setInterval(tick, 1000);
+}
+function stopCountdown() {
+  if (countdown) { clearInterval(countdown); countdown = null; $("countdown").classList.remove("on"); }
+}
+
+/* Moving around with the remote or the keyboard: up/down/left/right walk the
+   buttons on the page, ok presses one, back leaves setup focus */
+function focusables() { return [...document.querySelectorAll("button:not(:disabled), input")]; }
+function move(d) {
+  const f = focusables();
+  let i = f.indexOf(document.activeElement);
+  i = i < 0 ? 0 : Math.max(0, Math.min(f.length - 1, i + d));
+  f[i].focus();
+  f[i].scrollIntoView({ block: "nearest" });
+}
+function action(a) {
+  stopCountdown();
+  if (a === "up" || a === "left") move(-1);
+  else if (a === "down" || a === "right") move(1);
+  else if (a === "ok") { if (document.activeElement && document.activeElement.click) document.activeElement.click(); }
+  else if (a === "back" || a === "home") { const f = focusables(); if (f[0]) f[0].focus(); }
+  else if (a === "play" && st) { const m = st.modules.find(x => x.id === st.last && x.ready); if (m) open(m); }
+}
+document.addEventListener("keydown", e => {
+  stopCountdown();
+  if (e.target.tagName === "INPUT") return;
+  const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+  if (k) { action(k); e.preventDefault(); }
+});
+document.addEventListener("pointerdown", stopCountdown);
+
+/* Live: bridge status, remote buttons for this view, learning results */
+const es = new EventSource("/events?view=selector");
+es.addEventListener("bridge", e => {
+  try {
+    const b = JSON.parse(e.data);
+    chip("c-daisy", b.daisy ? "Daisy: connected" : "Daisy: not on the T95", b.daisy ? "ok" : "bad");
+    const n = (b.controllers || []).map(c => c.name).join(", ");
+    chip("c-ctl", n ? "controllers: " + n : "controllers: none", n ? "ok" : "");
+  } catch (err) {}
+});
+es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
+es.addEventListener("irraw", e => {
+  stopCountdown();
+  try { $("lastcode").textContent = "last button: " + JSON.parse(e.data).scan; } catch (err) {}
+});
+es.addEventListener("irlearned", e => { $("learn").classList.remove("on"); load(); });
+
+load().then(() => {
+  startCountdown();
+  const first = document.querySelector(".module:not(:disabled)");
+  if (first) first.focus();
+});
+</script>
+</body>
+</html>

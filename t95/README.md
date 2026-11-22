@@ -193,7 +193,10 @@ same port for the standalone APC40 host; role selection needs an explicit design
    existing Daisy handler and explicit outbound MIDI for controller LEDs.
    Identify controller sources, define ownership and disconnect behaviour, and
    prevent payload bytes from triggering legacy `R`/`B` commands.
-3. **Module selector, kiosk and IR.** Focused views for the selected modules;
+3. **Module selector, kiosk and IR.** 3a written and desktop-tested, not yet
+   on the T95: selector at `/`, kiosk (`kiosk/`), remote learn/profiles in
+   the bridge. 3b (remote drives the Daisy: firmware UI command) to come.
+   Focused views for the selected modules;
    Chromium on HDMI and browser access over Wi-Fi. IR profiles per view,
    tap/hold/repeat handling and a persisted learn mode.
 4. **Sample transfer.** Chunked, checked, flow-controlled transfer into memory

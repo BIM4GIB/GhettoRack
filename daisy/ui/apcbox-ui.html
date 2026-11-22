@@ -106,6 +106,7 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
 .toolbar label { color: var(--dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
 .empty { color: var(--dim); padding: 30px 10px; text-align: center; }
 .hidden { display: none !important; }
+body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
 </style>
 </head>
 <body>
@@ -113,6 +114,7 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
   <h1>APCBOX</h1>
   <button id="connect" class="primary">Connect Daisy</button>
   <button id="demo">Demo</button>
+  <button id="modules" class="hidden">Modules</button>
   <span id="c-link" class="chip">Daisy: not connected</span>
   <span id="c-bridge" class="chip hidden">T95 bridge: ?</span>
   <span id="c-ctl" class="chip hidden">T95 controllers: ?</span>
@@ -686,7 +688,19 @@ function connectBridge(caps) {
   $("connect").classList.add("hidden");
   $("c-bridge").classList.remove("hidden");
   st.bridge = { up: false, daisy: false };
-  const es = new EventSource("/events");
+  const tv = new URLSearchParams(location.search).has("tv");
+  const toModules = () => { location.href = (caps.selector || "/") + (tv ? "?tv=1" : ""); };
+  if (caps.selector) { $("modules").classList.remove("hidden"); $("modules").onclick = toModules; }
+  const es = new EventSource("/events?view=apcbox");
+  /* The T95 remote (profile "apcbox", then "all"). Daisy actions (play,
+     stop, the encoder) need the firmware UI command: not yet */
+  es.addEventListener("ir", e => {
+    let a = "";
+    try { a = JSON.parse(e.data).action; } catch (err) { return; }
+    if (a === "home" || a === "back" || a === "menu") toModules();
+    else if (a === "up") window.scrollBy({ top: -240, behavior: "smooth" });
+    else if (a === "down") window.scrollBy({ top: 240, behavior: "smooth" });
+  });
   es.onopen = () => { st.bridge.up = true; st.link = true; st.gotData = false; dirty = true; log("connected to the T95 bridge"); };
   es.onmessage = e => handleLine(e.data);
   es.addEventListener("bridge", e => {
@@ -731,6 +745,7 @@ function setupMacUi() {
     img.src = "/tft.bmp?" + Date.now();
   }, 120);
 }
+if (new URLSearchParams(location.search).has("tv")) document.body.classList.add("tv");
 if (location.protocol.startsWith("http")) {
   // The bridge answers /caps; the Mac build doesn't (404), so it keeps its controls
   fetch("/caps").then(r => r.ok ? r.json() : null).catch(() => null)
