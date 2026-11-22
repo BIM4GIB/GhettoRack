@@ -148,6 +148,15 @@ The T95 keeps the sample library; the Daisy only gets a track's sound.
 - `/health` → `samples`: current transfer, queue, recent results, speed.
   Browsers get `xfer` events with the same.
 
+## Sound on the TV
+
+"Sound on the TV (HDMI)" on the selector page: the bridge runs
+`alsaloop -C plughw:CARD=ApcBox -P plughw:CARD=HDMI -t 40000 -S 1` while the
+setting is on and both sound cards exist, starts it again when the Daisy
+comes back, and remembers the setting (`state.json`). It adds about 40 ms
+plus the TV's own delay: for listening while testing, not for playing.
+Status in `/health` → `hdmi_audio`. Card names: `--daisy-card`, `--hdmi-card`.
+
 ## Behaviour
 
 - Finds the Daisy by USB VID `1209` / PID `0001` under `/sys`, not by tty
@@ -175,7 +184,7 @@ The T95 keeps the sample library; the Daisy only gets a track's sound.
 | `/caps` | `{"source": "daisy-bridge", "midi": true, "ir": true, "selector": "/", "control": false, "ui": false, "tft": false}` |
 | `/state` | JSON: modules, last, autostart_s, IR profiles, actions, receiver, learning |
 | `POST /select` | `{"module": "apcbox"}`: remember the last module |
-| `POST /settings` | `{"autostart_s": 0-60}` |
+| `POST /settings` | `{"autostart_s": 0-60}` and/or `{"hdmi_audio": true/false}` |
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 | `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |

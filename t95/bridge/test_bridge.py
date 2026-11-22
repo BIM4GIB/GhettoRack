@@ -1361,5 +1361,57 @@ class HttpsTest(unittest.TestCase):
         self.assertEqual(oct(os.stat(os.path.join(d, "tls.key")).st_mode & 0o777), "0o600")
 
 
+
+class HdmiAudioTest(unittest.TestCase):
+    """The HDMI audio setting starts/stops alsaloop (a fake one here)"""
+
+    def test_toggle_persist_and_follow_the_daisy(self):
+        d = tempfile.mkdtemp()
+        asound = os.path.join(d, "asound")
+        os.makedirs(os.path.join(asound, "HDMI"))
+        log = os.path.join(d, "alsaloop.log")
+        fake = os.path.join(d, "alsaloop")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\necho \"$*\" >> %s\nexec sleep 300\n" % log)
+        os.chmod(fake, 0o755)
+        http = free_port()
+        state = os.path.join(d, "state.json")
+
+        def start():
+            p = subprocess.Popen(
+                [sys.executable, BRIDGE, "--port", os.path.join(d, "nodaisy"), "--host", "127.0.0.1",
+                 "--https-port", "0", "--http-port", str(http), "--ui", UI, "--no-midi", "--state", state,
+                 "--alsaloop", fake, "--asound", asound],
+                stdout=subprocess.DEVNULL, stderr=open(os.path.join(d, "bridge.log"), "a"))
+            BridgeTest.http = http
+            BridgeTest.wait_health(lambda h: "hdmi_audio" in h, 10)
+            return p
+
+        def running():
+            return BridgeTest.health()["hdmi_audio"]["running"]
+
+        proc = start()
+        self.addCleanup(lambda: proc.kill())
+        post = lambda body: IrTest.post(type("x", (), {"http": http})(), "/settings", body)
+        self.assertEqual(post({"hdmi_audio": True})[0], 200)
+        time.sleep(2.5)
+        self.assertFalse(running(), "no Daisy card yet: nothing to pass on")
+        self.assertEqual(BridgeTest.health()["hdmi_audio"]["daisy_card"], False)
+        os.makedirs(os.path.join(asound, "ApcBox"))          # the Daisy plugged in
+        BridgeTest.wait_health(lambda h: h["hdmi_audio"]["running"], 6)
+        self.assertIn("-C plughw:CARD=ApcBox -P plughw:CARD=HDMI -t 40000 -S 1", open(log).read())
+        os.rmdir(os.path.join(asound, "ApcBox"))             # unplugged: stops
+        BridgeTest.wait_health(lambda h: not h["hdmi_audio"]["running"], 6)
+        os.makedirs(os.path.join(asound, "ApcBox"))          # back: starts again
+        BridgeTest.wait_health(lambda h: h["hdmi_audio"]["running"] and h["hdmi_audio"]["starts"] == 2, 6)
+        proc.terminate(); proc.wait(5)
+        proc = start()                                        # setting survives a restart
+        BridgeTest.wait_health(lambda h: h["hdmi_audio"]["on"] and h["hdmi_audio"]["running"], 6)
+        self.assertEqual(post({"hdmi_audio": False})[0], 200)
+        BridgeTest.wait_health(lambda h: not h["hdmi_audio"]["running"], 6)
+        self.assertEqual(post({"hdmi_audio": "yes"})[0], 400)
+        subprocess.run(["pkill", "-f", fake])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

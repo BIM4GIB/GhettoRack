@@ -492,7 +492,7 @@ class State:
 
     def __init__(self, path):
         self.path = path
-        self.data = {"last": None, "autostart_s": 5,
+        self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False,
                      "ir": {p: {} for p in IR_PROFILES}}
         try:
             with open(path) as f:
@@ -501,6 +501,7 @@ class State:
                 self.data["last"] = d.get("last") if d.get("last") in [m["id"] for m in MODULES] else None
                 a = d.get("autostart_s", 5)
                 self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
+                self.data["hdmi_audio"] = d.get("hdmi_audio") is True
                 for prof, binds in (d.get("ir") or {}).items():
                     if prof in IR_PROFILES and isinstance(binds, dict):
                         self.data["ir"][prof] = {k: v for k, v in binds.items() if self.valid(k, v)}
@@ -798,6 +799,65 @@ class IrReader:
             await asyncio.sleep(RESCAN_S)
 
 
+# ---------------------------------------------------------------- HDMI audio
+
+class HdmiAudio:
+    """The Daisy's USB audio (capture card ApcBox) passed on to the TV over
+    HDMI with alsaloop, while the setting is on and both cards exist.
+    alsaloop exits when the Daisy goes away; it's started again when it's
+    back. Adds ~40 ms plus the TV's own delay: for listening, not playing."""
+
+    def __init__(self, bridge):
+        self.b = bridge
+        self.proc = None
+        self.starts = 0
+        self.last_error = None
+
+    def cards(self):
+        root = self.b.args.asound
+        return (os.path.exists(os.path.join(root, self.b.args.daisy_card)),
+                os.path.exists(os.path.join(root, self.b.args.hdmi_card)))
+
+    def info(self):
+        daisy, hdmi = self.cards()
+        return {"on": self.b.state.data["hdmi_audio"], "running": self.running(),
+                "daisy_card": daisy, "hdmi_card": hdmi, "starts": self.starts, "error": self.last_error}
+
+    def running(self):
+        return self.proc is not None and self.proc.poll() is None
+
+    def stop(self):
+        if self.running():
+            self.proc.terminate()
+            try:
+                self.proc.wait(3)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.proc = None
+
+    async def task(self):
+        while True:
+            want = self.b.state.data["hdmi_audio"]
+            daisy, hdmi = self.cards()
+            if want and daisy and hdmi and not self.running():
+                if self.proc is not None and self.proc.returncode not in (None, 0, -15):
+                    self.last_error = "alsaloop exited %s" % self.proc.returncode
+                cmd = [self.b.args.alsaloop, "-C", "plughw:CARD=" + self.b.args.daisy_card,
+                       "-P", "plughw:CARD=" + self.b.args.hdmi_card, "-t", "40000", "-S", "1"]
+                try:
+                    self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                                 stderr=subprocess.DEVNULL)
+                    self.starts += 1
+                    log.info("HDMI audio on (%s)", " ".join(cmd))
+                except OSError as e:
+                    self.last_error = str(e)
+                    self.proc = None
+            elif (not want or not daisy) and self.running():
+                self.stop()
+                log.info("HDMI audio off")
+            await asyncio.sleep(2)
+
+
 # ---------------------------------------------------------------- bridge
 
 class Bridge:
@@ -838,6 +898,7 @@ class Bridge:
             log.warning("no selector page at %s", args.selector)
         self.state = State(args.state)
         self.ir = IrReader(self)
+        self.hdmi = HdmiAudio(self)
         self.library = args.library or os.path.join(os.path.dirname(args.state), "samples")
         self.sdcard = args.sdcard
         self.sout_lo = bytearray()       # sample data: goes only when no MIDI is waiting
@@ -870,6 +931,7 @@ class Bridge:
             "ping_ms": self.ping_stats(),
             "ir": self.ir.info(),
             "samples": self.samples_info(),
+            "hdmi_audio": self.hdmi.info(),
         }
 
     def samples_info(self):
@@ -1109,6 +1171,7 @@ class Bridge:
     def state_json(self):
         return {"modules": MODULES, "last": self.state.data["last"],
                 "autostart_s": self.state.data["autostart_s"],
+                "hdmi_audio": self.hdmi.info(),
                 "ir": {"profiles": self.state.data["ir"], "actions": IR_ACTIONS,
                        "profile_names": IR_PROFILES, **self.ir.info()}}
 
@@ -1128,10 +1191,17 @@ class Bridge:
             self.state.save()
             return 200, {"ok": True}
         if path == "/settings":
-            a = d.get("autostart_s")
-            if not isinstance(a, int) or not 0 <= a <= 60:
-                return 400, {"error": "autostart_s: 0-60"}
-            self.state.data["autostart_s"] = a
+            if "autostart_s" in d:
+                a = d["autostart_s"]
+                if not isinstance(a, int) or not 0 <= a <= 60:
+                    return 400, {"error": "autostart_s: 0-60"}
+                self.state.data["autostart_s"] = a
+            if "hdmi_audio" in d:
+                if not isinstance(d["hdmi_audio"], bool):
+                    return 400, {"error": "hdmi_audio: true/false"}
+                self.state.data["hdmi_audio"] = d["hdmi_audio"]
+            if not ({"autostart_s", "hdmi_audio"} & d.keys()):
+                return 400, {"error": "autostart_s or hdmi_audio"}
             self.state.save()
             return 200, {"ok": True}
         if path in ("/ir/learn", "/ir/forget"):
@@ -1758,7 +1828,7 @@ async def main_async(args):
             log.warning("no HTTPS (the page's record button needs it on phones): %s", e)
     async with server:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task())
+                             b.ir.task(), b.xfer_task(), b.hdmi.task())
 
 
 def main(argv=None):
@@ -1782,6 +1852,10 @@ def main(argv=None):
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
     ap.add_argument("--ir-lirc", metavar="PATH", help="IR lirc device instead of finding it under /sys")
     ap.add_argument("--library", help="sample library folder (default: next to the state file)")
+    ap.add_argument("--alsaloop", default="/usr/bin/alsaloop", help="for the HDMI audio setting")
+    ap.add_argument("--asound", default="/proc/asound", help="where the sound cards are listed by name")
+    ap.add_argument("--daisy-card", default="ApcBox", help="the Daisy's USB audio card name")
+    ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")
     ap.add_argument("-v", "--verbose", action="store_true")

@@ -81,6 +81,12 @@ input[type=number] { width: 64px; background: #24282c; color: var(--text); borde
     <input id="autostart" type="number" min="0" max="60"> <span class="hint">seconds (0 = stay here)</span>
     <button id="saveauto">Save</button>
   </div>
+  <div class="row" style="margin-top:12px">
+    <label><input id="hdmi" type="checkbox"> Sound on the TV (HDMI)</label>
+    <span id="hdmi-status" class="hint"></span>
+  </div>
+  <p class="hint">Passes the Daisy's output on to the TV. It adds about 40 ms plus the TV's own delay:
+    fine for listening while testing; play from the Daisy's own output.</p>
 </main>
 <script>
 "use strict";
@@ -157,6 +163,7 @@ function render() {
     tb.appendChild(tr);
   }
   $("autostart").value = st.autostart_s;
+  showHdmi(st.hdmi_audio);
   chip("c-ir", st.ir.device ? "remote: " + (st.ir.name || "found") : "remote: no receiver", st.ir.device ? "ok" : "warn");
   showLearning(st.ir.learning);
 }
@@ -178,6 +185,21 @@ function showLearning(l) {
   c.onclick = async () => { await post("/ir/cancel", {}); b.classList.remove("on"); };
   b.appendChild(c);
 }
+
+function showHdmi(h) {
+  if (!h) return;
+  $("hdmi").checked = h.on;
+  $("hdmi-status").textContent = !h.on ? "" : h.running ? "playing on the TV"
+    : !h.hdmi_card ? "no HDMI sound card" : !h.daisy_card ? "waiting for the Daisy" : h.error ? h.error : "starting…";
+}
+$("hdmi").onchange = async () => {
+  await post("/settings", { hdmi_audio: $("hdmi").checked });
+  setTimeout(async () => showHdmi((await (await fetch("/state")).json()).hdmi_audio), 2500);
+  showHdmi(Object.assign({}, st.hdmi_audio, { on: $("hdmi").checked, running: false }));
+};
+setInterval(async () => {
+  try { showHdmi((await (await fetch("/state")).json()).hdmi_audio); } catch (err) {}
+}, 5000);
 
 $("saveauto").onclick = async () => {
   const v = Math.max(0, Math.min(60, parseInt($("autostart").value, 10) || 0));
