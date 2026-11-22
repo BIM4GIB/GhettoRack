@@ -105,11 +105,14 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
   (any button, for the setup page) and `irlearned`.
 - Kept in `state.json` (systemd `StateDirectory`, `/var/lib/apcbox-bridge`):
   last module, countdown, bindings. Survives restarts and reboots.
-- play and stop work on the Daisy while a browser shows the ApcBox page:
-  the bridge presses the APC40's own PLAY / STOP buttons on the port of the
-  APC40 that drives the box. So only when that APC40 is on the T95; with it
-  on the Daisy's USB-A they're ignored (logged). The encoder and the rest
-  need a firmware UI command (step 3b).
+- Remote actions for the Daisy, while a browser shows the ApcBox page:
+  left/right turn the encoder, ok pushes it, back is its back, play/stop,
+  number keys 1-9 and 0 pick tracks 1-10. With firmware v13.7 (control
+  protocol 2) they go as UI actions (`ESC U`). With older firmware only
+  play/stop work, as presses of the APC40's PLAY/STOP on the port of the
+  APC40 that drives the box (so only with that APC40 on the T95).
+- `/ui?a=turn&d=N|push|back`: the page's encoder buttons (same URLs as the
+  Mac build). 503 until the Daisy speaks protocol 2.
 - Anyone on the network can change the bindings and the last module (the
   POST endpoints). Fine on a home network; don't expose port 8040 further.
 
@@ -168,5 +171,5 @@ T95 with a real Daisy: latency, CPU load and long runs still need measuring ther
 ## Not here yet
 
 Knobs, pads and pitch bend on the keyboards (notes only so far), MIDI clock
-in/out, remote control of the Daisy itself (step 3b), sample transfer. No real-time priority: add it only if
+in/out, sample transfer. No real-time priority: add it only if
 the ping figures on the T95 say so.

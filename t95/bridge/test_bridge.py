@@ -172,7 +172,7 @@ class BridgeTest(unittest.TestCase):
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json")],
-            stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.wait_health(lambda h: h["daisy"], 10)
 
     @classmethod
@@ -449,7 +449,7 @@ class MidiTest(unittest.TestCase):
             [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
              "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
              "--midi", cls.apc.link + "=APC40 mkII-ish APC40", "--midi", cls.keys.link + "=LPK25"],
-            stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         BridgeTest.http = cls.http
         cls.health = BridgeTest.health
         cls.wait_health = BridgeTest.wait_health
@@ -672,7 +672,8 @@ class EndToEndTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp()
         link = os.path.join(cls.dir, "daisy")
-        cls.sim = subprocess.Popen([SIM, link], stderr=subprocess.DEVNULL)
+        cls.sim = subprocess.Popen([SIM, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.addClassCleanup(cls.sim.kill)       # also if setUpClass fails below
         end = time.time() + 5
         while not os.path.exists(link) and time.time() < end:
             time.sleep(0.05)
@@ -683,14 +684,15 @@ class EndToEndTest(unittest.TestCase):
         os.mkfifo(cls.ir)
         cls.irw = os.open(cls.ir, os.O_RDWR | os.O_NONBLOCK)
         with open(os.path.join(cls.dir, "state.json"), "w") as f:   # remote: play/stop on two buttons
-            json.dump({"ir": {"all": {"play/tap": 0x2FE1C, "stop/tap": 0x2FE1D}}}, f)
+            json.dump({"ir": {"all": {"play/tap": 0x2FE1C, "stop/tap": 0x2FE1D, "3/tap": 0x2FE03}}}, f)
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--http-port", str(cls.http),
              "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--ir-lirc", cls.ir,
              "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
-            stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
         BridgeTest.http = cls.http
-        BridgeTest.wait_health(lambda h: h["control"] == 1 and len(h["controllers"]) == 2, 10)
+        BridgeTest.wait_health(lambda h: h["control"] >= 1 and len(h["controllers"]) == 2, 10)
 
     @classmethod
     def tearDownClass(cls):
@@ -771,6 +773,26 @@ class EndToEndTest(unittest.TestCase):
         self.assertTrue(box.wait_for(lambda c: playing(c) == "0"), "remote stop didn't stop it")
         sel.close(); box.close()
 
+    def test_e2c_ui_command_track_and_encoder(self):
+        """v13.7 control protocol 2: remote digits pick tracks, /ui drives the
+        encoder (the page's buttons)"""
+        h = BridgeTest.health()
+        self.assertEqual(h["control"], 2)
+        caps = json.loads(BridgeTest.get("/caps")[2])
+        self.assertTrue(caps["ui"])
+        sel = lambda c: int([l for l in c.lines if l.startswith("S ")][-1].split()[8])
+        box = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(box.wait_for(lambda c: any(l.startswith("S ") for l in c.lines)))
+        os.write(self.irw, struct.pack("QHHIQ", 0, 0, 10, 0, 0x2FE03))   # "3"
+        time.sleep(0.4)
+        self.assertTrue(box.wait_for(lambda c: sel(c) == 2), "remote 3 didn't select track 3")
+        for a in ("turn&d=1", "push", "back", "turn&d=-1"):
+            self.assertEqual(BridgeTest.get("/ui?a=" + a)[0], 200, a)
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            BridgeTest.get("/ui?a=explode")
+        self.assertEqual(e.exception.code, 404)
+        box.close()
+
     def test_e3_page_runs_in_a_browser(self):
         """The page itself: no script errors, bridge mode, controller chip.
         Needs Playwright with Chromium (desktop only; skipped otherwise)."""
@@ -787,13 +809,20 @@ class EndToEndTest(unittest.TestCase):
             pg.goto("http://127.0.0.1:%d/apcbox" % self.http)
             pg.wait_for_timeout(2500)
             chips = pg.eval_on_selector_all("header .chip:not(.hidden)", "es => es.map(e => e.textContent)")
-            hidden_tft = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
+            panel_hidden = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
+            hidden_tft = pg.eval_on_selector("#tft", "e => e.classList.contains('hidden')")
+            # the Daisy's encoder from the page (v13.7: UI command)
+            with pg.expect_response(lambda r: "/ui?a=push" in r.url) as resp:
+                pg.click("button[data-ui='push']")
+            ui_status = resp.value.status
             b.close()
         self.assertEqual(errors, [], "script errors on the page")
         self.assertIn("T95 bridge: connected", chips)
         self.assertIn("Daisy: connected", chips)
         self.assertTrue(any(c.startswith("T95 controllers: APC40 1 (driving)") and "keys 2" in c for c in chips), chips)
-        self.assertTrue(hidden_tft)
+        self.assertTrue(hidden_tft, "the screen preview is Mac-only")
+        self.assertFalse(panel_hidden, "encoder buttons should show with v13.7")
+        self.assertEqual(ui_status, 200)
 
 
 
@@ -818,7 +847,7 @@ class IrTest(unittest.TestCase):
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir", cls.fifo],
-            stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
         BridgeTest.http = cls.http
         BridgeTest.wait_health(lambda h: h["ir"]["device"] == cls.fifo, 10)
 
@@ -999,7 +1028,7 @@ class IrLircTest(IrTest):
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir-lirc", cls.fifo],
-            stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
         BridgeTest.http = cls.http
         BridgeTest.wait_health(lambda h: h["ir"]["device"] == cls.fifo and h["ir"]["source"] == "lirc", 10)
 

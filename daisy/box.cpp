@@ -2959,4 +2959,28 @@ void BoxUiBack(uint32_t now)
         tft_view = 0;
 }
 
+bool BoxUiCommand(const char* c, uint32_t now)
+{
+    g_now = now;
+    int n = 0;
+    if(sscanf(c, "turn %d", &n) == 1 && n >= -16 && n <= 16)
+        BoxUiTurn(n, now);
+    else if(strcmp(c, "push") == 0)
+        BoxUiPush(now);
+    else if(strcmp(c, "back") == 0)
+        BoxUiBack(now);
+    else if(strcmp(c, "play") == 0)
+        eng->Play();
+    else if(strcmp(c, "stop") == 0)
+        eng->Stop();
+    else if(sscanf(c, "track %d", &n) == 1 && n >= 1 && n <= kTracks)
+    {
+        SelectTrack(n - 1);
+        Popup("track %d", n);
+    }
+    else
+        return false;
+    return true;
+}
+
 } // namespace ab

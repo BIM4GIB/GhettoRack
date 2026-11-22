@@ -12,7 +12,9 @@
  *    ESC M p hex... \n     MIDI from T95 port p (1-8): one complete message,
  *                          bytes as hex digits, spaces ignored (v13.5)
  *    ESC N p name \n       T95 port p has a controller called name; "-" = gone
- *    ESC P id \n           ping: the Daisy answers "Y id" (id: up to 16 chars)
+ *    ESC P id \n           ping: the Daisy answers "Y id" (id: up to 32 chars)
+ *    ESC U action \n       UI action (v13.7, control protocol 2): turn N,
+ *                          push, back, play, stop, track N (1-16)
  *
  *  Bytes outside a command are ignored. Inside a framed command an ESC
  *  starts over, and the payload is text, so a corrupted frame can't become
@@ -36,6 +38,7 @@ class HostCmd
         kMidi,
         kName,
         kPing,
+        kUi,
     };
 
     static constexpr int     kMaxMidi = 128; // bytes per M frame
@@ -68,7 +71,8 @@ class HostCmd
                         st_  = kPort;
                         return kNone;
                     case 'P':
-                        cmd_  = kPing;
+                    case 'U':
+                        cmd_  = b == 'P' ? kPing : kUi;
                         st_   = kText;
                         tlen_ = 0;
                         return kNone;
@@ -146,7 +150,7 @@ class HostCmd
     int            Port() const { return port_; }
     const uint8_t* Midi() const { return midi_; }
     int            MidiLen() const { return len_; }
-    const char*    Text() const { return text_; } // name or ping id
+    const char*    Text() const { return text_; } // name, ping id or UI action
 
   private:
     static int Hex(uint8_t b)

@@ -108,6 +108,9 @@ uint32_t BoxTftCompose(uint32_t now);
 void BoxUiTurn(int d, uint32_t now);
 void BoxUiPush(uint32_t now);
 void BoxUiBack(uint32_t now);
+/** A UI action from the T95 (remote, page): "turn N", "push", "back",
+ *  "play", "stop", "track N" (1-16). false = not understood */
+bool BoxUiCommand(const char* action, uint32_t now);
 /** Touch: raw XPT2046 readings (Daisy), a tap in screen pixels (Mac build),
  *  and starting the 3-cross calibration */
 void BoxTouchRaw(int rx, int ry, bool down, uint32_t now);

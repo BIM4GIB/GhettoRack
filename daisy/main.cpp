@@ -97,17 +97,22 @@ T95Ports t95; // controllers on the T95, through the bridge
 const char* const kLoopPart[8] = {"usb-a", "serial in", "box", "t95", "serial out", "oled", "tft", "sd"};
 uint32_t          loop_part_max[8];
 uint32_t          loop_max = 0, loop_mark = 0, loop_log_time = 0;
-inline void       LoopPart(int i)
+/* System::GetUs() wraps about every 18 s (a 32-bit tick counter divided
+   down), not at 2^32 us: a pass across the wrap looked like 4277 s. Such
+   impossible values are dropped. */
+constexpr uint32_t kLoopSane = 10000000; // 10 s
+inline void        LoopPart(int i)
 {
     uint32_t u = System::GetUs();
-    if(u - loop_mark > loop_part_max[i])
-        loop_part_max[i] = u - loop_mark;
+    uint32_t d = u - loop_mark;
+    if(d < kLoopSane && d > loop_part_max[i])
+        loop_part_max[i] = d;
     loop_mark = u;
 }
 void LoopReport(uint32_t now, uint32_t start_us)
 {
     uint32_t d = System::GetUs() - start_us;
-    if(d > loop_max)
+    if(d < kLoopSane && d > loop_max)
         loop_max = d;
     if(now - loop_log_time < 10000)
         return;
@@ -329,6 +334,10 @@ void LedFlush(uint32_t now)
 /* ================================================================== */
 /* 0.96" SSD1306 OLED on I2C1: SCL = pin 12 (D11), SDA = pin 13 (D12)    */
 
+/* DMA-reachable (D2 SRAM, not cached) buffers for the OLED's I2C transfers */
+uint8_t DMA_BUFFER_MEM_SECTION oled_cmd[4];
+uint8_t DMA_BUFFER_MEM_SECTION oled_tx[129];
+
 class Oled
 {
   public:
@@ -344,15 +353,45 @@ class Oled
         Probe();
     }
 
-    /** Main loop: sends at most one of the 8 pages per call (~3.5 ms) */
+    /** Main loop. One page (4 command bytes, then 128 pixel bytes) at a time,
+     *  sent by DMA so the loop doesn't wait: blocking, a page took ~52 ms on
+     *  the rig (v13.6 loop timing) and every MIDI message waited with it.
+     *  If DMA fails or never finishes, it falls back to blocking sends. */
     void Poll(uint32_t now)
     {
         if(!present_)
         {
-            /* Plugged in later? Try again every 2 s (costs a few ms) */
-            if(now - last_probe_ > 2000)
+            /* Plugged in later? Try again every 10 s (a probe blocks ~20 ms) */
+            if(now - last_probe_ > 10000)
                 Probe();
             return;
+        }
+        if(step_ != kIdle)
+        {
+            if(!done_)
+            {
+                if(now - started_ > 200)
+                {
+                    Log("OLED: DMA didn't finish, sending blocking from now on");
+                    use_dma_ = false;
+                    step_    = kIdle;
+                    page_    = -1;
+                }
+                return;
+            }
+            if(!ok_)
+            {
+                Lost();
+                return;
+            }
+            if(step_ == kCmd)
+            {
+                Start(oled_tx, sizeof(oled_tx), kData, now);
+                return;
+            }
+            step_ = kIdle; // a page is out
+            if(++page_ >= 8)
+                page_ = -1;
         }
         uint32_t       version;
         const uint8_t* fb = BoxScreen(&version);
@@ -364,20 +403,24 @@ class Oled
             memcpy(shadow_, fb, sizeof(shadow_)); // send one consistent frame
             page_ = 0;
         }
-        const uint8_t cmd[] = {0x00, (uint8_t)(0xB0 + page_), 0x00, 0x10};
-        tx_[0]              = 0x40;
-        memcpy(tx_ + 1, shadow_ + page_ * 128, 128);
-        if(Send(cmd, sizeof(cmd)) && Send(tx_, sizeof(tx_)))
+        oled_cmd[0] = 0x00;
+        oled_cmd[1] = (uint8_t)(0xB0 + page_);
+        oled_cmd[2] = 0x00;
+        oled_cmd[3] = 0x10;
+        oled_tx[0]  = 0x40;
+        memcpy(oled_tx + 1, shadow_ + page_ * 128, 128);
+        if(use_dma_)
+        {
+            Start(oled_cmd, sizeof(oled_cmd), kCmd, now);
+            return;
+        }
+        if(Send(oled_cmd, sizeof(oled_cmd)) && Send(oled_tx, sizeof(oled_tx)))
         {
             if(++page_ >= 8)
                 page_ = -1;
         }
         else
-        {
-            present_ = false; // unplugged: go back to probing
-            page_    = -1;
-            Log("OLED lost");
-        }
+            Lost();
     }
 
     bool Present() const { return present_; }
@@ -385,6 +428,42 @@ class Oled
   private:
     uint8_t addr_ = 0x3C; // 0x3D on some modules (address jumper)
     bool    told_ = false;
+
+    enum Step : uint8_t
+    {
+        kIdle,
+        kCmd,
+        kData,
+    };
+
+    void Start(uint8_t* d, uint16_t n, Step step, uint32_t now)
+    {
+        done_    = false;
+        step_    = step;
+        started_ = now;
+        if(i2c_.TransmitDma(addr_, d, n, DmaDone, this) != I2CHandle::Result::OK)
+        {
+            Log("OLED: DMA refused, sending blocking from now on");
+            use_dma_ = false;
+            step_    = kIdle;
+            page_    = -1;
+        }
+    }
+
+    static void DmaDone(void* ctx, I2CHandle::Result r)
+    {
+        Oled* o = (Oled*)ctx;
+        o->ok_   = r == I2CHandle::Result::OK;
+        o->done_ = true;
+    }
+
+    void Lost()
+    {
+        present_ = false; // unplugged: go back to probing
+        page_    = -1;
+        step_    = kIdle;
+        Log("OLED lost");
+    }
 
     bool Send(const uint8_t* d, uint16_t n)
     {
@@ -416,13 +495,17 @@ class Oled
         sent_version_ = 0xFFFFFFFF;
     }
 
-    I2CHandle i2c_;
+    I2CHandle     i2c_;
+    volatile bool done_    = false; // set from the DMA interrupt
+    volatile bool ok_      = true;
+    Step          step_    = kIdle;
+    bool          use_dma_ = true;
+    uint32_t      started_ = 0;
     bool      present_      = false;
     int       page_         = -1;
     uint32_t  sent_version_ = 0xFFFFFFFF;
     uint32_t  last_probe_   = 0;
     uint8_t   shadow_[1024];
-    uint8_t   tx_[129];
 };
 
 Oled oled;
@@ -772,7 +855,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.6 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.7 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

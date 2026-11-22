@@ -83,8 +83,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
   must be capability-gated for a Daisy-backed bridge.
 - Daisy CDC input: `ESC R` (state dump), `ESC BOOT` (bootloader) and, from
-  v13.5, the T95 control frames `ESC K/M/N/P` (see `protocol/serial.md`). Send
-  control frames only after the Daisy reports a `P` line. v13.2 and older act
+  v13.5, the T95 control frames `ESC K/M/N/P`, from v13.7 `ESC U` (UI
+  actions; see `protocol/serial.md`). Send control frames only after the
+  Daisy reports a `P` line, `ESC U` only when its version is 2 or more. v13.2 and older act
   on any bare `R`/`B` byte, so never open the port with echo on (plain
   `cat`/`stty`/`screen` on Linux). Sample payloads still need their own framed,
   versioned, flow-controlled transfer; they must not reuse ESC M.

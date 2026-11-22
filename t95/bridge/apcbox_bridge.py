@@ -82,12 +82,18 @@ IR_HOLD_S = 0.5
 IR_REPEAT_S = 0.11
 IR_LEARN_S = 15.0
 IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
-              "play", "stop", "next", "prev", "vol_up", "vol_down"]
+              "play", "stop", "next", "prev", "vol_up", "vol_down",
+              "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
 IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
 IR_PROFILES = ["all", "selector", "apcbox"]
-# Remote actions the bridge plays on the Daisy itself, as presses of the
-# APC40's own buttons (note, channel 0) on the T95 port of the APC40 that
-# drives the box. Only while a browser shows the ApcBox page.
+# Remote actions the bridge plays on the Daisy itself, while a browser shows
+# the ApcBox page. Firmware with control protocol 2 (v13.7) takes them as UI
+# actions (ESC U): encoder, transport, track select. Older firmware: only
+# play/stop, as presses of the APC40's own buttons on the port of the APC40
+# that drives the box (so only when that APC40 is on the T95).
+DAISY_UI = {"play": "play", "stop": "stop", "left": "turn -1", "right": "turn 1",
+            "ok": "push", "back": "back", "0": "track 10",
+            **{str(n): "track %d" % n for n in range(1, 10)}}
 APC_BUTTONS = {"play": 0x5B, "stop": 0x5C}
 MODULES = [
     {"id": "apcbox", "name": "ApcBox groovebox", "url": "/apcbox", "ready": True,
@@ -605,8 +611,8 @@ class IrReader:
                 c.push(sse_event("ir", {"action": a, "phase": phase}))
         if any(c.view == "apcbox" for c in self.b.clients):
             a = self.decide("apcbox", phase)
-            if a in APC_BUTTONS:
-                self.b.apc_button(APC_BUTTONS[a])
+            if a:
+                self.b.daisy_action(a)
 
     def decide(self, view, phase):
         st, scan = self.b.state, self.scan
@@ -947,6 +953,18 @@ class Bridge:
             return None
         return active if active in self.ports else None
 
+    def daisy_action(self, a):
+        """A remote action for the Daisy: ESC U when it speaks protocol 2,
+        else the APC40 button for play/stop"""
+        if self.ctl >= 2 and a in DAISY_UI:
+            return self.ui_send(DAISY_UI[a])
+        if a in APC_BUTTONS:
+            return self.apc_button(APC_BUTTONS[a])
+        return False
+
+    def ui_send(self, action):
+        return self.ctl_send(b"%sU %s\n" % (ESC, action.encode()))
+
     def apc_button(self, note):
         """Press and release one APC40 button, as if on the APC40 itself"""
         p = self.apc_port()
@@ -1201,13 +1219,29 @@ class Bridge:
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.selector)
             elif path in ("/apcbox", "/apcbox-ui.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.page)
+            elif path == "/ui":
+                # The page's encoder buttons (same URLs as the Mac build)
+                a = params.get("a", "")
+                act = {"push": "push", "back": "back"}.get(a)
+                if a == "turn":
+                    try:
+                        d = max(-16, min(16, int(params.get("d", "0"))))
+                        act = "turn %d" % d if d else None
+                    except ValueError:
+                        act = None
+                if self.ctl < 2:
+                    await self.reply(writer, 503, "text/plain", b"the Daisy's firmware has no UI command (v13.7+)\n")
+                elif act and self.ui_send(act):
+                    await self.reply(writer, 200, "text/plain", b"ok\n")
+                else:
+                    await self.reply(writer, 404, "text/plain", b"unknown UI action\n")
             elif path == "/state":
                 await self.reply(writer, 200, "application/json", json.dumps(self.state_json(), indent=1).encode() + b"\n")
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
-                caps = {"source": "daisy-bridge", "bridge": 3, "control": False, "midi": True, "ir": True,
-                        "selector": "/", "ui": False, "tft": False}
+                caps = {"source": "daisy-bridge", "bridge": 4, "control": self.ctl >= 2, "midi": True, "ir": True,
+                        "selector": "/", "ui": self.ctl >= 2, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")
             elif path == "/events":
                 await self.stream(reader, writer, peer, params.get("view", "")[:32])

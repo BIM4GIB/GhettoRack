@@ -718,20 +718,38 @@ function connectBridge(caps) {
   const toModules = () => { location.href = (caps.selector || "/") + (tv ? "?tv=1" : ""); };
   if (caps.selector) { $("modules").classList.remove("hidden"); $("modules").onclick = toModules; }
   const es = new EventSource("/events?view=apcbox");
-  /* The T95 remote (profile "apcbox", then "all"). Daisy actions (play,
-     stop, the encoder) need the firmware UI command: not yet */
+  /* The T95 remote (profile "apcbox", then "all"). The bridge itself sends
+     the Daisy actions (encoder, play/stop, track numbers); the page only
+     handles its own: modules, scrolling */
   es.addEventListener("ir", e => {
     let a = "";
     try { a = JSON.parse(e.data).action; } catch (err) { return; }
-    if (a === "home" || a === "back" || a === "menu") toModules();
+    if (a === "home" || a === "menu") toModules();
     else if (a === "up") window.scrollBy({ top: -240, behavior: "smooth" });
     else if (a === "down") window.scrollBy({ top: 240, behavior: "smooth" });
   });
   es.onopen = () => { st.bridge.up = true; st.link = true; st.gotData = false; dirty = true; log("connected to the T95 bridge"); };
   es.onmessage = e => handleLine(e.data);
+  /* The Daisy's encoder from the page: v13.7 firmware has the UI command.
+     The screen preview itself is Mac-only, so only the buttons show */
+  const ui = a => fetch("/ui?a=" + a).catch(() => {});
+  document.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => ui(b.dataset.ui));
+  $("tft").classList.add("hidden");
+  $("tftpanel").querySelector("h2 span").textContent = "Daisy encoder (via the T95)";
+  document.addEventListener("keydown", e => {
+    if (!st.bridge.ui || e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowLeft") ui("turn&d=-1");
+    else if (e.key === "ArrowRight") ui("turn&d=1");
+    else if (e.key === "Enter") ui("push");
+    else if (e.key === "Escape") ui("back");
+    else return;
+    e.preventDefault();
+  });
   es.addEventListener("bridge", e => {
     try {
       const b = JSON.parse(e.data);
+      st.bridge.ui = b.daisy && (b.control || 0) >= 2;
+      $("tftpanel").classList.toggle("hidden", !st.bridge.ui);
       if (b.daisy !== st.bridge.daisy) log(b.daisy ? `bridge: Daisy on ${b.port}` : "bridge: Daisy not connected to the T95", b.daisy ? "" : "w");
       st.bridge.daisy = !!b.daisy; dirty = true;
     } catch (err) {}

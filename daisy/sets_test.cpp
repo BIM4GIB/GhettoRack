@@ -621,7 +621,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 1 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 2 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -694,7 +694,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 1 03 01 02 1") >= 1);
+        CHECK(T95Count("P 2 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -710,6 +710,29 @@ int main()
         T95Tick(5);
         CHECK(kb_track[100] == -1);
         e.SetSynth(1, false);
+        SelectTrack(0);
+
+        /* UI actions (control protocol 2) */
+        CHECK(T95Count("P 2 ") >= 1);
+        e.Stop();
+        T95Tick(2);
+        T95Frame("\x1bU play\n");
+        T95Tick(2);                 // the engine starts on its next block
+        CHECK(e.Playing());
+        T95Frame("\x1bU stop\n");
+        T95Tick(2);
+        CHECK(!e.Playing());
+        T95Frame("\x1bU track 5\n");
+        CHECK(sel_track == 4);
+        T95Frame("\x1bU track 17\n\x1bU track 0\n\x1bU dance\n");
+        CHECK(sel_track == 4);
+        SetsOpen(false);
+        touch_cal = 0;
+        int view0 = tft_view;
+        T95Frame("\x1bU push\n");
+        CHECK(tft_view != view0);
+        T95Frame("\x1bU back\n");
+        T95Frame("\x1bU turn 1\n");
         SelectTrack(0);
 
         /* ping */
@@ -728,7 +751,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 1 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 2 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */

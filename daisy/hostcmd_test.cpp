@@ -114,7 +114,7 @@ int main()
                     snprintf(h, 3, "%02x", p.Midi()[i]);
                     g.data += h;
                 }
-            else if(c == HostCmd::kName || c == HostCmd::kPing)
+            else if(c == HostCmd::kName || c == HostCmd::kPing || c == HostCmd::kUi)
                 g.data = p.Text();
             v.push_back(g);
         }
@@ -144,6 +144,12 @@ int main()
         // A frame cut short by an ESC: the ESC starts the next command
         auto v = frames("\x1bM1 903c\x1bR\x1bN3 MPK249\n");
         Check(v.size() == 2 && v[0].cmd == HostCmd::kResync && v[1].data == "MPK249", "ESC inside a frame starts over");
+    }
+    {
+        auto v = frames("\x1bU turn -2\n\x1bUplay\n\x1bU\n\x1bU track 12\n");
+        Check(v.size() == 3 && v[0].cmd == HostCmd::kUi && v[0].data == "turn -2" && v[1].data == "play"
+                  && v[2].data == "track 12",
+              "U frames (empty one dropped)");
     }
     {
         // Payloads are text: no frame content can make a BOOT
