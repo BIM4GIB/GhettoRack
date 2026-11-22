@@ -1,51 +1,216 @@
 # T95 companion box
 
-An old T95 Max Android TV box, rooted and running Armbian. It takes the
-screen, controllers, files and networking off the Daisy, so the Daisy only
-does sound. Nothing in this folder runs yet: this is the plan and what's
-known about the hardware.
+The T95 is GhettoRack's Linux companion to the Daisy Seed 3 running ApcBox.
+The Daisy remains responsible for sequencing, voices, FX and mixing on its
+audio clock, and must continue working standalone with the APC40 on its own
+USB host port.
 
-## Hardware (found so far)
+GhettoRack will start with a module selector: choose an instrument mode or
+compatible combination, then show only its relevant UI. Numark DJ mode is one
+option, not the definition of the whole project. Sampler, sequencer, synth,
+quantisation and network clock roles are also in scope.
 
-| | |
+## Status as of 2026-11-22
+
+**Linux is installed and booting from internal eMMC without the SD card.**
+HDMI console, Wi-Fi, SSH and root filesystem expansion have been observed.
+The post-install check reported zero failed systemd services.
+
+The bridge, kiosk, controller forwarding and sample transfer below remain
+planned. Existing ApcBox firmware and its Mac UI are the starting point, not
+features already deployed on the T95.
+
+## Hardware and evidence
+
+| Item | Current findings |
 |---|---|
-| Board | `H616-T95MAX-V4.0` (2019-12-17) |
-| SoC | Allwinner H616, 4 x Cortex-A53, ~3.9 GB RAM |
-| OS | Armbian, kernel `6.18.63-current-sunxi64`, PREEMPT |
-| USB | 2 sockets (USB0, USB1). The H616's other two controllers aren't routed anywhere reachable |
-| Debug UART | pads GND / TX / RX on the top side (used for rooting) |
-| Audio | card 0 H616 analogue codec, card 1 SPDIF, card 2 HDMI |
-| IR receiver | works: `ir-keytable`, remote uses extended NEC, address `0x2fe` |
-| MIDI | raw MIDI works (`CONFIG_SND_RAWMIDI=y`, e.g. `/dev/snd/midiC3D0` for an LPK25). **No ALSA sequencer** (`CONFIG_SND_SEQUENCER` not set): no `aconnect`/`aseqdump` until the kernel is rebuilt with `SND_SEQUENCER`, `SND_SEQ_DUMMY`, `SND_SEQ_MIDI`, `SND_SEQ_VIRMIDI` as modules |
-| Power | DC5V jack. Use a 5 V 3 A supply once the Daisy and a hub hang off it |
+| Board | `H616-T95MAX-V4.0`, silkscreen date 2019-12-17 |
+| SoC / RAM | Allwinner H616, four Cortex-A53 cores, 4 GB RAM; Linux reports about 3.8 GiB |
+| Storage | 32 GB eMMC, Linux reports 29.1 GiB; the case's 64 GB label is inaccurate for this unit |
+| Power management | AXP305 marking observed on the board |
+| Wireless | AW859A / UWE5622 family; Wi-Fi association and SSH verified with `wlan0` |
+| OS | Armbian-unofficial 26.11, Debian Trixie, `6.18.63-current-sunxi64`; PREEMPT reported, not a claim of PREEMPT_RT |
+| USB | Two external sockets, referred to here as USB0 and USB1; other controller routing is not established |
+| Debug UART | Pads labelled GND / TX / RX. Adapter loopback passed, but no board console was obtained. Root access came from Android `adb root`, not UART |
+| Audio | User reports enumerated H616 analogue, SPDIF and HDMI cards; enumeration is not a playback/latency qualification |
+| IR | User verified receiver with `ir-keytable`: extended NEC (`necx`), remote address `0x2fe` |
+| MIDI | User verified raw MIDI, e.g. an LPK25 at `/dev/snd/midiC3D0`. `CONFIG_SND_RAWMIDI=y`; ALSA sequencer support absent in this build |
+| Power | 5 V DC input. Size the supply and powered hub for measured peripheral load; verify polarity and prevent backfeeding |
 
-## USB plan
+Use raw MIDI in the bridge. Do not require `aconnect` or `aseqdump` on this
+kernel, and do not hardcode ALSA card numbers. Adding ALSA sequencer support
+later is a separate kernel-build task, not a prerequisite for the initial bridge.
+Bluetooth, sustained audio performance and live-gig reliability remain unverified.
 
-- **USB1:** the Daisy's USB-C (USB-C to USB-A cable, or soldered inside later).
-  The Daisy gets a controller to itself.
-- **USB0:** a powered USB 2.0 hub for the APC40, MPK249, LPK25, keyboard receiver.
-- Never connect the Daisy's own USB-A host socket (pins 36/37) to the box with an
-  A-to-A cable: two hosts, two 5 V supplies.
+## Linux image and board adaptation
 
-## Software plan (agreed order)
+Base release:
+[rene/armbian-tvbox, t95-h616](https://github.com/rene/armbian-tvbox/releases/tag/t95-h616)
 
-1. **Bridge daemon** (real-time priority, own CPU core):
-   - opens each controller's raw MIDI port and forwards the bytes to the Daisy over
-     its CDC serial (needs the planned MIDI-in command, see `protocol/serial.md`);
-     LED messages come back the same way
-   - reads the Daisy's report lines and serves the UI (`daisy/ui/`) over WebSocket:
-     Chromium kiosk on HDMI, plus any browser on Wi-Fi (iPad)
-   - can flash the Daisy: `tools/flash-seed.sh` works on Linux (`dfu-util`)
-2. **IR remote**: profiles per view (STEPS, MIXER, PATTERNS, TRACK, SYSTEM, sets,
-   box), tap / hold / repeat, learn mode, saved as a file on the box.
-3. **Sample transfer** box to Daisy SDRAM (64 MB limit, ~0.8-1 MB/s on one lane).
-4. Later: USB audio OUT (box synths into the Daisy), a second USB lane on the
-   Daisy's pins 36/37 in device mode, DIN MIDI clock out from a Daisy UART,
-   jam mode (device ownership, clock in/out), latency loopback test.
+- Filename: `Armbian-unofficial_26.11.0-trunk_T95-h616_trixie_current_6.18.63_minimal.img`
+- Size: 1,656,750,080 bytes.
+- Base SHA-256: `a2af7a34571a5dbf6b3f6f9ad093d5c9af94fe5e98af364bd05c8a354889efa7`.
 
-## Rules
+This is an unofficial board-specific build. The base release targets a different
+Wi-Fi variant; the tested unit required an AW859A/UWE5622 adaptation:
 
-- Timing stays on the Daisy (sequencer, voices, FX, mixer run on its audio clock).
-  The box sends controls, never the beat.
-- The Daisy must keep working standalone (APC40 on its own USB host) without the box.
-- Listen through the Daisy's output, not the box's HDMI (adds tens of ms).
+1. Adapt `allwinner/sun50i-h616-t95.dtb`: remove the XR819 `wifi@1` child and
+   its alias/symbol references; add mmc1 `mmc-ddr-1_8v`, matching the included
+   Orange Pi Zero2 configuration. Retain the rest of the T95 board configuration.
+2. Load `sprdwl_ng` through `/etc/modules-load.d/t95-wifi.conf`.
+3. Configure `wlan0` using Netplan and systemd-networkd with local Wi-Fi
+   credentials and DHCP.
+
+Matching UWE5622 kernel modules and Linux firmware were already in the base
+image. Its board INI matched the extracted Android INI. The Linux
+`wcnmodem.bin` differed from Android's and was retained for the successful boot.
+Do not copy Android 4.9.170 kernel modules into Linux 6.18.
+
+A separately delivered `t95-wifi-prep.zip` prepared the tested SD image; its
+source has not been established as committed here. Import/review that helper,
+DTB source and diff before describing this repository as a complete image build.
+Personalised images contain a usable Wi-Fi key and must stay private.
+
+Kernel/DTB upgrades can replace these board-specific changes. Preserve the
+working configuration and recovery card, and validate upgrades on SD before
+changing the internal installation.
+
+## Installation record and recovery
+
+The original Android eMMC was backed up before installation:
+
+| Backup | Exact length |
+|---|---:|
+| eMMC user area | 31,268,536,320 bytes |
+| eMMC boot0 | 4,194,304 bytes |
+| eMMC boot1 | 4,194,304 bytes |
+
+Stock device tree and Wi-Fi files were also extracted. These are private
+backups, not repository assets. Matching lengths and recorded hashes do not
+constitute a tested restore; the original dump was made while Android ran.
+
+The adapted image was written to a 128 GB microSD and its written bytes were
+hash-verified. SD boot, HDMI and Wi-Fi worked. After a clean reboot test,
+`sudo armbian-install` installed to eMMC using ext4 without encryption.
+Power-off, SD removal and a fresh boot confirmed:
+
+- Root filesystem: `/dev/mmcblk2p1`.
+- Only the 29.1 GiB eMMC, its boot areas and zram were listed.
+- `systemctl --failed` reported no failed units.
+
+At installation time, the SD was `mmcblk0` and eMMC was `mmcblk2`. **Always
+re-identify them on the target before writing.** Do not clone the larger SD
+device blindly onto the smaller eMMC.
+
+Keep the working SD as recovery media. This platform normally tries a bootable
+SD before eMMC; leave it out for normal internal-storage boot. Bootloader/FEL
+recovery through the button labelled UBOOT has not been validated here.
+Disconnect the Mac-to-T95 USB debug cable before Linux boots into USB host mode.
+
+Useful read-only checks:
+
+```sh
+uname -a
+findmnt -no SOURCE /
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+systemctl --failed --no-pager
+ip -br addr
+```
+
+### First-login locale issue
+
+Automatic location detection returned timezone `null`. Setup then spent over
+an hour generating unrelated locales; SSH remained usable. The excessive
+locale generation was stopped and `/etc/locale.gen` restricted to:
+
+```text
+en_GB.UTF-8 UTF-8
+```
+
+British English was generated successfully, and these commands established the
+system defaults:
+
+```sh
+sudo locale-gen
+sudo update-locale --reset LANG=en_GB.UTF-8
+sudo timedatectl set-timezone Europe/London
+cat /etc/locale.conf
+timedatectl
+```
+
+On this Trixie build, `update-locale` writes `/etc/locale.conf`.
+The old `/etc/default/locale` contained blank values and was misleading.
+Clock synchronisation and a subsequent reboot were verified. These are recovery
+notes for the observed first-login issue, not commands to rerun at every boot.
+
+## Daisy connection and USB topology
+
+See [serial protocol](../protocol/serial.md) and
+[existing UI](../daisy/ui/apcbox-ui.html).
+
+The v13.x ApcBox baseline presents a USB full-speed composite device:
+VID `1209`, PID `0001`, product `ApcBox`, serial derived from STM32 unique ID.
+
+- CDC-ACM serial, normally `/dev/ttyACM*`; baud setting is ignored.
+- UAC1 stereo 48 kHz / 16-bit audio **from Daisy to host**. The asynchronous
+  stream follows the Daisy's audio clock.
+- No USB-MIDI class and no host-to-Daisy audio stream yet.
+- CDC host commands currently consist only of `R` (full state dump) and
+  `B` (enter bootloader). Musical control and sample transfer need new firmware.
+
+Planned wiring:
+
+| T95 port | Connection |
+|---|---|
+| USB1 | Daisy USB-C, on a dedicated host controller |
+| USB0 | Powered USB hub for APC40, MPK249, LPK25 and other controllers |
+
+Verify actual topology with `lsusb -t` on the assembled rig. Never join the
+Daisy's USB-A host socket to the T95 host socket using an ordinary A-to-A cable.
+The future second device lane on Daisy pins 36/37 conflicts with using that
+same port for the standalone APC40 host; role selection needs an explicit design.
+
+## Implementation sequence
+
+1. **Read-only telemetry bridge.** Own the serial connection, request `R`,
+   assemble complete report lines, and serve them over SSE at `/events`.
+   Preserve the existing parser and direct Web Serial path. Support reconnect,
+   multiple browsers and bounded buffering. Show Daisy link health separately
+   from browser-to-bridge connectivity.
+2. **Versioned MIDI/control transport.** Add framed MIDI input routed into the
+   existing Daisy handler and explicit outbound MIDI for controller LEDs.
+   Identify controller sources, define ownership and disconnect behaviour, and
+   prevent payload bytes from triggering legacy `R`/`B` commands.
+3. **Module selector, kiosk and IR.** Focused views for the selected modules;
+   Chromium on HDMI and browser access over Wi-Fi. IR profiles per view,
+   tap/hold/repeat handling and a persisted learn mode.
+4. **Sample transfer.** Chunked, checked, flow-controlled transfer into memory
+   actually available on the Daisy. Its 64 MB SDRAM is shared with existing
+   slots and staging buffers. Query capacity; measure throughput while audio
+   and MIDI run. No guaranteed transfer rate has been established.
+5. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
+   lane, DIN MIDI clock from a Daisy UART, network jam clock leader/follower
+   modes, and end-to-end latency tests.
+
+The existing HTTP UI uses `EventSource("/events")`, not WebSocket.
+Its Mac-build `/ui` controls and `/tft.bmp` polling must be disabled or
+capability-gated for the initial Daisy bridge. Serial `D` reports supply the
+OLED mirror, not the TFT framebuffer. The parser also understands `BF`,
+`BN` and `KN`; retain these even where the protocol table is incomplete.
+LED telemetry `W` is not itself an implemented bidirectional MIDI transport.
+
+## Timing and validation
+
+Keep synthesis and sample-accurate work on the Daisy. The bridge may use a
+dedicated core and real-time priority for bounded MIDI forwarding after
+measurement; web serving, logging and sample I/O stay outside that work.
+PREEMPT alone does not guarantee a latency budget.
+
+Network/MIDI clock leader and follower modes remain a design goal. External
+tempo/phase must be translated into the Daisy scheduler; do not drive sequencer
+steps directly from browser timers or conflate MIDI clock with USB audio clocks.
+
+Use the Daisy output as the initial monitoring path. Qualify other outputs with
+measurements rather than assuming a fixed HDMI delay. Before calling this
+gig-ready, test audio/MIDI latency and jitter under load, hotplug/reconnection,
+power stability, thermal behaviour and recovery after interrupted sessions.
