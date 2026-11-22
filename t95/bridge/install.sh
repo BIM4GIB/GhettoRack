@@ -33,6 +33,7 @@ udevadm control --reload
 udevadm trigger --action=add --subsystem-match=tty
 udevadm trigger --action=add --subsystem-match=rc
 udevadm trigger --action=add --subsystem-match=lirc
+udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=0483
 systemctl daemon-reload
 systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service

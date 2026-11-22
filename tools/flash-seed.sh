@@ -85,6 +85,10 @@ while [ $i -lt 60 ]; do
   fi
   sleep 0.5; i=$((i + 1))
 done
+# Linux: the bootloader is on the bus but dfu-util can't open it (no udev rule, not root)
+if [ -z "$SER" ] && [ "$(id -u)" -ne 0 ] && command -v lsusb >/dev/null && lsusb | grep -qi '0483:df11'; then
+  fail "a Seed is in the bootloader but this user can't open it. Run: sudo $0 --new  (for next time: sudo t95/bridge/install.sh adds the udev rule)"
+fi
 [ -n "$SER" ] || fail "no bootloader showed up. Tap RESET, press BOOT while the LED pulses, then run with --new."
 
 say "flashing $(basename "$BIN") to serial $SER"

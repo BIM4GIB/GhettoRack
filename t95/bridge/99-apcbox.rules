@@ -9,3 +9,8 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", SYMLINK+="a
 ACTION=="add", SUBSYSTEM=="rc", RUN+="/bin/sh -c 'echo nec > /sys/class/rc/%k/protocols'"
 # The bridge reads decoded scancodes from lirc (it marks repeats)
 SUBSYSTEM=="lirc", GROUP="input", MODE="0660"
+
+# Daisy bootloader (DFU, 0483:df11): flash without sudo for the dialout
+# group. Without it dfu-util can't open the device on Linux and
+# tools/flash-seed.sh sees no bootloader (happened on the T95, 2026-11-22).
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", GROUP="dialout", MODE="0660"
