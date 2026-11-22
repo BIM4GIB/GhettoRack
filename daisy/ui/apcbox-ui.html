@@ -173,9 +173,16 @@ body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <span class="smp-tabs"><button data-src="lib" class="sel">library</button> <button data-src="sd">SD card</button></span>
         <span id="smp-path" class="lbl"></span>
-        <label style="margin-left:auto"><button id="smp-up-btn">upload…</button>
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <button id="smp-rec">● rec</button>
+          <span id="smp-rec-meter" class="cpu" style="width:70px"><i></i></span>
+          <span id="smp-rec-time" class="lbl"></span>
+          <label class="lbl"><input id="smp-rec-send" type="checkbox" checked> to track</label>
+        </span>
+        <label><button id="smp-up-btn">upload…</button>
           <input id="smp-up" type="file" multiple accept="audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg" class="hidden"></label>
       </div>
+      <div id="smp-rec-hint" class="lbl hidden" style="margin-top:6px"></div>
       <div id="smp-list"></div>
       <div id="smp-xfer"></div>
     </section>
@@ -777,11 +784,11 @@ function connectBridge(caps) {
   });
   es.onerror = () => { if (st.bridge.up) log("lost the T95 bridge, retrying", "w"); st.bridge.up = false; st.link = false; dirty = true; };
   setInterval(() => { dirty = true; }, 1000); // data freshness
-  if (caps.samples) setupSamples(es);
+  if (caps.samples) setupSamples(es, caps);
 }
 
 /* Samples: browse the T95's library and SD card, send to the selected track */
-function setupSamples(es) {
+function setupSamples(es, caps) {
   $("samples").classList.remove("hidden");
   const smp = { src: "lib", path: "" };
   const post = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then(r => r.json());
@@ -835,6 +842,80 @@ function setupSamples(es) {
     document.querySelectorAll(".smp-tabs button").forEach(x => x.classList.toggle("sel", x.dataset.src === "lib"));
     load();
   };
+  /* Record from this device's microphone into the library (and the track).
+     Phones only allow the mic on HTTPS: the bridge also serves 8443 */
+  let rec = null;
+  const httpsUrl = () => `https://${location.hostname}:${caps.https_port || 8443}${location.pathname}${location.search}`;
+  const canRec = window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder;
+  if (!canRec) {
+    const h = $("smp-rec-hint");
+    h.classList.remove("hidden");
+    h.innerHTML = "";
+    if (!window.isSecureContext && caps.https_port) {
+      h.append("recording needs the secure page: ");
+      const a = el("a", "", httpsUrl()); a.href = httpsUrl(); a.style.color = "var(--blue)";
+      h.append(a, " (the browser warns once about the certificate)");
+    } else h.append("this browser can't record");
+  }
+  $("smp-rec").onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    if (!canRec) { if (!window.isSecureContext && caps.https_port) location.href = httpsUrl(); return; }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (err) { log("microphone: " + err.message, "w"); return; }
+    const type = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+    const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    const chunks = [];
+    mr.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+    const ac = new AudioContext();
+    const an = ac.createAnalyser();
+    ac.createMediaStreamSource(stream).connect(an);
+    const buf = new Float32Array(an.fftSize);
+    const t0 = performance.now();
+    const meter = $("smp-rec-meter").firstChild;
+    const tick = () => {
+      if (rec !== mr) return;
+      an.getFloatTimeDomainData(buf);
+      let pk = 0;
+      for (const v of buf) pk = Math.max(pk, Math.abs(v));
+      meter.style.width = Math.min(100, pk * 100) + "%";
+      meter.style.background = pk > 0.95 ? "var(--red)" : "var(--green)";
+      const secs = (performance.now() - t0) / 1000;
+      $("smp-rec-time").textContent = secs.toFixed(1) + " s";
+      if (secs >= 30) mr.stop(); // a track holds about 30 s
+      requestAnimationFrame(tick);
+    };
+    mr.onstop = async () => {
+      rec = null;
+      stream.getTracks().forEach(t => t.stop());
+      ac.close();
+      $("smp-rec").textContent = "● rec";
+      meter.style.width = "0";
+      const mime = mr.mimeType || type;
+      const ext = mime.includes("mp4") ? "mp4" : mime.includes("ogg") ? "ogg" : "webm";
+      const d = new Date(), pad = n => String(n).padStart(2, "0");
+      const name = `rec ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.${ext}`;
+      const blob = new Blob(chunks, { type: mime });
+      $("smp-rec-time").textContent = "uploading…";
+      const r = await fetch("/samples/upload?name=" + encodeURIComponent(name), { method: "POST", body: blob }).then(x => x.json()).catch(() => ({ error: "upload failed" }));
+      $("smp-rec-time").textContent = "";
+      if (r.error) { log("recording: " + r.error, "w"); return; }
+      log(`recorded ${name} (${(blob.size / 1024).toFixed(0)} KB)`);
+      if ($("smp-rec-send").checked) {
+        const o = await post("/samples/send", { src: "lib", path: r.path, track: st.sel + 1 });
+        if (o.error) log("sample: " + o.error, "w");
+      }
+      smp.src = "lib"; smp.path = "uploads";
+      document.querySelectorAll(".smp-tabs button").forEach(x => x.classList.toggle("sel", x.dataset.src === "lib"));
+      load();
+    };
+    mr.start(250);
+    rec = mr;
+    $("smp-rec").textContent = "■ stop";
+    tick();
+  };
+
   es.addEventListener("xfer", e => {
     let t;
     try { t = JSON.parse(e.data); } catch (err) { return; }

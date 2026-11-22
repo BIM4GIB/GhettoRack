@@ -138,6 +138,13 @@ The T95 keeps the sample library; the Daisy only gets a track's sound.
   A T95 sample doesn't survive a Daisy power cycle unless it's in a set.
 - Only one transfer at a time; a set can't load during one (and the other
   way round).
+- Recording: the Samples panel's record button records this device's
+  microphone (echo cancellation, noise suppression and auto gain off), up to
+  30 s, uploads it and, unless unticked, sends it to the selected track.
+  Phones only allow the microphone on HTTPS, so the bridge also serves
+  `https://<t95-ip>:8443/` with a self-signed certificate it makes itself
+  (openssl, in the state folder, remade when the address changes). The
+  browser warns once. On plain HTTP the panel links to the HTTPS page.
 - `/health` → `samples`: current transfer, queue, recent results, speed.
   Browsers get `xfer` events with the same.
 
@@ -173,7 +180,7 @@ The T95 keeps the sample library; the Daisy only gets a track's sound.
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 | `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |
 | `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy |
-| `POST /samples/upload?name=` | raw file body (up to 64 MB) into `uploads/` |
+| `POST /samples/upload?name=` | raw file body (up to 64 MB) into `uploads/`; page recordings come as `.webm` (Chrome) or `.mp4` (Safari) |
 | `POST /samples/import` | `{"path"}`: copy a file or folder (audio only) from the SD card into the library |
 | `POST /samples/delete`, `/samples/cancel` | delete from the library, drop the queue |
 

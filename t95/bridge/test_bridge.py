@@ -172,7 +172,7 @@ class BridgeTest(unittest.TestCase):
         cls.daisy = FakeDaisy(cls.link)
         cls.http = free_port()
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--https-port", "0",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json")],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.wait_health(lambda h: h["daisy"], 10)
@@ -452,7 +452,7 @@ class MidiTest(unittest.TestCase):
         cls.keys = FakeController(os.path.join(cls.dir, "keys"))
         cls.http = free_port()
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--https-port", "0",
              "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
              "--midi", cls.apc.link + "=APC40 mkII-ish APC40", "--midi", cls.keys.link + "=LPK25"],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
@@ -692,7 +692,7 @@ class EndToEndTest(unittest.TestCase):
         with open(os.path.join(cls.dir, "state.json"), "w") as f:   # remote: play/stop on two buttons
             json.dump({"ir": {"all": {"play/tap": 0x2FE1C, "stop/tap": 0x2FE1D, "3/tap": 0x2FE03}}}, f)
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--http-port", str(cls.http),
+            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--http-port", str(cls.http),
              "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--ir-lirc", cls.ir,
              "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
@@ -816,6 +816,45 @@ class EndToEndTest(unittest.TestCase):
             t["bytes"] // 1024, t["seconds"], t["kb_per_s"]))
         c.close()
 
+    def test_e2e_record_in_the_page(self):
+        """The page's record button with Chromium's fake microphone: record,
+        upload, convert (ffmpeg), send to the selected track, firmware loads it"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg needed to convert the recording")
+        c = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("S ") for l in c.lines)))
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"])
+            pg = b.new_page()
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox" % self.http)   # localhost counts as secure
+            pg.wait_for_timeout(1500)
+            self.assertFalse(pg.is_visible("#smp-rec-hint"), "localhost can record: no hint")
+            pg.click("#smp-rec")
+            pg.wait_for_timeout(2200)
+            self.assertRegex(pg.inner_text("#smp-rec-time").lower(), r"^[12]\.\d s$")
+            pg.click("#smp-rec")                                  # stop: upload and send
+            ok = False
+            for _ in range(100):
+                pg.wait_for_timeout(200)
+                if "done in" in pg.inner_text("#smp-xfer"):
+                    ok = True
+                    break
+            xfer = pg.inner_text("#smp-xfer")
+            b.close()
+        self.assertEqual(errors, [], "script errors")
+        self.assertTrue(ok, "recording didn't reach the Daisy: " + xfer)
+        sel = int([l for l in c.lines if l.startswith("S ")][-1].split()[8])
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("N %d rec_" % sel) for l in c.lines)),
+                        [l for l in c.lines if l.startswith("N %d" % sel)][-2:])
+        print("\n  page recording -> track %d: %s" % (sel + 1, xfer.splitlines()[0]))
+        c.close()
+
     def test_e3_page_runs_in_a_browser(self):
         """The page itself: no script errors, bridge mode, controller chip.
         Needs Playwright with Chromium (desktop only; skipped otherwise)."""
@@ -871,7 +910,7 @@ class IrTest(unittest.TestCase):
     @classmethod
     def start(cls):
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir", cls.fifo],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
         BridgeTest.http = cls.http
@@ -1052,7 +1091,7 @@ class IrLircTest(IrTest):
     @classmethod
     def start(cls):
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir-lirc", cls.fifo],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
         BridgeTest.http = cls.http
@@ -1186,7 +1225,7 @@ class SampleTest(unittest.TestCase):
         cls.daisy = LossyDaisy(cls.link)
         cls.http = free_port()
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--http-port", str(cls.http),
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--https-port", "0", "--http-port", str(cls.http),
              "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
              "--library", cls.lib, "--sdcard", cls.sd, "--sdcard-any"],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
@@ -1287,6 +1326,39 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(t["state"], "failed")
         self.assertIn("too-big", t["error"])
         self.assertEqual(self.post("/samples/send", {"src": "lib", "path": "drums/tone.wav", "track": 17})[0], 400)
+
+
+
+class HttpsTest(unittest.TestCase):
+    """The HTTPS port (for the record button on phones)"""
+
+    def test_https_serves_the_pages(self):
+        import ssl as _ssl
+        d = tempfile.mkdtemp()
+        http, https = free_port(), free_port()
+        proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(d, "nodaisy"), "--host", "127.0.0.1",
+             "--http-port", str(http), "--https-port", str(https), "--ui", UI, "--no-midi",
+             "--state", os.path.join(d, "state.json")],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(d, "bridge.log"), "w"))
+        self.addCleanup(proc.kill)
+        ctx = _ssl.create_default_context(cafile=None)
+        body = None
+        for _ in range(60):
+            if os.path.exists(os.path.join(d, "tls.crt")):
+                try:
+                    ctx = _ssl.create_default_context(cafile=os.path.join(d, "tls.crt"))
+                    with urllib.request.urlopen("https://127.0.0.1:%d/apcbox" % https, context=ctx, timeout=5) as r:
+                        body = r.read()
+                    break
+                except (OSError, _ssl.SSLError):
+                    pass
+            time.sleep(0.2)
+        self.assertIsNotNone(body, "no HTTPS (log: %s)" % open(os.path.join(d, "bridge.log")).read()[-500:])
+        self.assertIn(b"APCBOX", body)
+        caps = json.loads(urllib.request.urlopen("https://127.0.0.1:%d/caps" % https, context=ctx, timeout=5).read())
+        self.assertEqual(caps["https_port"], https)
+        self.assertEqual(oct(os.stat(os.path.join(d, "tls.key")).st_mode & 0o777), "0o600")
 
 
 if __name__ == "__main__":

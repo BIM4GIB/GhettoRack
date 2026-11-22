@@ -41,6 +41,8 @@ import asyncio
 import base64
 import binascii
 import shutil
+import socket
+import ssl
 import subprocess
 import collections
 import fcntl
@@ -110,7 +112,8 @@ POST_MAX = 4096
 
 # Samples (control protocol 3): the T95 keeps the library, the Daisy gets a
 # track's sound over USB. See daisy/xfer.h for the Daisy side.
-AUDIO_EXT = (".wav", ".wave", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a")
+AUDIO_EXT = (".wav", ".wave", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a",
+             ".webm", ".mp4")   # .webm / .mp4: recordings from the page (Chrome / Safari)
 XFER_CHUNK = 512          # bytes per ESC F D frame (kXferChunk on the Daisy)
 XFER_WINDOW = 4           # chunks in flight; the Daisy's receive ring takes 8 KB
 XFER_RESEND_S = 0.5
@@ -1590,8 +1593,8 @@ class Bridge:
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
-                caps = {"source": "daisy-bridge", "bridge": 5, "control": self.ctl >= 2, "midi": True, "ir": True,
-                        "samples": True,
+                caps = {"source": "daisy-bridge", "bridge": 6, "control": self.ctl >= 2, "midi": True, "ir": True,
+                        "samples": True, "https_port": self.args.https_port,
                         "selector": "/", "ui": self.ctl >= 2, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")
             elif path == "/events":
@@ -1697,12 +1700,64 @@ class Bridge:
             log.info("browser %s left (%d)", peer, len(self.clients))
 
 
+def local_ips():
+    ips = set()
+    try:
+        out = subprocess.run(["hostname", "-I"], capture_output=True, text=True, timeout=5).stdout
+        ips.update(out.split())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))     # no packet is sent; picks the outgoing address
+            ips.add(s.getsockname()[0])
+    except OSError:
+        pass
+    ips.add("127.0.0.1")
+    return sorted(i for i in ips if ":" not in i)
+
+
+def tls_context(directory):
+    """Self-signed certificate for the HTTPS port (phones only give the page
+    the microphone over HTTPS). Made once with openssl, kept in the state
+    folder; a new one when the T95's address changes."""
+    os.makedirs(directory, exist_ok=True)
+    crt, key = os.path.join(directory, "tls.crt"), os.path.join(directory, "tls.key")
+    ips = local_ips()
+    host = socket.gethostname()
+    want = ",".join(["DNS:" + host, "DNS:" + host + ".local"] + ["IP:" + i for i in ips])
+    stamp = os.path.join(directory, "tls.san")
+    have = open(stamp).read() if os.path.exists(stamp) else ""
+    if not (os.path.exists(crt) and os.path.exists(key)) or have != want:
+        r = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
+                            "-subj", "/CN=GhettoRack " + host, "-addext", "subjectAltName=" + want,
+                            "-keyout", key, "-out", crt], capture_output=True, timeout=60)
+        if r.returncode != 0:
+            raise OSError("openssl: " + r.stderr.decode(errors="replace")[:200])
+        os.chmod(key, 0o600)
+        with open(stamp, "w") as f:
+            f.write(want)
+        log.info("made a TLS certificate for %s", want)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(crt, key)
+    return ctx
+
+
 async def main_async(args):
     b = Bridge(args)
     server = await asyncio.start_server(b.handle_http, args.host, args.http_port, limit=16384)
     log.info("serving http://%s:%d/", args.host, args.http_port)
+    servers = [server.serve_forever()]
+    if args.https_port:
+        try:
+            ctx = tls_context(os.path.dirname(args.state))
+            tls = await asyncio.start_server(b.handle_http, args.host, args.https_port, ssl=ctx, limit=16384)
+            servers.append(tls.serve_forever())
+            log.info("serving https://%s:%d/ (self-signed: the browser warns once)", args.host, args.https_port)
+        except (OSError, ssl.SSLError) as e:
+            log.warning("no HTTPS (the page's record button needs it on phones): %s", e)
     async with server:
-        await asyncio.gather(server.serve_forever(), b.serial_task(), b.midi_task(), b.control_task(),
+        await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
                              b.ir.task(), b.xfer_task())
 
 
@@ -1711,6 +1766,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--http-port", type=int, default=8040)
+    ap.add_argument("--https-port", type=int, default=8443, help="0 = no HTTPS")
     ap.add_argument("--serial", help="USB serial number of the Daisy to use (several connected)")
     ap.add_argument("--port", help="tty path instead of finding the Daisy by VID/PID")
     ap.add_argument("--midi", action="append", metavar="PATH=NAME",
