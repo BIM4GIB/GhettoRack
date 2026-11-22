@@ -23,10 +23,15 @@ static int         fails = 0;
         }                                                           \
     } while(0)
 
+static std::vector<std::string> xfer_lines;
 class TestPlat : public Platform
 {
   public:
-    void Out(const char*) override {}
+    void Out(const char* l) override
+    {
+        if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
+            xfer_lines.push_back(l);
+    }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
     int32_t FileRead(void* d, uint32_t n) override { return (int32_t)fread(d, 1, n, rf); }
     bool FileSkip(uint32_t n) override { return fseek(rf, n, SEEK_CUR) == 0; }
@@ -621,7 +626,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 2 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 3 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -694,7 +699,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 2 03 01 02 1") >= 1);
+        CHECK(T95Count("P 3 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -713,7 +718,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 2 ") >= 1);
+        CHECK(T95Count("P 3 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -751,7 +756,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 2 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 3 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -767,6 +772,121 @@ int main()
         T95Tick(5);
         CHECK(t95p.AnyAttached());
         T95Frame("\x1bN4 -\n");
+
+        /* ---------- samples from the T95 (ESC F) ---------- */
+        {
+            auto b64 = [](const uint8_t* d, size_t n) {
+                static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                std::string o;
+                for(size_t i = 0; i < n; i += 3)
+                {
+                    uint32_t v = d[i] << 16 | (i + 1 < n ? d[i + 1] << 8 : 0) | (i + 2 < n ? d[i + 2] : 0);
+                    o += t[v >> 18 & 63];
+                    o += t[v >> 12 & 63];
+                    o += i + 1 < n ? t[v >> 6 & 63] : '=';
+                    o += i + 2 < n ? t[v & 63] : '=';
+                }
+                return o;
+            };
+            auto has = [](const char* prefix) {
+                for(auto& l : xfer_lines)
+                    if(l.rfind(prefix, 0) == 0)
+                        return true;
+                return false;
+            };
+            // a 0.25 s 16-bit mono WAV, as the T95 sends it (converted to 48 kHz)
+            const int        frames = 12000;
+            std::vector<uint8_t> w(44 + frames * 2);
+            auto p32 = [&](int o, uint32_t v) { memcpy(&w[o], &v, 4); };
+            auto p16 = [&](int o, uint16_t v) { memcpy(&w[o], &v, 2); };
+            memcpy(&w[0], "RIFF", 4); p32(4, 36 + frames * 2); memcpy(&w[8], "WAVEfmt ", 8);
+            p32(16, 16); p16(20, 1); p16(22, 1); p32(24, 48000); p32(28, 96000); p16(32, 2); p16(34, 16);
+            memcpy(&w[36], "data", 4); p32(40, frames * 2);
+            for(int i = 0; i < frames; i++)
+            {
+                int16_t v = (int16_t)(9000 * sinf(6.2831853f * 330.f * i / 48000.f));
+                memcpy(&w[44 + i * 2], &v, 2);
+            }
+            const int nchunks = (int)((w.size() + 511) / 512);
+            auto chunk = [&](int id, int seq, bool corrupt = false) {
+                size_t   off = (size_t)seq * 512, n = std::min<size_t>(512, w.size() - off);
+                uint32_t crc = Crc32(&w[off], (uint32_t)n) ^ (corrupt ? 1u : 0u);
+                char     h[64];
+                snprintf(h, sizeof(h), "\x1b" "FD %d %d %lx ", id, seq, (unsigned long)crc);
+                T95Frame(std::string(h) + b64(&w[off], n) + "\n");
+            };
+            SelectTrack(2);
+            T95Tick(5);
+            uint32_t old_len = e.GetSlot(2).length;
+            CHECK(old_len > 0); // a built-in sound is playing there now
+            xfer_lines.clear();
+
+            char o[96];
+            snprintf(o, sizeof(o), "\x1b" "FO 7 3 %d tone 330.wav\n", (int)w.size());
+            T95Frame(o);
+            CHECK(has("FO 7 ok"));
+            snprintf(o, sizeof(o), "\x1b" "FO 8 3 %d other.wav\n", (int)w.size());
+            T95Frame(o);
+            CHECK(has("FO 8 err busy")); // one at a time
+            // backwards, chunk 3 twice, chunk 5 corrupted first
+            for(int sq = nchunks - 1; sq >= 0; sq--)
+            {
+                if(sq == 5)
+                    chunk(7, sq, true);
+                chunk(7, sq);
+                if(sq == 3)
+                    chunk(7, sq);
+            }
+            CHECK(has("FA 7 5 err crc"));
+            CHECK(has("FA 7 0 ok"));
+            CHECK(e.GetSlot(2).length == old_len); // still the old sound while receiving
+            // a set can't load while the staging pool holds the sample
+            int op0 = set_op;
+            LoadSetBegin(0);
+            CHECK(set_op == op0);
+            T95Frame("\x1b" "FC 7\n");
+            CHECK(has("FC 7 ok"));
+            for(int i = 0; i < 200 && !has("FL 7"); i++)
+                T95Tick(1);
+            CHECK(has("FL 7 ok"));
+            CHECK(e.GetSlot(2).length == (uint32_t)frames);
+            CHECK(strcmp(slot_path[2], "t95/tone_330.wav") == 0);
+            CHECK(!XferBusy());
+
+            // commit with chunks missing, then abort
+            xfer_lines.clear();
+            snprintf(o, sizeof(o), "\x1b" "FO 9 3 %d x.wav\n", (int)w.size());
+            T95Frame(o);
+            chunk(9, 0);
+            T95Frame("\x1b" "FC 9\n");
+            char miss[32];
+            snprintf(miss, sizeof(miss), "FC 9 err missing %d", nchunks - 1);
+            CHECK(has(miss));
+            T95Frame("\x1b" "FA 9\n");
+            CHECK(has("FC 9 err aborted") && !XferBusy());
+
+            // too big, bad track, a set busy
+            xfer_lines.clear();
+            T95Frame("\x1b" "FO 10 3 99999999 huge.wav\n");
+            T95Frame("\x1b" "FO 11 17 1000 t.wav\n");
+            set_op = 2;
+            T95Frame("\x1b" "FO 12 3 1000 t.wav\n");
+            set_op = 0;
+            CHECK(has("FO 10 err too-big") && has("FO 11 err track") && has("FO 12 err set-busy"));
+
+            // silence for 10 s: dropped, and the next one works
+            snprintf(o, sizeof(o), "\x1b" "FO 13 3 %d y.wav\n", (int)w.size());
+            T95Frame(o);
+            CHECK(XferBusy());
+            T95Tick(10100);
+            CHECK(!XferBusy());
+            snprintf(o, sizeof(o), "\x1b" "FO 14 3 %d y.wav\n", (int)w.size());
+            T95Frame(o);
+            CHECK(has("FO 14 ok"));
+            T95Frame("\x1b" "FA 14\n");
+            SelectTrack(0);
+            printf("t95 samples ok\n");
+        }
 
         /* garbage and frames for ports nobody announced do nothing */
         T95Frame("\x1bM3 903c64\n\x1bM9 903c64\n\x1bMx\n\x1bN\n");

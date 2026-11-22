@@ -181,7 +181,7 @@ class Link
         }
     }
 
-    static constexpr uint32_t  kRx = 4096;
+    static constexpr uint32_t  kRx = 8192; // 4 sample chunks in flight fit with room to spare
     static uint8_t             rx_[kRx];
     static volatile uint32_t   rx_w_, rx_r_, rx_dropped_;
     static HostCmd             cmd_;

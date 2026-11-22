@@ -116,6 +116,31 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 - Anyone on the network can change the bindings and the last module (the
   POST endpoints). Fine on a home network; don't expose port 8040 further.
 
+## Samples (firmware v13.8 on)
+
+The T95 keeps the sample library; the Daisy only gets a track's sound.
+
+- Library: `/var/lib/apcbox-bridge/samples` on the eMMC (persists). Uploads
+  from the page land in `uploads/`; imports from the SD card in `sdcard/`.
+- The T95's SD slot: FAT/exFAT cards are mounted read-only at `/media/sdcard`
+  (udev rule; only SD cards, never the eMMC, never ext4 cards such as the
+  recovery card). Browse it, send from it directly, or import into the
+  library. Taking the card out unmounts it. The Daisy's own card can be
+  moved into the T95's slot to import it (power the Daisy off first).
+- Sending: converted with ffmpeg to mono, 16-bit, 48 kHz (without ffmpeg a
+  WAV goes unchanged; the Daisy's parser takes PCM 8-32 bit, float, any
+  rate). Then `ESC F` frames: 512-byte chunks, base64, CRC32 each, 4 in
+  flight, resent after 0.5 s or an error, at most 8 tries per chunk. Sample
+  frames wait behind MIDI and control on the serial link.
+- On the Daisy the file goes into the staging pool (no extra SDRAM) while
+  the track keeps playing; when complete, the normal loader reads it like a
+  file from its card. A set saved on the Daisy afterwards keeps the sound.
+  A T95 sample doesn't survive a Daisy power cycle unless it's in a set.
+- Only one transfer at a time; a set can't load during one (and the other
+  way round).
+- `/health` → `samples`: current transfer, queue, recent results, speed.
+  Browsers get `xfer` events with the same.
+
 ## Behaviour
 
 - Finds the Daisy by USB VID `1209` / PID `0001` under `/sys`, not by tty
@@ -146,6 +171,11 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 | `POST /settings` | `{"autostart_s": 0-60}` |
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
+| `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |
+| `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy |
+| `POST /samples/upload?name=` | raw file body (up to 64 MB) into `uploads/` |
+| `POST /samples/import` | `{"path"}`: copy a file or folder (audio only) from the SD card into the library |
+| `POST /samples/delete`, `/samples/cancel` | delete from the library, drop the queue |
 
 ## Tests
 
@@ -165,11 +195,15 @@ Daisy that stops reading while a keyboard floods, ping, discovery against a
 T95-shaped `/sys` tree. Remote (fake input device): learning, per-view
 actions, tap/hold, repeat, bad requests, state across a restart, and the
 selector page in a browser (learn, ok opens the module, boot countdown,
-home from the ApcBox page, a button cancels the countdown). Passing on a desktop says nothing about the real
+home from the ApcBox page, a button cancels the countdown). Samples:
+listing and path escapes, upload, SD import, sending through a fake Daisy
+that loses 15% of the acks and fakes CRC errors (bytes must match), a
+24-bit stereo file converted, refusals, and a 2 s sample end to end into
+the firmware's transfer code and loader (t95sim). Passing on a desktop says nothing about the real
 T95 with a real Daisy: latency, CPU load and long runs still need measuring there.
 
 ## Not here yet
 
 Knobs, pads and pitch bend on the keyboards (notes only so far), MIDI clock
-in/out, sample transfer. No real-time priority: add it only if
+in/out, sending a whole kit or set from the T95 in one go, sets kept on the T95. No real-time priority: add it only if
 the ping figures on the T95 say so.

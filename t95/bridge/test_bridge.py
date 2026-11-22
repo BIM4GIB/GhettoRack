@@ -25,6 +25,8 @@ import tempfile
 import threading
 import time
 import tty
+import shutil
+import urllib.parse
 import unittest
 import urllib.request
 
@@ -426,6 +428,7 @@ class RespondingDaisy(FakeDaisy):
                 f = buf[1:j].decode()
                 buf = buf[j + 1:]
                 self.frames.append(f)
+                self.on_frame(fd, f)
                 if f.startswith("P "):
                     try:
                         os.write(fd, ("Y %s\n" % f[2:]).encode())
@@ -434,6 +437,9 @@ class RespondingDaisy(FakeDaisy):
 
     def got(self, prefix):
         return [f for f in list(self.frames) if f.startswith(prefix)]
+
+    def on_frame(self, fd, f):
+        pass
 
 
 class MidiTest(unittest.TestCase):
@@ -777,7 +783,7 @@ class EndToEndTest(unittest.TestCase):
         """v13.7 control protocol 2: remote digits pick tracks, /ui drives the
         encoder (the page's buttons)"""
         h = BridgeTest.health()
-        self.assertEqual(h["control"], 2)
+        self.assertGreaterEqual(h["control"], 2)
         caps = json.loads(BridgeTest.get("/caps")[2])
         self.assertTrue(caps["ui"])
         sel = lambda c: int([l for l in c.lines if l.startswith("S ")][-1].split()[8])
@@ -792,6 +798,23 @@ class EndToEndTest(unittest.TestCase):
             BridgeTest.get("/ui?a=explode")
         self.assertEqual(e.exception.code, 404)
         box.close()
+
+    def test_e2d_sample_to_the_real_firmware(self):
+        """A WAV from the library into track 3 through the firmware's xfer.h
+        and loader (t95sim)"""
+        lib = os.path.join(os.path.dirname(os.path.join(self.dir, "state.json")), "samples", "t")
+        os.makedirs(lib, exist_ok=True)
+        make_wav(os.path.join(lib, "e2e tone.wav"), 2.0)
+        c = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(c.wait_for(lambda c: c.events))
+        code, out = SampleTest.post(self, "/samples/send", {"src": "lib", "path": "t/e2e tone.wav", "track": 3})
+        self.assertEqual(code, 200, out)
+        t = SampleTest.wait_xfer(self, out["id"])
+        self.assertEqual(t["state"], "done", t)
+        self.assertTrue(c.wait_for(lambda c: "N 2 e2e_tone.wav" in c.lines), [l for l in c.lines if l.startswith("N 2")])
+        print("\n  2 s sample to the firmware over a pty: %d KB in %.2f s (%s KB/s)" % (
+            t["bytes"] // 1024, t["seconds"], t["kb_per_s"]))
+        c.close()
 
     def test_e3_page_runs_in_a_browser(self):
         """The page itself: no script errors, bridge mode, controller chip.
@@ -811,6 +834,8 @@ class EndToEndTest(unittest.TestCase):
             chips = pg.eval_on_selector_all("header .chip:not(.hidden)", "es => es.map(e => e.textContent)")
             panel_hidden = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
             hidden_tft = pg.eval_on_selector("#tft", "e => e.classList.contains('hidden')")
+            samples_shown = not pg.eval_on_selector("#samples", "e => e.classList.contains('hidden')")
+            smp_rows = pg.eval_on_selector_all("#smp-list .smp-row", "es => es.length")
             # the Daisy's encoder from the page (v13.7: UI command)
             with pg.expect_response(lambda r: "/ui?a=push" in r.url) as resp:
                 pg.click("button[data-ui='push']")
@@ -823,6 +848,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertTrue(hidden_tft, "the screen preview is Mac-only")
         self.assertFalse(panel_hidden, "encoder buttons should show with v13.7")
         self.assertEqual(ui_status, 200)
+        self.assertTrue(samples_shown and smp_rows >= 1, "Samples panel should list the library")
 
 
 
@@ -1074,6 +1100,193 @@ class IrLircTest(IrTest):
         self.rec(0x2FE0B); time.sleep(0.4)
         self.assertTrue(c.wait_for(lambda c: self.irs(c).count("ok") == 2), self.irs(c))
         c.close()
+
+
+
+def make_wav(path, secs=0.5, rate=48000, ch=1, width=2, hz=330.0):
+    import math
+    import wave
+    n = int(secs * rate)
+    with wave.open(path, "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(width)
+        w.setframerate(rate)
+        frames = bytearray()
+        for i in range(n):
+            v = int(9000 * math.sin(2 * math.pi * hz * i / rate))
+            frames += (v.to_bytes(2, "little", signed=True) if width == 2
+                       else (v << 8).to_bytes(3, "little", signed=True)) * ch
+        w.writeframes(bytes(frames))
+
+
+class LossyDaisy(RespondingDaisy):
+    """Takes ESC F frames like the firmware, but loses some acks and claims
+    CRC errors on others, so the bridge has to resend"""
+
+    def plug(self):
+        super().plug()
+        import random
+        self.rng = random.Random(7)
+        self.files = {}
+        self.refuse = None
+        self.drop = 0.15
+        self.crcerr = 0.05
+
+    def say(self, fd, line):
+        try:
+            os.write(fd, (line + "\n").encode())
+        except OSError:
+            pass
+
+    def on_frame(self, fd, f):
+        import base64 as b64
+        import binascii as ba
+        if f.startswith("FO "):
+            _, i, track, size, name = f.split(" ", 4)
+            if self.refuse:
+                return self.say(fd, "FO %s err %s" % (i, self.refuse))
+            self.files[i] = {"size": int(size), "chunks": {}, "track": int(track), "name": name}
+            self.say(fd, "FO %s ok 1572864" % i)
+        elif f.startswith("FD "):
+            _, i, seq, crc, data = f.split(" ", 4)
+            raw = b64.b64decode(data)
+            if ba.crc32(raw) & 0xFFFFFFFF != int(crc, 16):
+                return self.say(fd, "FA %s %s err crc" % (i, seq))
+            if self.rng.random() < self.crcerr:
+                return self.say(fd, "FA %s %s err crc" % (i, seq))
+            self.files[i]["chunks"][int(seq)] = raw
+            if self.rng.random() >= self.drop:
+                self.say(fd, "FA %s %s ok" % (i, seq))
+        elif f.startswith("FC "):
+            i = f.split()[1]
+            x = self.files[i]
+            need = (x["size"] + 511) // 512
+            if len(x["chunks"]) != need:
+                return self.say(fd, "FC %s err missing %d" % (i, need - len(x["chunks"])))
+            x["data"] = b"".join(x["chunks"][k] for k in range(need))
+            self.say(fd, "FC %s ok" % i)
+            self.say(fd, "FL %s ok" % i)
+
+
+class SampleTest(unittest.TestCase):
+    """Library, SD card, uploads, and sending samples through a lossy link"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.lib = os.path.join(cls.dir, "lib")
+        cls.sd = os.path.join(cls.dir, "sd")
+        os.makedirs(os.path.join(cls.lib, "drums"))
+        os.makedirs(os.path.join(cls.sd, "Kits", "808"))
+        make_wav(os.path.join(cls.lib, "drums", "tone.wav"), 1.0)
+        make_wav(os.path.join(cls.sd, "Kits", "808", "BD.wav"), 0.3)
+        make_wav(os.path.join(cls.sd, "Kits", "808", "SD 24bit stereo.wav"), 0.3, ch=2, width=3, rate=44100)
+        open(os.path.join(cls.sd, "Kits", "readme.txt"), "w").write("not audio")
+        cls.link = os.path.join(cls.dir, "daisy")
+        cls.daisy = LossyDaisy(cls.link)
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--http-port", str(cls.http),
+             "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
+             "--library", cls.lib, "--sdcard", cls.sd, "--sdcard-any"],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["daisy"], 10)
+        cls.daisy.send("V 9\nP 3 00 00 00 -1\n")
+        BridgeTest.wait_health(lambda h: h["control"] == 3, 5)
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    post = IrTest.post
+
+    def samples(self, src, path=""):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:%d/samples?src=%s&path=%s"
+                                        % (self.http, src, urllib.parse.quote(path)), timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def wait_xfer(self, xid, timeout=30):
+        end = time.time() + timeout
+        while time.time() < end:
+            s = BridgeTest.health()["samples"]
+            for t in [s["current"]] + s["recent"]:
+                if t and t["id"] == xid and t["state"] in ("done", "failed"):
+                    return t
+            time.sleep(0.1)
+        raise AssertionError("transfer %d didn't finish: %s" % (xid, BridgeTest.health()["samples"]))
+
+    def test_s1_listing_and_traversal(self):
+        code, d = self.samples("lib")
+        self.assertEqual((code, d["dirs"]), (200, ["drums"]))
+        code, d = self.samples("sd", "Kits/808")
+        self.assertEqual(sorted(f["name"] for f in d["files"]), ["BD.wav", "SD 24bit stereo.wav"])
+        code, d = self.samples("sd", "Kits")
+        self.assertEqual((d["dirs"], d["files"]), (["808"], []), "readme.txt isn't audio")
+        for bad in ("../", "../../etc", "/etc", "drums/../../"):
+            self.assertEqual(self.samples("lib", bad)[0], 400, bad)
+        self.assertEqual(self.post("/samples/send", {"src": "lib", "path": "../state.json", "track": 1})[0], 400)
+
+    def test_s2_upload(self):
+        p = os.path.join(self.dir, "up.wav")
+        make_wav(p, 0.2)
+        body = open(p, "rb").read()
+        req = urllib.request.Request("http://127.0.0.1:%d/samples/upload?name=my%%20clap.wav" % self.http,
+                                     data=body, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as r:
+            out = json.loads(r.read())
+        self.assertEqual(out["path"], "uploads/my clap.wav")
+        self.assertEqual(open(os.path.join(self.lib, "uploads", "my clap.wav"), "rb").read(), body)
+        req = urllib.request.Request("http://127.0.0.1:%d/samples/upload?name=evil.sh" % self.http,
+                                     data=b"rm -rf /", method="POST")
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(req, timeout=5)
+
+    def test_s3_import_from_sd(self):
+        code, out = self.post("/samples/import", {"path": "Kits"})
+        self.assertEqual((code, out["copied"]), (200, 2))
+        self.assertTrue(os.path.isfile(os.path.join(self.lib, "sdcard", "Kits", "808", "BD.wav")))
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "sdcard", "Kits", "readme.txt")))
+        self.assertEqual(self.post("/samples/import", {"path": "Kits"})[1]["copied"], 0, "already there")
+
+    def test_s4_send_through_a_lossy_link(self):
+        sys.path.insert(0, HERE)
+        import apcbox_bridge as b
+        c = SseClient(self.http, path="/events?view=apcbox")
+        code, out = self.post("/samples/send", {"src": "lib", "path": "drums/tone.wav", "track": 3})
+        self.assertEqual(code, 200)
+        t = self.wait_xfer(out["id"])
+        self.assertEqual(t["state"], "done", t)
+        self.assertGreater(t["resent"], 0, "the lossy link should have forced resends")
+        got = self.daisy.files[str(out["id"])]
+        want, _ = b.convert_for_daisy(os.path.join(self.lib, "drums", "tone.wav"))
+        self.assertEqual(got["data"], want, "the Daisy got different bytes")
+        self.assertEqual(got["track"], 3)
+        self.assertTrue(c.wait_for(lambda c: any(e == "xfer" and d["state"] == "done" for e, d in c.named)))
+        self.assertFalse(any(l.startswith("F") for l in c.lines), "F replies reached a browser")
+        print("\n  lossy link: %d chunks, %d resent, %.1f s, %s" % (t["chunks"], t["resent"], t["seconds"], t["how"]))
+        c.close()
+
+    def test_s5_sd_file_24bit_stereo_converted(self):
+        code, out = self.post("/samples/send", {"src": "sd", "path": "Kits/808/SD 24bit stereo.wav", "track": 5})
+        t = self.wait_xfer(out["id"])
+        self.assertEqual(t["state"], "done", t)
+        data = self.daisy.files[str(out["id"])]["data"]
+        if shutil.which("ffmpeg"):
+            # mono, 16-bit, 48 kHz
+            self.assertEqual(struct.unpack_from("<HHIIHH", data, 20), (1, 1, 48000, 96000, 2, 16))
+
+    def test_s6_daisy_refuses(self):
+        self.daisy.refuse = "too-big"
+        code, out = self.post("/samples/send", {"src": "lib", "path": "drums/tone.wav", "track": 2})
+        t = self.wait_xfer(out["id"])
+        self.daisy.refuse = None
+        self.assertEqual(t["state"], "failed")
+        self.assertIn("too-big", t["error"])
+        self.assertEqual(self.post("/samples/send", {"src": "lib", "path": "drums/tone.wav", "track": 17})[0], 400)
 
 
 if __name__ == "__main__":

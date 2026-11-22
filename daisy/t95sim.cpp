@@ -69,6 +69,12 @@ class SimPlat : public Platform
     bool     ControllerPresent() override;
     uint32_t Dropped() override { return 0; }
     bool     AudioRunning() override { return true; }
+    int16_t* Staging(uint32_t* n) override // like the Daisy's (SDRAM there)
+    {
+        static std::vector<int16_t> stage(4600 * 1024);
+        *n = (uint32_t)stage.size();
+        return stage.data();
+    }
     uint8_t  scratch[4096];
 };
 

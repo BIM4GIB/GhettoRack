@@ -14,3 +14,9 @@ SUBSYSTEM=="lirc", GROUP="input", MODE="0660"
 # group. Without it dfu-util can't open the device on Linux and
 # tools/flash-seed.sh sees no bootloader (happened on the T95, 2026-11-22).
 SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", GROUP="dialout", MODE="0660"
+
+# The T95's SD slot: FAT/exFAT cards are mounted read-only at /media/sdcard
+# for the sample library (import, send). Matches only cards whose MMC type
+# is "SD"; the internal eMMC reports "MMC", and ext4 cards (the Armbian
+# recovery card) are left alone. Taking the card out unmounts it.
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="mmcblk*", ATTRS{type}=="SD", ENV{ID_FS_TYPE}=="vfat|exfat", RUN+="/usr/bin/systemd-mount --no-block --collect --options=ro,nosuid,nodev,noexec,umask=022 $devnode /media/sdcard"

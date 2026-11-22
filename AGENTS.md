@@ -77,18 +77,19 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 8 are separate version numbers.
+  version 9 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
   must be capability-gated for a Daisy-backed bridge.
 - Daisy CDC input: `ESC R` (state dump), `ESC BOOT` (bootloader) and, from
   v13.5, the T95 control frames `ESC K/M/N/P`, from v13.7 `ESC U` (UI
-  actions; see `protocol/serial.md`). Send control frames only after the
-  Daisy reports a `P` line, `ESC U` only when its version is 2 or more. v13.2 and older act
+  actions), from v13.8 `ESC F` (sample transfer; see `protocol/serial.md`
+  and `daisy/xfer.h`). Send control frames only after the Daisy reports a
+  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+. v13.2 and older act
   on any bare `R`/`B` byte, so never open the port with echo on (plain
-  `cat`/`stty`/`screen` on Linux). Sample payloads still need their own framed,
-  versioned, flow-controlled transfer; they must not reuse ESC M.
+  `cat`/`stty`/`screen` on Linux). Sample data goes only as `ESC F` frames
+  (never ESC M), sent at low priority behind MIDI by the bridge.
 - One bridge owns the Daisy serial port. Identify the device by VID/PID and
   serial, not a hardcoded tty index. Raw MIDI card indices are also unstable.
   Separate device connection, telemetry freshness and browser connection status.

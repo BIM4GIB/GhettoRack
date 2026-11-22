@@ -202,7 +202,8 @@ same port for the standalone APC40 host; role selection needs an explicit design
    Focused views for the selected modules;
    Chromium on HDMI and browser access over Wi-Fi. IR profiles per view,
    tap/hold/repeat handling and a persisted learn mode.
-4. **Sample transfer.** Chunked, checked, flow-controlled transfer into memory
+4. **Sample transfer.** Built (v13.8, bridge): library on the T95 (eMMC,
+   SD card import, uploads), sent into a track over USB. Not yet on the rig. Chunked, checked, flow-controlled transfer into memory
    actually available on the Daisy. Its 64 MB SDRAM is shared with existing
    slots and staging buffers. Query capacity; measure throughput while audio
    and MIDI run. No guaranteed transfer rate has been established.

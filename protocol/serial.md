@@ -1,4 +1,4 @@
-# ApcBox serial protocol (report version 8)
+# ApcBox serial protocol (report version 9)
 
 The Daisy's USB-C is a composite USB device, full speed (12 Mbit/s):
 
@@ -22,7 +22,7 @@ From firmware v13.3, every command starts with ESC (0x1B):
 | `ESC BOOT` (1B 42 4F 4F 54) | Reboot into the Daisy bootloader (used by `tools/flash-seed.sh`) |
 
 From v13.5, the T95 control protocol: version 1 (v13.5, v13.6) has K, M, N
-and P; version 2 (v13.7) adds U. Send these only after the Daisy has sent a
+and P; version 2 (v13.7) adds U; version 3 (v13.8) adds F. Send these only after the Daisy has sent a
 `P` line, and U only when its version is 2 or more: older firmware would act
 on the `R`/`B` letters inside them.
 
@@ -33,6 +33,10 @@ on the `R`/`B` letters inside them.
 | `ESC N` *p* *name* `\n` | Port *p* now has a controller called *name* (printable ASCII, at most 32). `-` = gone. Re-announcing the same name is harmless |
 | `ESC P` *id* `\n` | Ping. The Daisy answers `Y` *id* from its main loop (*id*: printable, at most 32) |
 | `ESC U` *action* `\n` | UI action, control protocol 2 (v13.7): `turn N` (-16..16, the encoder), `push`, `back`, `play`, `stop`, `track N` (1-16). Unknown actions are logged and ignored |
+| `ESC F O` *id track size name* `\n` | Sample transfer, control protocol 3 (v13.8): start sending a WAV file of *size* bytes for *track* (1-16). One at a time; refused while a set loads or if it doesn't fit the staging pool |
+| `ESC F D` *id seq crc32 base64* `\n` | Chunk *seq* (512 bytes, the last may be shorter), CRC32 in hex. Any order, repeats are harmless. At most 800 characters per frame |
+| `ESC F C` *id* `\n` | All chunks sent: if every one arrived, the Daisy loads the file into the track like a file from its card |
+| `ESC F A` *id* `\n` | Abort. 10 s without a frame also aborts |
 
 Example: `ESC M2 903c64 \n` = note on, C4, velocity 100, from port 2.
 The Daisy asks each new port for its identity. An Akai APC40 reply (47 73)
@@ -82,7 +86,11 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `I p hex` | MIDI the Daisy got from a T95 keyboard on port *p* (for the page log) |
 | `P ver att apc keys active` | T95 control protocol version (2 from v13.7), then hex port masks (bit 0 = port 1): attached, identified as APC40, keyboards; then who drives the box: -1 none, 0 the Daisy's USB-A, 1-8 a T95 port. On change and every second |
 | `Y id` | Answer to `ESC P id` |
-| `V n` | Report version (8). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
+| `FO id ok capacity` / `FO id err why` | Sample transfer started (track slot capacity in samples) or refused: `busy`, `set-busy`, `track`, `too-big` |
+| `FA id seq ok` / `FA id seq err why` | Chunk stored, or not: `crc`, `length`, `range`, `stale` (no such transfer) |
+| `FC id ok` / `FC id err why` | Commit accepted (loading), or `missing N`, `stale`, `set-busy`, `aborted` |
+| `FL id ok\|err` | The loader finished with it: in the track, or not a playable WAV |
+| `V n` | Report version (9). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields
 

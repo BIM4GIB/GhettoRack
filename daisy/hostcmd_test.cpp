@@ -114,7 +114,7 @@ int main()
                     snprintf(h, 3, "%02x", p.Midi()[i]);
                     g.data += h;
                 }
-            else if(c == HostCmd::kName || c == HostCmd::kPing || c == HostCmd::kUi)
+            else if(c == HostCmd::kName || c == HostCmd::kPing || c == HostCmd::kUi || c == HostCmd::kFile)
                 g.data = p.Text();
             v.push_back(g);
         }
@@ -150,6 +150,12 @@ int main()
         Check(v.size() == 3 && v[0].cmd == HostCmd::kUi && v[0].data == "turn -2" && v[1].data == "play"
                   && v[2].data == "track 12",
               "U frames (empty one dropped)");
+    }
+    {
+        std::string body(780, 'A');
+        auto v = frames("\x1b" "FD 1 0 0 " + body + "\n\x1b" "FD 1 0 0 " + std::string(820, 'A') + "\n\x1bR");
+        Check(v.size() == 2 && v[0].cmd == HostCmd::kFile && v[1].cmd == HostCmd::kResync,
+              "F frame up to 800 characters, longer dropped");
     }
     {
         // Payloads are text: no frame content can make a BOOT

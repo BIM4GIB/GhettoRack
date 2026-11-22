@@ -29,7 +29,7 @@ class T95Ports
     static constexpr int      kPorts     = 8; // 1..8
     static constexpr uint32_t kKeepalive = 2000;
     static constexpr uint32_t kIdentify  = 1000; // no identity reply by then: decide by name
-    static constexpr int      kVersion   = 2;    // the "P" line's control version (2: ESC U)
+    static constexpr int      kVersion   = 3;    // the "P" line's control version (2: ESC U, 3: ESC F)
 
     /** send: queue one line; false = no room right now (nothing queued) */
     using SendFn = bool (*)(const char* line);
@@ -55,6 +55,7 @@ class T95Ports
                     Attach(c.Port(), c.Text(), now);
                 break;
             case HostCmd::kMidi: Midi(c.Port(), c.Midi(), c.MidiLen(), now); break;
+            case HostCmd::kFile: ab::BoxFileFrame(c.Text(), now); break;
             case HostCmd::kUi:
                 if(!ab::BoxUiCommand(c.Text(), now))
                     ab::BoxLog("T95: unknown UI action '%s'", c.Text());

@@ -15,6 +15,8 @@
  *    ESC P id \n           ping: the Daisy answers "Y id" (id: up to 32 chars)
  *    ESC U action \n       UI action (v13.7, control protocol 2): turn N,
  *                          push, back, play, stop, track N (1-16)
+ *    ESC F frame \n        sample transfer (v13.8, control protocol 3), up to
+ *                          800 characters: see xfer.h
  *
  *  Bytes outside a command are ignored. Inside a framed command an ESC
  *  starts over, and the payload is text, so a corrupted frame can't become
@@ -39,10 +41,12 @@ class HostCmd
         kName,
         kPing,
         kUi,
+        kFile,
     };
 
     static constexpr int     kMaxMidi = 128; // bytes per M frame
     static constexpr int     kMaxText = 32;  // name / ping id
+    static constexpr int     kMaxFile = 800; // F frame: header + 512 bytes in base64
     static constexpr uint8_t kEsc     = 0x1B;
 
     /** Feed one received byte; returns the command it completes, if any */
@@ -72,7 +76,8 @@ class HostCmd
                         return kNone;
                     case 'P':
                     case 'U':
-                        cmd_  = b == 'P' ? kPing : kUi;
+                    case 'F':
+                        cmd_  = b == 'P' ? kPing : b == 'U' ? kUi : kFile;
                         st_   = kText;
                         tlen_ = 0;
                         return kNone;
@@ -127,22 +132,26 @@ class HostCmd
                 return kNone;
             }
             case kText:
+            {
+                char* buf = cmd_ == kFile ? ftext_ : text_;
+                int   max = cmd_ == kFile ? kMaxFile : kMaxText;
                 if(b == '\n')
                 {
-                    st_          = kIdle;
-                    text_[tlen_] = 0;
+                    st_         = kIdle;
+                    buf[tlen_]  = 0;
                     return tlen_ > 0 ? cmd_ : kNone;
                 }
                 if(b == '\r')
                     return kNone;
-                if(b < 0x20 || b > 0x7E || tlen_ >= kMaxText)
+                if(b < 0x20 || b > 0x7E || tlen_ >= max)
                 {
                     st_ = kIdle;
                     return kNone;
                 }
                 if(!(tlen_ == 0 && b == ' ')) // "N1 name", "P id": skip leading spaces
-                    text_[tlen_++] = (char)b;
+                    buf[tlen_++] = (char)b;
                 return kNone;
+            }
             default: return kNone;
         }
     }
@@ -150,7 +159,7 @@ class HostCmd
     int            Port() const { return port_; }
     const uint8_t* Midi() const { return midi_; }
     int            MidiLen() const { return len_; }
-    const char*    Text() const { return text_; } // name, ping id or UI action
+    const char*    Text() const { return cmd_ == kFile ? ftext_ : text_; } // name, ping id, UI action, F frame
 
   private:
     static int Hex(uint8_t b)
@@ -182,4 +191,5 @@ class HostCmd
     int     nib_   = -1;
     uint8_t midi_[kMaxMidi];
     char    text_[kMaxText + 1] = {};
+    char    ftext_[kMaxFile + 1] = {};
 };

@@ -496,6 +496,11 @@ void LoadSetBegin(int slot)
 {
     if(!sd_ok || set_op)
         return;
+    if(XferBusy()) // the staging pool holds a sample from the T95
+    {
+        Popup("busy receiving a sample");
+        return;
+    }
     char p[40];
     snprintf(p, sizeof(p), "sets/%02d/set.bin", slot + 1);
     int32_t n = plat->ReadFile(p, &setf, sizeof(setf));

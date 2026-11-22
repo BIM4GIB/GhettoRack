@@ -7,6 +7,7 @@
 #include "wav.h"
 #include "kitmap.h"
 #include "oledfont.h"
+#include <cctype>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -533,13 +534,58 @@ bool TrackLoading(int t)
     return false;
 }
 
+/* A sample sent from the T95 (xfer.h) is read by the loader like a file:
+   "t95/<name>" reads from the received bytes in the staging pool */
+bool IsT95Path(const char* p) { return strncmp(p, "t95/", 4) == 0; }
+const uint8_t* mem_file = nullptr;
+uint32_t       mem_size = 0, mem_pos = 0;
+bool           mem_open = false;
+char           mem_name[kPathLen];
+void           XferLoaded(bool ok);
+
+bool SrcOpen(const char* path)
+{
+    mem_open = false;
+    if(IsT95Path(path))
+    {
+        if(!mem_file || strcmp(path, mem_name))
+            return false;
+        mem_pos  = 0;
+        mem_open = true;
+        return true;
+    }
+    return sd_ok && plat->FileOpen(path);
+}
+uint32_t SrcTell() { return mem_open ? mem_pos : plat->FileTell(); }
+void     SrcClose()
+{
+    if(mem_open)
+        mem_open = false;
+    else
+        plat->FileClose();
+}
+
 int32_t PlatRead(void* ctx, void* dst, uint32_t n)
 {
+    if(mem_open)
+    {
+        uint32_t k = n < mem_size - mem_pos ? n : mem_size - mem_pos;
+        memcpy(dst, mem_file + mem_pos, k);
+        mem_pos += k;
+        return (int32_t)k;
+    }
     return ((Platform*)ctx)->FileRead(dst, n);
 }
 
 bool PlatSkip(void* ctx, uint32_t n)
 {
+    if(mem_open)
+    {
+        if(n > mem_size - mem_pos)
+            return false;
+        mem_pos += n;
+        return true;
+    }
     return ((Platform*)ctx)->FileSkip(n);
 }
 
@@ -564,6 +610,8 @@ void FinishJob(bool ok)
     else
         snprintf(slot_path[t], kPathLen, "@k%d", BuiltInKitFor(t));
     eng->ReleaseSlotLock(t);
+    if(IsT95Path(cur_job.path))
+        XferLoaded(ok);
     if(cur_job.audition && !eng->Playing())
         eng->Audition(t);
     load_state = kLoadIdle;
@@ -671,7 +719,7 @@ void LoaderStep(uint32_t now)
                 FinishJob(true);
                 return;
             }
-            if(!sd_ok || !plat->FileOpen(cur_job.path))
+            if(!SrcOpen(cur_job.path))
             {
                 Log("can't open %s", cur_job.path);
                 eng->RenderBuiltInSound(t, BuiltInKitFor(t));
@@ -682,7 +730,7 @@ void LoaderStep(uint32_t now)
             if(!wav.Begin(src))
             {
                 Log("not a playable wav: %s", cur_job.path);
-                plat->FileClose();
+                SrcClose();
                 eng->RenderBuiltInSound(t, BuiltInKitFor(t));
                 FinishJob(false);
                 return;
@@ -704,11 +752,11 @@ void LoaderStep(uint32_t now)
                memory: SDMMC DMA can't write to unaligned addresses */
             uint32_t scratch_size = 0;
             uint8_t* scratch      = plat->Scratch(&scratch_size);
-            uint32_t o            = plat->FileTell() & 3;
+            uint32_t o            = SrcTell() & 3;
             bool     more = wav.Step(scratch + o, scratch_size - 4, s.data, s.capacity);
             if(more)
                 return;
-            plat->FileClose();
+            SrcClose();
             s.rate = (float)wav.SampleRate() / eng->SampleRate();
             __sync_synchronize(); // sample data visible before the length
             s.length = wav.Written();
@@ -1007,6 +1055,7 @@ void ReleaseAllHeld()
     copy_held = false;
 }
 
+#include "xfer.h"
 #include "sets.h"
 
 /** Knobs of one track back to default; fader, mute and solo stay */
@@ -2350,7 +2399,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 8;
+constexpr int kReportVersion = 9;
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
 uint8_t  rep_track[kTracks][13];
@@ -2863,6 +2912,7 @@ void BoxPoll(uint32_t now)
         FullReset(now);
     }
     LoaderStep(now);
+    XferPoll(now);
     SetsPoll(now);
     BrowseStep(now);
     UpdateLeds(now);
@@ -2982,5 +3032,7 @@ bool BoxUiCommand(const char* c, uint32_t now)
         return false;
     return true;
 }
+
+void BoxFileFrame(const char* frame, uint32_t now) { XferFrame(frame, now); }
 
 } // namespace ab

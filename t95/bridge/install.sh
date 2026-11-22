@@ -21,6 +21,9 @@ if [ "${1:-}" = "--remove" ]; then
 fi
 
 python3 -c 'import asyncio, termios' 2>/dev/null || { echo "needs python3: sudo apt install python3"; exit 1; }
+# ffmpeg converts samples (MP3, FLAC, AIFF, 24-bit...) to what the Daisy plays
+command -v ffmpeg >/dev/null || { apt-get update && apt-get install -y --no-install-recommends ffmpeg; } || \
+  echo "note: no ffmpeg; samples other than WAV can't be sent"
 
 mkdir -p "$DEST"
 install -m 644 "$HERE/apcbox_bridge.py" "$DEST/apcbox_bridge.py"
@@ -34,6 +37,8 @@ udevadm trigger --action=add --subsystem-match=tty
 udevadm trigger --action=add --subsystem-match=rc
 udevadm trigger --action=add --subsystem-match=lirc
 udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=0483
+udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=vfat
+udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=exfat
 systemctl daemon-reload
 systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service
