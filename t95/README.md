@@ -36,6 +36,8 @@ features already deployed on the T95.
 | Audio | User reports enumerated H616 analogue, SPDIF and HDMI cards; enumeration is not a playback/latency qualification |
 | IR | User verified receiver with `ir-keytable`: extended NEC (`necx`), remote address `0x2fe` |
 | Daisy link | Daisy on USB1: bus 5, full-speed OHCI, alone. CDC `ttyACM0` and UAC card `ApcBox`; `arecord` showed signal at 48 kHz stereo |
+| Controllers via T95 | 2026-11-22, v13.6: APC40 and LPK25 on the USB0 hub, found by the bridge, identified by the Daisy (APC40 driving, LPK25 keys). APC40 LEDs lit through the T95; 635 APC40 and 29 LPK25 messages reached the Daisy, none dropped. **Sound not yet checked.** v13.5 dropped T95 controllers at once (unsigned time compare), fixed in v13.6 |
+| Ping T95 to Daisy | 2026-11-22, 291 pings: min 0.87, avg 3.1, p99 42.6, max 55.7 ms round trip. The spikes are unexplained; v13.6 logs slow main-loop parts (`loop:` lines) to tell Daisy-side from T95-side. Not yet read |
 | Bridge | 2026-11-22, v13.3 Daisy: bridge running under systemd, found the Daisy by serial, about 83 lines/s for 4.5 min with 0 bad lines; page live over Wi-Fi with APC40 events. Short run only: no long-run, load or latency figures yet |
 | Second socket | USB0: an LPK25 enumerated on bus 8 (OHCI). The USB 2.0 side of that socket is not yet confirmed |
 | MIDI | User verified raw MIDI, e.g. an LPK25 at `/dev/snd/midiC3D0`. `CONFIG_SND_RAWMIDI=y`; ALSA sequencer support absent in this build |
@@ -185,8 +187,9 @@ same port for the standalone APC40 host; role selection needs an explicit design
    Preserve the existing parser and direct Web Serial path. Support reconnect,
    multiple browsers and bounded buffering. Show Daisy link health separately
    from browser-to-bridge connectivity.
-2. **Versioned MIDI/control transport.** Built in firmware v13.5 and the
-   bridge, desktop-tested; not yet run on the rig. Add framed MIDI input routed into the
+2. **Versioned MIDI/control transport.** Built (v13.5/v13.6 and the bridge);
+   APC40 and LPK25 work through the T95 (LEDs, messages). Open: sound check,
+   the 40-55 ms ping spikes. Add framed MIDI input routed into the
    existing Daisy handler and explicit outbound MIDI for controller LEDs.
    Identify controller sources, define ownership and disconnect behaviour, and
    prevent payload bytes from triggering legacy `R`/`B` commands.
