@@ -23,8 +23,11 @@ keepalives (ESC K) and pings (ESC P). Python 3 standard library only.
   /state        JSON: modules, last module, IR profiles; POST /select,
                 /settings, /ir/learn, /ir/forget, /ir/cancel change it
 
-IR remote: the kernel decodes the remote (rc core, NEC) into input events;
-the bridge reads the raw scancodes (MSC_SCAN), so no keymap is involved.
+IR remote: the kernel decodes the remote (rc core, NEC). The bridge reads
+scancodes from the lirc device, which marks repeat frames and the protocol:
+a press starts only on a fresh NEC frame, so stray repeats (which carry the
+previous button's code) and other decoders' noise are ignored. No keymap is
+involved. Without lirc it falls back to the input device (MSC_SCAN).
 Buttons are bound to actions per profile (one per view, plus "all"), learnt
 from the setup page, and sent to browsers as "ir" events for their view.
 
@@ -67,6 +70,12 @@ PING_KEEP = 300
 # IR remote
 EV_MSC, MSC_SCAN = 0x04, 0x04
 EVIOCGRAB = 0x40044590    # _IOW('E', 0x90, int)
+LIRC_SET_REC_MODE = 0x40046912   # _IOW('i', 0x12, __u32)
+LIRC_MODE_SCANCODE = 8
+LIRC_SCANCODE = struct.Struct("QHHIQ")   # struct lirc_scancode, 24 bytes
+LIRC_FLAG_REPEAT = 2
+NEC_PROTOS = {9, 10, 11}  # RC_PROTO_NEC, NECX, NEC32 (the T95 remote is NECX)
+IMON_NOISE = 0x7FFFFFFF   # what the imon decoder makes of noise on the T95
 IR_EVENT = struct.Struct("llHHi")    # struct input_event (64-bit time)
 IR_RELEASE_S = 0.2        # no repeat frame for this long: button released (NEC repeats ~110 ms)
 IR_HOLD_S = 0.5
@@ -434,15 +443,19 @@ class State:
 
 
 def find_ir(root=""):
-    """(event device, name) of the first IR receiver (rc core) or (None, None)"""
+    """(input event device, lirc device or None, name) of the first IR
+    receiver (rc core), or (None, None, None)"""
     for ev in sorted(glob.glob(root + "/sys/class/rc/rc*/input*/event*")):
         name = ""
         try:
             name = open(os.path.join(os.path.dirname(ev), "name")).read().strip()
         except OSError:
             pass
-        return "/dev/input/" + os.path.basename(ev), name
-    return None, None
+        rc = os.path.dirname(os.path.dirname(ev))
+        lirc = sorted(glob.glob(os.path.join(rc, "lirc*")))
+        return ("/dev/input/" + os.path.basename(ev),
+                "/dev/" + os.path.basename(lirc[0]) if lirc else None, name)
+    return None, None, None
 
 
 class IrReader:
@@ -454,10 +467,13 @@ class IrReader:
 
     def __init__(self, bridge):
         self.b = bridge
-        self.fd = None
+        self.fd = None              # what we read: lirc, or the input device
+        self.grab_fd = None         # the input device, held only to keep its keys from the kiosk
         self.path = None
+        self.lirc = False
         self.name = None
         self.buf = b""
+        self.strays = 0
         self.scan = None            # button currently down
         self.down_t = 0.0
         self.held = False
@@ -469,7 +485,8 @@ class IrReader:
         self.learning = None        # (profile, action, press, deadline)
 
     def info(self):
-        return {"device": self.path, "name": self.name, "presses": self.presses,
+        return {"device": self.path, "source": "lirc" if self.lirc else "input",
+                "name": self.name, "presses": self.presses, "strays": self.strays,
                 "last_scan": None if self.last_scan is None else "%x" % self.last_scan,
                 "learning": None if not self.learning else
                 {"profile": self.learning[0], "action": self.learning[1], "press": self.learning[2]}}
@@ -490,14 +507,41 @@ class IrReader:
             self.close()
             return
         self.buf += data
-        while len(self.buf) >= IR_EVENT.size:
-            _, _, typ, code, value = IR_EVENT.unpack_from(self.buf)
-            self.buf = self.buf[IR_EVENT.size:]
-            if typ == EV_MSC and code == MSC_SCAN:
-                self.frame(value & 0xFFFFFFFF)
+        rec = LIRC_SCANCODE if self.lirc else IR_EVENT
+        while len(self.buf) >= rec.size:
+            fields = rec.unpack_from(self.buf)
+            self.buf = self.buf[rec.size:]
+            if self.lirc:
+                _, flags, proto, _, scan = fields
+                if proto not in NEC_PROTOS:
+                    self.strays += 1
+                    continue
+                self.frame(scan & 0xFFFFFFFF, bool(flags & LIRC_FLAG_REPEAT))
+            else:
+                _, _, typ, code, value = fields
+                if typ == EV_MSC and code == MSC_SCAN:
+                    if value & 0xFFFFFFFF == IMON_NOISE:
+                        self.strays += 1
+                        continue
+                    self.frame(value & 0xFFFFFFFF, None)
 
-    def frame(self, scan):
+    def drain_grab(self):
+        try:
+            os.read(self.grab_fd, 4096)     # held only for the grab
+        except OSError:
+            pass
+
+    def frame(self, scan, repeat):
+        """repeat: True/False from lirc, None when unknown (input device)"""
         loop = asyncio.get_running_loop()
+        if repeat:
+            if scan != self.scan:
+                # A repeat with no button down carries the previous button's
+                # code (rc core): noise. It mustn't start a press, or learn.
+                self.strays += 1
+                return
+        elif repeat is False and self.scan is not None:
+            self.release()          # a fresh frame: a new press, even of the same button
         self.last_scan = scan
         if scan != self.scan:
             if self.scan is not None:
@@ -576,16 +620,58 @@ class IrReader:
         return None
 
     def close(self):
+        loop = asyncio.get_running_loop()
+        for fd in (self.fd, self.grab_fd):
+            if fd is not None:
+                loop.remove_reader(fd)
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
         if self.fd is not None:
-            asyncio.get_running_loop().remove_reader(self.fd)
-            try:
-                os.close(self.fd)
-            except OSError:
-                pass
             log.info("IR receiver %s gone", self.path)
         self.release()
-        self.fd = None
+        self.fd = self.grab_fd = None
         self.path = None
+        self.lirc = False
+
+    def open(self, ev, lirc, name):
+        loop = asyncio.get_running_loop()
+        if ev:
+            try:
+                g = os.open(ev, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    # Exclusive: if the kernel maps the remote to keys, the kiosk's
+                    # compositor would see them too and every press would act twice
+                    fcntl.ioctl(g, EVIOCGRAB, 1)
+                except OSError:
+                    pass            # not an evdev device (tests)
+                if lirc:
+                    self.grab_fd = g
+                    loop.add_reader(g, self.drain_grab)
+                else:
+                    self.fd, self.path, self.lirc = g, ev, False
+            except OSError as e:
+                log.warning("open %s: %s", ev, e)
+        if lirc:
+            try:
+                fd = os.open(lirc, os.O_RDONLY | os.O_NONBLOCK)
+                try:
+                    fcntl.ioctl(fd, LIRC_SET_REC_MODE, struct.pack("I", LIRC_MODE_SCANCODE))
+                except OSError:
+                    pass            # not a lirc device (tests)
+                if self.fd is not None:
+                    os.close(self.fd)
+                self.fd, self.path, self.lirc = fd, lirc, True
+            except OSError as e:
+                log.warning("open %s: %s (using the input device)", lirc, e)
+        if self.fd is None and self.grab_fd is not None:   # lirc failed: read the input device
+            loop.remove_reader(self.grab_fd)
+            self.fd, self.grab_fd, self.path, self.lirc = self.grab_fd, None, ev, False
+        if self.fd is not None:
+            self.name, self.buf = name, b""
+            loop.add_reader(self.fd, self.on_readable)
+            log.info("IR receiver %s (%s, %s)", self.path, name, "lirc" if self.lirc else "input device")
 
     async def task(self):
         loop = asyncio.get_running_loop()
@@ -594,24 +680,15 @@ class IrReader:
                 self.learning = None
                 self.b.broadcast(sse_event("irlearned", {"timeout": True}))
             if self.fd is None:
-                if self.b.args.ir:
-                    path, name = (self.b.args.ir if os.path.exists(self.b.args.ir) else None), "test"
+                a = self.b.args
+                if a.ir or a.ir_lirc:               # tests: fixed paths
+                    ev = a.ir if a.ir and os.path.exists(a.ir) else None
+                    lirc = a.ir_lirc if a.ir_lirc and os.path.exists(a.ir_lirc) else None
+                    name = "test"
                 else:
-                    path, name = find_ir()
-                if path:
-                    try:
-                        self.fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-                        try:
-                            # Exclusive: if the kernel maps the remote to keys, the kiosk's
-                            # compositor would see them too and every press would act twice
-                            fcntl.ioctl(self.fd, EVIOCGRAB, 1)
-                        except OSError:
-                            pass        # not an evdev device (tests)
-                        self.path, self.name, self.buf = path, name, b""
-                        loop.add_reader(self.fd, self.on_readable)
-                        log.info("IR receiver %s (%s)", path, name)
-                    except OSError as e:
-                        log.warning("open %s: %s", path, e)
+                    ev, lirc, name = find_ir()
+                if ev or lirc:
+                    self.open(ev, lirc, name)
             await asyncio.sleep(RESCAN_S)
 
 
@@ -1207,6 +1284,7 @@ def main(argv=None):
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
+    ap.add_argument("--ir-lirc", metavar="PATH", help="IR lirc device instead of finding it under /sys")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,

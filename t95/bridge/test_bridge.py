@@ -962,5 +962,65 @@ class IrTest(unittest.TestCase):
         self.assertEqual(errors, [], "script errors")
 
 
+
+class IrLircTest(IrTest):
+    """The same remote tests through the lirc device (repeat-flagged frames),
+    plus the noise seen on the T95: imon fakes and stray repeats"""
+
+    LIRC = struct.Struct("QHHIQ")
+
+    @classmethod
+    def start(cls):
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+             "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", cls.state, "--ir-lirc", cls.fifo],
+            stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["ir"]["device"] == cls.fifo and h["ir"]["source"] == "lirc", 10)
+
+    def rec(self, scan, repeat=False, proto=10):
+        os.write(self.w, self.LIRC.pack(0, 2 if repeat else 0, proto, 0, scan))
+
+    def press(self, scan, secs=0.0):
+        end = time.time() + secs
+        self.rec(scan)
+        while time.time() < end:
+            time.sleep(0.11)
+            self.rec(scan, repeat=True)
+        time.sleep(0.35)
+
+    def test_i8_learn_through_the_t95_noise(self):
+        """The 2026-11-22 trace: imon 0x7fffffff fakes and a lone repeat of the
+        previous button arrive between presses. Each learn must get its own
+        button, and earlier rows must keep theirs."""
+        prof = "selector"
+        actions = ["left", "right", "back", "menu"]
+        codes = [0x2FE16, 0x2FE50, 0x2FE51, 0x2FE1A]
+        prev = None
+        for a, code in zip(actions, codes):
+            self.assertEqual(self.post("/ir/learn", {"profile": prof, "action": a})[0], 200)
+            time.sleep(0.3)
+            self.rec(0x7FFFFFFF, proto=23)              # imon noise
+            if prev is not None:
+                self.rec(prev, repeat=True)             # lone repeat: previous button's code
+            time.sleep(0.3)
+            self.assertIsNotNone(self.state_now()["ir"]["learning"], "noise was learnt for " + a)
+            self.press(code, 0.25)
+            prev = code
+        binds = self.state_now()["ir"]["profiles"][prof]
+        for a, code in zip(actions, codes):
+            self.assertEqual(binds.get(a + "/tap"), code, a)
+        self.assertGreaterEqual(BridgeTest.health()["ir"]["strays"], 7)
+
+    def test_i9_fresh_frame_is_a_new_press_of_the_same_button(self):
+        c = SseClient(self.http, path="/events?view=selector")
+        self.assertTrue(c.wait_for(lambda c: c.events))
+        # ok (all) pressed twice, quickly: two fresh frames = two taps
+        self.rec(0x2FE0B); time.sleep(0.05); self.rec(0x2FE0B, repeat=True); time.sleep(0.08)
+        self.rec(0x2FE0B); time.sleep(0.4)
+        self.assertTrue(c.wait_for(lambda c: self.irs(c).count("ok") == 2), self.irs(c))
+        c.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

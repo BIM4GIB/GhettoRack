@@ -86,9 +86,14 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 - `/` is the selector (`t95/ui/selector.html`): modules (ApcBox ready, the
   others later), the remote setup, the start-up countdown. `/apcbox` is the
   ApcBox page; under the bridge it has a "Modules" button back.
-- The IR receiver is found under `/sys/class/rc/rc*/input*/event*`, opened
-  exclusively (so the kiosk doesn't also see its keys) and read for raw
-  scancodes (`MSC_SCAN`). The udev rule turns NEC decoding on.
+- The IR receiver is found under `/sys/class/rc/`. The bridge reads decoded
+  scancodes from its lirc device (`/dev/lirc0`), which marks repeat frames
+  and the protocol: a press starts only on a fresh NEC frame. On the T95 the
+  kernel also produced imon noise (`0x7fffffff`) and lone repeats carrying
+  the previous button's code, which made learning bind the wrong buttons;
+  those are now ignored (`strays` in `/health`). The input device is held
+  exclusively so the kiosk doesn't also see the remote as keys; without lirc
+  it's read instead (`MSC_SCAN`). The udev rule leaves only NEC decoding on.
 - A button is bound per profile: `all`, `selector`, `apcbox`. A view's own
   profile wins; `all` fills the gaps. Each button can have a tap action and
   a hold action (half a second). Arrows and volume act on press and repeat

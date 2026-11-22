@@ -32,6 +32,7 @@ install -m 644 "$HERE/apcbox-bridge.service" /etc/systemd/system/apcbox-bridge.s
 udevadm control --reload
 udevadm trigger --action=add --subsystem-match=tty
 udevadm trigger --action=add --subsystem-match=rc
+udevadm trigger --action=add --subsystem-match=lirc
 systemctl daemon-reload
 systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service

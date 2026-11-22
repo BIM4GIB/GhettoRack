@@ -3,7 +3,9 @@
 # The bridge finds the Daisy by VID/PID itself; the link is for people.
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", SYMLINK+="apcbox", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
 
-# IR receiver: make sure the kernel decodes NEC (the T95 remote is extended
-# NEC, address 0x2fe; "nec" covers NEC, NECX and NEC32). The bridge reads the
-# scancodes from the input device; no keymap needed.
-ACTION=="add", SUBSYSTEM=="rc", RUN+="/bin/sh -c 'echo +nec > /sys/class/rc/%k/protocols'"
+# IR receiver: NEC decoding only (the T95 remote is extended NEC, address
+# 0x2fe; "nec" covers NEC, NECX and NEC32). Only: the imon decoder, on by
+# default, turned noise into fake 0x7fffffff presses on the T95.
+ACTION=="add", SUBSYSTEM=="rc", RUN+="/bin/sh -c 'echo nec > /sys/class/rc/%k/protocols'"
+# The bridge reads decoded scancodes from lirc (it marks repeats)
+SUBSYSTEM=="lirc", GROUP="input", MODE="0660"
