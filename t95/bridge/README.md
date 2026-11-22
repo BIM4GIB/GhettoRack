@@ -21,7 +21,8 @@ Python 3 standard library only. Files:
 
 | File | What |
 |---|---|
-| `apcbox_bridge.py` | The bridge |
+| `apcbox_bridge.py` | Entry point (the service runs it) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
 | `99-apcbox.rules` | udev: `/dev/apcbox` link, `dialout` access, ModemManager keeps off it |

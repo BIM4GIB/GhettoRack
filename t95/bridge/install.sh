@@ -27,6 +27,9 @@ command -v ffmpeg >/dev/null || { apt-get update && apt-get install -y --no-inst
 
 mkdir -p "$DEST"
 install -m 644 "$HERE/apcbox_bridge.py" "$DEST/apcbox_bridge.py"
+rm -rf "$DEST/rackbridge"
+install -d "$DEST/rackbridge"
+install -m 644 "$HERE"/rackbridge/*.py "$DEST/rackbridge/"
 install -m 644 "$REPO/daisy/ui/apcbox-ui.html" "$DEST/apcbox-ui.html"
 install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
 install -m 644 "$HERE/99-apcbox.rules" /etc/udev/rules.d/99-apcbox.rules
