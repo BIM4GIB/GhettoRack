@@ -1,0 +1,451 @@
+<title>ApcBox Wiring Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column, diagrams in scrollable frames; wire colours carry the function */
+:root {
+  --bg: #f3f5f2; --panel: #ffffff; --fg: #1b2420; --muted: #5b6862; --line: #d5ddd8; --board: #1f3a2f; --board-fg: #e8efe9; --pad: #c9a64a;
+  --pwr: #d23c32; --gnd: #3f4a46; --usb: #0f8fa8; --sd: #d9731a; --oled: #b38b00; --tft: #2f62d6; --enc: #8a45c4; --audio: #23934f; --free: #aab5af;
+  --warn-bg: #fff4e0; --warn-fg: #7a4a00; --code-bg: #e9eeea;
+  --display: "Instrument Sans", system-ui, sans-serif; --body: "Instrument Sans", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111614; --panel: #18201c; --fg: #e3ebe6; --muted: #93a39b; --line: #2c3833; --board: #0f2a20; --board-fg: #d8e6dc; --pad: #d6b354;
+  --pwr: #ff6b5e; --gnd: #9aa8a2; --usb: #36c1dc; --sd: #ff9a45; --oled: #e6c13a; --tft: #6f97ff; --enc: #bb84f0; --audio: #4fcf82; --free: #4a5852;
+  --warn-bg: #2e2412; --warn-fg: #f2c879; --code-bg: #202a25; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111614; --panel: #18201c; --fg: #e3ebe6; --muted: #93a39b; --line: #2c3833; --board: #0f2a20; --board-fg: #d8e6dc; --pad: #d6b354;
+  --pwr: #ff6b5e; --gnd: #9aa8a2; --usb: #36c1dc; --sd: #ff9a45; --oled: #e6c13a; --tft: #6f97ff; --enc: #bb84f0; --audio: #4fcf82; --free: #4a5852;
+  --warn-bg: #2e2412; --warn-fg: #f2c879; --code-bg: #202a25; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; display: grid; gap: 40px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 2rem; font-weight: 700; }
+h2 { font-size: 1.4rem; font-weight: 700; }
+h3 { font-size: 1.05rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+section { display: grid; gap: 16px; min-width: 0; }
+.eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+header { display: grid; gap: 10px; }
+nav { display: flex; flex-wrap: wrap; gap: 8px; }
+nav a { font-size: 13px; color: var(--fg); text-decoration: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; background: var(--panel); }
+nav a:hover, nav a:focus-visible { border-color: var(--fg); outline: none; }
+code, .mono { font-family: var(--mono); font-size: .88em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow-x: auto; margin: 0; font-family: var(--mono); font-size: 13px; line-height: 1.5; }
+.frame { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; overflow-x: auto; min-width: 0; }
+.frame svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.steps { display: grid; gap: 14px; counter-reset: s; padding: 0; margin: 0; list-style: none; }
+.steps > li { display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+.steps > li::before { counter-increment: s; content: counter(s); width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-family: var(--mono); font-size: 14px; }
+.steps > li > div { display: grid; gap: 8px; min-width: 0; }
+.note { background: var(--warn-bg); color: var(--warn-fg); border-radius: 8px; padding: 10px 14px; font-size: 14px; max-width: 80ch; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.card .frame { border: 0; padding: 0; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td.pin { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; color: #fff; font-weight: 600; white-space: nowrap; }
+ul.tight { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.svgtext { font-family: var(--mono); }
+@media (max-width: 520px) { h1 { font-size: 1.6rem; } }
+</style>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">ApcBox · firmware v12 · Daisy Seed</div>
+  <h1>ApcBox Wiring Guide</h1>
+  <p>Setting up a fresh Seed, and where every wire goes. Pin numbers are the Seed's physical pins (1 to 40), with the libDaisy name after them. Wire colours follow the function, the same in every diagram.</p>
+  <nav>
+    <a href="#setup">Fresh Seed</a><a href="#pinout">Seed pinout</a><a href="#power">Power &amp; ground</a><a href="#usb">APC40</a><a href="#sd">microSD</a><a href="#tft">Screen</a><a href="#enc">Encoder</a><a href="#oled">OLED</a><a href="#audio">Audio</a><a href="#table">Pin table</a><a href="#check">Checks</a>
+  </nav>
+</header>
+
+<section id="setup">
+  <div class="eyebrow">Step by step</div>
+  <h2>Setting up a fresh Seed</h2>
+  <p>The Mac side is already set up (toolchain, <code>dfu-util</code>, <code>~/dev/DaisyExamples</code>). A new Seed only needs the Daisy bootloader and then ApcBox. Plug in <b>only the Seed you're flashing</b>: the script takes the first Daisy it finds.</p>
+  <ol class="steps">
+    <li><div>
+      <h3>Unpack v12</h3>
+      <p>Unzip <code>ApcBox-v12-sets.zip</code> into <code>~/dev/DaisyExamples/seed/</code> so it replaces the <code>ApcBox</code> folder. Your <code>tools/</code> folder stays. The zip has a ready-built <code>build/ApcBox.bin</code>. To rebuild it yourself:</p>
+      <pre>cd ~/dev/DaisyExamples/seed/ApcBox && make clean && make</pre>
+    </div></li>
+    <li><div>
+      <h3>Put the Seed in the chip's own USB mode</h3>
+      <p>USB-C to the Mac. Press and hold <b>BOOT</b>, press <b>RESET</b>, release RESET, then release BOOT. This starts the STM32's built-in loader, there on every Seed out of the box. Check it with <code>dfu-util -l</code>: it should list <code>@Internal Flash</code>. (Not the same as tapping RESET and then pressing BOOT while the LED pulses: that holds the Daisy bootloader open, which a new Seed doesn't have yet.)</p>
+    </div></li>
+    <li><div>
+      <h3>Install the Daisy bootloader</h3>
+      <pre>sh ~/dev/DaisyExamples/seed/ApcBox/flash.sh</pre>
+      <p>The script sees the chip's mode and writes the Daisy bootloader (<code>dsy_bootloader_v6_4-intdfu-2000ms.bin</code>) into internal flash. ApcBox needs it: the firmware runs from the Seed's QSPI flash and the bootloader starts it.</p>
+    </div></li>
+    <li><div>
+      <h3>Replug, then flash ApcBox</h3>
+      <p>Unplug and replug the USB-C. The LED pulses for about 2 seconds while the bootloader waits. Run the same command again:</p>
+      <pre>sh ~/dev/DaisyExamples/seed/ApcBox/flash.sh</pre>
+      <p>It waits up to 20 s for the bootloader and writes ApcBox at <code>0x90040000</code>. An <code>Error 74</code> after "File downloaded successfully" is normal. If it doesn't catch the pulse, tap RESET and press BOOT while the LED pulses: that holds the bootloader open.</p>
+    </div></li>
+    <li><div>
+      <h3>Check it's alive</h3>
+      <p>LED flashing fast: ApcBox is running, no APC40 on the USB-A socket yet. Slow: APC40 found. Open <code>ui/apcbox-ui.html</code> in Chrome and connect: you should get the log and the "V 7" version line. From now on <code>flash.sh</code> works with no buttons: it sends "B" over the serial port and ApcBox jumps to the bootloader itself. Close the monitor page first, it holds the port.</p>
+    </div></li>
+    <li><div>
+      <h3>Card</h3>
+      <p>A second card: format it FAT32 with an MBR partition map (Disk Utility: MS-DOS (FAT), Master Boot Record) named <code>APCBOX</code>, then run <code>sdprep.py --go</code>. Or move the card over from the first box: sets, kits and samples all live on it.</p>
+    </div></li>
+  </ol>
+  <div class="note">Both Seeds on the Mac at once: the monitor page asks which port to use, but <code>flash.sh</code> and <code>dfu-util</code> take the first one. Unplug the other Seed before flashing.</div>
+</section>
+
+<section id="pinout">
+  <div class="eyebrow">Top view, USB-C at the top</div>
+  <h2>Seed pinout</h2>
+  <p>Coloured pins are the ones ApcBox uses. Grey ones are free. Pin 1 is top left, pin 20 bottom left, pin 21 bottom right, pin 40 top right.</p>
+  <div class="legend" id="legend"></div>
+  <div class="frame"><svg id="seed" viewBox="0 0 860 760" role="img" aria-label="Daisy Seed pinout with ApcBox connections"></svg></div>
+</section>
+
+<section id="power">
+  <div class="eyebrow">Wire this first</div>
+  <h2>Power and ground</h2>
+  <p>The Seed runs from its USB-C (the Mac). A 5 V breadboard supply feeds the screen's backlight and the USB-A socket's VBUS. The APC40 has its own adapter. Every ground meets at one rail.</p>
+  <div class="frame"><svg id="pwr" viewBox="0 0 820 330" role="img" aria-label="Power and ground wiring"></svg></div>
+  <div class="note">One flaky ground wire was what made the first box flash and lose its OLED and SD. Use short, solid ground jumpers and check them with a meter first. Never put 5 V on pin 38: it's the Seed's 3.3 V output, not an input.</div>
+</section>
+
+<section id="usb">
+  <div class="eyebrow">USB host</div>
+  <h2>APC40 on a USB-A socket</h2>
+  <div class="grid2">
+    <div class="card"><div class="frame"><svg id="d-usb"></svg></div></div>
+    <div class="card">
+      <ul class="tight">
+        <li>A USB-A <b>female</b> breakout. The APC40's normal USB cable plugs into it.</li>
+        <li>D− and D+ go straight to pins 36 and 37. Keep these two wires short and next to each other.</li>
+        <li>VBUS comes from the 5 V supply, not from the Seed. The APC40 still needs its own power adapter.</li>
+        <li>Wrong way round (D− and D+ swapped): the LED stays on fast flash, nothing is found.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="sd">
+  <div class="eyebrow">SDMMC1, 1-bit mode</div>
+  <h2>microSD</h2>
+  <div class="grid2">
+    <div class="card"><div class="frame"><svg id="d-sd"></svg></div></div>
+    <div class="card">
+      <ul class="tight">
+        <li>Uses the SD card's native mode, not SPI, but a cheap "SPI" module works: its labels just mean different things (MOSI = CMD, MISO = DAT0, SCK = CLK, CS = DAT3).</li>
+        <li>CS has to be <b>tied to 3.3 V</b> so the card stays in SD mode.</li>
+        <li>VCC: plain breakout with no chips on it, 3.3 V (pin 38). A module with a regulator chip on it, 5 V from the supply. If you're not sure, use 3.3 V.</li>
+        <li>If the log says code 3 (no card answering): add 10 kΩ pull-ups from CMD and DAT0 to 3.3 V, and shorten the wires.</li>
+        <li>Code 13: the card isn't FAT32. exFAT doesn't work.</li>
+        <li>Hot-swap works: pull it, put it back, the box remounts within about 2 s.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="tft">
+  <div class="eyebrow">SunFounder 3.5" IPS · ST7796U · XPT2046 touch · SPI1</div>
+  <h2>Screen and touch</h2>
+  <p>The screen has a Raspberry Pi socket. Pin numbers on the left are the Pi header's numbering, as printed on the screen's board. ApcBox uses 11 of the 40: 8 for the picture, 3 more for touch. Touch shares the clock and data-in lines with the picture and has its own chip select, data-out and interrupt wires.</p>
+  <div class="grid2">
+    <div class="card"><div class="frame"><svg id="d-tft"></svg></div></div>
+    <div class="card">
+      <h3>Which header pins</h3>
+      <div class="frame"><svg id="pihdr" viewBox="0 0 340 300" role="img" aria-label="Raspberry Pi header with used pins"></svg></div>
+      <p style="font-size:14px;color:var(--muted)">Pin positions from SunFounder's own hardware page for this screen. Touch: on the first touch with no saved calibration, a calibration screen comes up. Tap the three crosses (a fingernail works best). It's saved to the card as <code>apcbox/touch.bin</code>. To redo it later: CALIBRATE TOUCH in the SYSTEM view, or hold the encoder down for 3 seconds.</p>
+    </div>
+  </div>
+  <div class="note">Backlight on but the picture black: the panel isn't getting its start-up commands. This board has shift registers behind the header, so the firmware sends 16-bit words by default (log: "screen: 16-bit bus"). For a plain SPI screen, hold the encoder push while tapping RESET to switch to 8-bit (saved on the card). Otherwise check CS, DC and RST. Picture mirrored, upside down, or red and blue swapped: change <code>kMadctl</code> in <code>tft.h</code>. Colours look like a negative: set <code>kInvert</code> to false.</div>
+</section>
+
+<section id="enc">
+  <div class="eyebrow">EC11 rotary encoder + back button</div>
+  <h2>Encoder</h2>
+  <div class="grid2">
+    <div class="card"><div class="frame"><svg id="d-enc"></svg></div></div>
+    <div class="card">
+      <ul class="tight">
+        <li>Breakout labels vary: CLK = A, DT = B, SW = push.</li>
+        <li><b>+ goes to 3.3 V, never 5 V.</b> The breakout's pull-ups would put 5 V on the Seed's pins.</li>
+        <li>Turning backwards: swap the A and B wires.</li>
+        <li>Back button: a separate momentary switch, not part of the encoder. One leg to pin 27, the other to ground. No resistor needed. The encoder's own GND goes to the ground rail (pin 40), not pin 27.</li>
+        <li>Turn: change. Push: next view (or the action on the sets screen). Hold push 0.7 s or press back: back.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="oled">
+  <div class="eyebrow">0.96" SSD1306 · I2C1</div>
+  <h2>OLED</h2>
+  <div class="grid2">
+    <div class="card"><div class="frame"><svg id="d-oled"></svg></div></div>
+    <div class="card">
+      <ul class="tight">
+        <li>Optional now that the big screen exists. It mirrors the main info, and the sets list when the sets screen is open.</li>
+        <li>Address 0x3C or 0x3D, the firmware tries both.</li>
+        <li>Log says "no reply": SDA and SCL swapped, or VCC/GND loose. Most modules have pull-ups on board.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="audio">
+  <div class="eyebrow">Codec on the Seed</div>
+  <h2>Audio out and in</h2>
+  <div class="grid2">
+    <div class="card"><h3>Out: 3.5 mm stereo jack</h3><div class="frame"><svg id="d-aout"></svg></div><p style="font-size:14px">Line level, for a mixer, powered speakers or an audio interface.</p></div>
+    <div class="card"><h3>In: live sampling</h3><div class="frame"><svg id="d-ain"></svg></div><p style="font-size:14px">Line level. A mic needs a preamp first: the Focusrite's line out, or a MAX9814 mic board (its output to pin 16, its VDD to 3.3 V).</p></div>
+  </div>
+  <p>The Seed's USB-C also carries the audio to the Mac or iPad as a USB sound card. Nothing to wire for that.</p>
+</section>
+
+<section id="table">
+  <div class="eyebrow">Everything in one place</div>
+  <h2>Pin table</h2>
+  <div class="tablewrap"><table id="pintable"><thead><tr><th>Pin</th><th>Name</th><th>Goes to</th><th>Part</th><th>Notes</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section id="check">
+  <div class="eyebrow">After wiring, before the APC40</div>
+  <h2>Checks</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>With a meter, power off</h3>
+      <ul class="tight">
+        <li>Pin 40 to supply GND: 0 Ω. Pin 20 (AGND) to pin 40: should read close to 0 Ω.</li>
+        <li>3.3 V rail to GND, and 5 V rail to GND: no short.</li>
+        <li>No 5 V wire anywhere near pins 38, 21 or the encoder's +.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Power on, monitor page open</h3>
+      <ul class="tight">
+        <li><code>OLED found at 0x3C</code></li>
+        <li><code>screen: SPI up</code>, and the screen shows the STEPS view</li>
+        <li>No "SD not mounted" line. Kits load, the sets screen (SHIFT + DETAIL VIEW) lists the card's sets</li>
+        <li>Turn the encoder: the view changes. Hold its push: back to STEPS</li>
+        <li>Touch the screen: the calibration crosses come up. After that, tapping a view dot in the top right switches view</li>
+        <li>Plug in the APC40: LED goes to slow flash, the APC40 lights up</li>
+      </ul>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+const C = n => `var(--${n})`;
+const KIND = {
+  pwr:  ["Power", "pwr"], gnd: ["Ground", "gnd"], usb: ["APC40 USB", "usb"], sd: ["microSD", "sd"],
+  tft:  ["Screen", "tft"], enc: ["Encoder / back", "enc"], oled: ["OLED", "oled"], audio: ["Audio", "audio"], free: ["Free", "free"]
+};
+// physical pin -> [libDaisy name, kind, goes to, part, note]
+const PINS = {
+  1: ["D0", "free"], 2: ["D1", "free", "", "", "SD DAT3 in 4-bit mode (not used)"], 3: ["D2", "free"], 4: ["D3", "free"],
+  5: ["D4", "sd", "DAT0 / MISO", "microSD"], 6: ["D5", "sd", "CMD / MOSI", "microSD"], 7: ["D6", "sd", "CLK / SCK", "microSD"],
+  8: ["D7", "tft", "CS (Pi 24)", "Screen"], 9: ["D8", "tft", "SCK (Pi 23)", "Screen", "SPI1 clock, ~40 MHz"],
+  10: ["D9", "tft", "T_DO (Pi 21)", "Touch", "SPI1 MISO, touch data out"], 11: ["D10", "tft", "MOSI (Pi 19)", "Screen"],
+  12: ["D11", "oled", "SCL", "OLED"], 13: ["D12", "oled", "SDA", "OLED"],
+  14: ["D13", "tft", "DC (Pi 18)", "Screen"], 15: ["D14", "tft", "RST (Pi 22)", "Screen"],
+  16: ["AUDIO IN L", "audio", "line in", "Input"], 17: ["AUDIO IN R", "free"], 18: ["AUDIO OUT L", "audio", "jack tip", "Output"],
+  19: ["AUDIO OUT R", "audio", "jack ring", "Output"], 20: ["AGND", "gnd", "jack sleeve", "Audio", "audio ground"],
+  21: ["3V3 A", "free", "", "", "analog 3.3 V, leave it"], 22: ["D15", "enc", "SW (push)", "Encoder"],
+  23: ["D16", "tft", "T_CS (Pi 26)", "Touch", "touch chip select"], 24: ["D17", "tft", "T_IRQ (Pi 11)", "Touch", "low while touched"],
+  25: ["D18", "enc", "A / CLK", "Encoder"], 26: ["D19", "enc", "B / DT", "Encoder"], 27: ["D20", "enc", "switch to GND", "Back button", "other side to GND"],
+  28: ["D21", "free"], 29: ["D22", "free"], 30: ["D23", "free"], 31: ["D24", "free"], 32: ["D25", "free"], 33: ["D26", "free"], 34: ["D27", "free"], 35: ["D28", "free"],
+  36: ["D29 USB D−", "usb", "D−", "USB-A socket"], 37: ["D30 USB D+", "usb", "D+", "USB-A socket"],
+  38: ["3V3 D", "pwr", "3.3 V rail", "SD, screen logic, encoder, OLED", "output, max ~100 mA spare"],
+  39: ["VIN", "free", "", "", "4-17 V in. Not used: powered from USB-C"], 40: ["DGND", "gnd", "ground rail", "everything"]
+};
+const ns = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(ns, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+/* legend */
+const lg = document.getElementById("legend");
+for (const k of ["pwr", "gnd", "usb", "sd", "tft", "enc", "oled", "audio", "free"]) {
+  const s = document.createElement("span");
+  s.innerHTML = `<i style="background:${C(k)}"></i>${KIND[k][0]}`;
+  lg.appendChild(s);
+}
+
+/* Seed board */
+(function seed() {
+  const s = document.getElementById("seed");
+  const bx = 300, by = 40, bw = 260, bh = 680, top = by + 60, step = 30.5;
+  el("rect", { x: bx, y: by, width: bw, height: bh, rx: 10, fill: C("board") }, s);
+  el("rect", { x: bx + 100, y: by - 14, width: 60, height: 34, rx: 6, fill: C("free"), stroke: C("board-fg"), "stroke-width": 1 }, s);
+  el("text", { x: bx + 130, y: by + 8, "text-anchor": "middle", "font-size": 11, fill: C("board"), class: "svgtext", "font-weight": 600 }, s, "USB-C");
+  el("text", { x: bx + bw / 2, y: by + 330, "text-anchor": "middle", "font-size": 20, fill: C("board-fg"), "font-weight": 700, "font-family": "var(--display)" }, s, "Daisy Seed");
+  el("text", { x: bx + bw / 2, y: by + 354, "text-anchor": "middle", "font-size": 12, fill: C("board-fg"), opacity: .7, class: "svgtext" }, s, "top view");
+  // buttons
+  [["BOOT", by + 420], ["RESET", by + 470]].forEach(([t, y]) => {
+    el("rect", { x: bx + 105, y, width: 50, height: 26, rx: 4, fill: C("board-fg"), opacity: .9 }, s);
+    el("text", { x: bx + 130, y: y + 17, "text-anchor": "middle", "font-size": 11, fill: C("board"), class: "svgtext", "font-weight": 600 }, s, t);
+  });
+  el("circle", { cx: bx + 130, cy: by + 540, r: 7, fill: C("pwr") }, s);
+  el("text", { x: bx + 130, y: by + 565, "text-anchor": "middle", "font-size": 11, fill: C("board-fg"), class: "svgtext" }, s, "LED");
+  for (let p = 1; p <= 40; p++) {
+    const left = p <= 20, i = left ? p - 1 : 40 - p;
+    const y = top + i * step, x = left ? bx + 16 : bx + bw - 16;
+    const [name, kind, to, part] = PINS[p];
+    const col = C(kind), used = kind !== "free";
+    el("circle", { cx: x, cy: y, r: 9, fill: used ? col : "none", stroke: used ? col : C("pad"), "stroke-width": 2.5 }, s);
+    el("text", { x: left ? x + 16 : x - 16, y: y + 4, "text-anchor": left ? "start" : "end", "font-size": 11, fill: C("board-fg"), class: "svgtext" }, s, p);
+    // label outside
+    const lx = left ? bx - 10 : bx + bw + 10, anchor = left ? "end" : "start";
+    if (used) el("line", { x1: left ? bx : bx + bw, y1: y, x2: lx + (left ? 4 : -4), y2: y, stroke: col, "stroke-width": 2 }, s);
+    el("text", { x: lx, y: y - 1, "text-anchor": anchor, "font-size": 12.5, fill: used ? C("fg") : C("muted"), class: "svgtext", "font-weight": used ? 600 : 400 }, s, name);
+    if (used && to) el("text", { x: lx, y: y + 12, "text-anchor": anchor, "font-size": 11, fill: col, class: "svgtext" }, s, `${part} · ${to}`);
+  }
+})();
+
+/* generic wiring diagram: device on the left, Seed pins on the right */
+function wiring(id, title, rows, opts = {}) {
+  const s = document.getElementById(id);
+  const rh = 36, h = 56 + rows.length * rh, w = 460;
+  s.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  s.setAttribute("role", "img");
+  s.setAttribute("aria-label", title + " wiring");
+  const dx = 10, dw = 132, sx = 318, sw = 132;
+  el("rect", { x: dx, y: 12, width: dw, height: h - 24, rx: 8, fill: C("panel"), stroke: C("fg"), "stroke-width": 1.5 }, s);
+  el("text", { x: dx + dw / 2, y: 32, "text-anchor": "middle", "font-size": 13, fill: C("fg"), "font-weight": 700, "font-family": "var(--display)" }, s, title);
+  el("rect", { x: sx, y: 12, width: sw, height: h - 24, rx: 8, fill: C("board") }, s);
+  el("text", { x: sx + sw / 2, y: 32, "text-anchor": "middle", "font-size": 13, fill: C("board-fg"), "font-weight": 700, "font-family": "var(--display)" }, s, opts.right || "Seed / rails");
+  rows.forEach((r, i) => {
+    const y = 58 + i * rh, col = C(r.k);
+    el("text", { x: dx + dw - 14, y: y + 4, "text-anchor": "end", "font-size": 12.5, fill: C("fg"), class: "svgtext", "font-weight": 600 }, s, r.d);
+    el("circle", { cx: dx + dw, cy: y, r: 5, fill: col }, s);
+    el("line", { x1: dx + dw + 5, y1: y, x2: sx - 5, y2: y, stroke: col, "stroke-width": 3, "stroke-linecap": "round" }, s);
+    if (r.w) el("text", { x: (dx + dw + sx) / 2, y: y - 7, "text-anchor": "middle", "font-size": 10.5, fill: C("muted"), class: "svgtext" }, s, r.w);
+    el("circle", { cx: sx, cy: y, r: 5, fill: col }, s);
+    el("text", { x: sx + 12, y: y + 4, "font-size": 12.5, fill: C("board-fg"), class: "svgtext", "font-weight": 600 }, s, r.s);
+  });
+}
+wiring("d-usb", "USB-A socket", [
+  { d: "VBUS", s: "5V rail", k: "pwr", w: "from 5 V supply" },
+  { d: "D−", s: "pin 36  D29", k: "usb" },
+  { d: "D+", s: "pin 37  D30", k: "usb" },
+  { d: "GND", s: "GND rail", k: "gnd" }]);
+wiring("d-sd", "microSD module", [
+  { d: "VCC", s: "pin 38  3V3", k: "pwr", w: "5 V if it has a regulator" },
+  { d: "GND", s: "pin 40  GND", k: "gnd" },
+  { d: "SCK / CLK", s: "pin 7   D6", k: "sd" },
+  { d: "MOSI / CMD", s: "pin 6   D5", k: "sd" },
+  { d: "MISO / DAT0", s: "pin 5   D4", k: "sd" },
+  { d: "CS / DAT3", s: "3V3 rail", k: "pwr", w: "tie high" }]);
+wiring("d-tft", "Screen (Pi pin)", [
+  { d: "1  3.3V", s: "pin 38  3V3", k: "pwr" },
+  { d: "2  5V", s: "5V rail", k: "pwr", w: "backlight" },
+  { d: "6  GND", s: "pin 40  GND", k: "gnd" },
+  { d: "23 SCK", s: "pin 9   D8", k: "tft" },
+  { d: "19 MOSI", s: "pin 11  D10", k: "tft" },
+  { d: "24 CS", s: "pin 8   D7", k: "tft" },
+  { d: "18 DC", s: "pin 14  D13", k: "tft" },
+  { d: "22 RST", s: "pin 15  D14", k: "tft" },
+  { d: "21 T_DO", s: "pin 10  D9", k: "tft", w: "touch" },
+  { d: "26 T_CS", s: "pin 23  D16", k: "tft", w: "touch" },
+  { d: "11 T_IRQ", s: "pin 24  D17", k: "tft", w: "touch" }]);
+wiring("d-enc", "EC11 + back sw", [
+  { d: "+", s: "3V3 rail", k: "pwr", w: "never 5 V" },
+  { d: "GND", s: "GND rail", k: "gnd" },
+  { d: "A / CLK", s: "pin 25  D18", k: "enc" },
+  { d: "B / DT", s: "pin 26  D19", k: "enc" },
+  { d: "SW", s: "pin 22  D15", k: "enc" },
+  { d: "back sw leg 1", s: "pin 27  D20", k: "enc", w: "separate switch" },
+  { d: "back sw leg 2", s: "GND rail", k: "gnd" }]);
+wiring("d-oled", "SSD1306 OLED", [
+  { d: "VCC", s: "pin 38  3V3", k: "pwr" },
+  { d: "GND", s: "pin 40  GND", k: "gnd" },
+  { d: "SCL", s: "pin 12  D11", k: "oled" },
+  { d: "SDA", s: "pin 13  D12", k: "oled" }]);
+wiring("d-aout", "3.5 mm jack", [
+  { d: "Tip (L)", s: "pin 18  OUT L", k: "audio" },
+  { d: "Ring (R)", s: "pin 19  OUT R", k: "audio" },
+  { d: "Sleeve", s: "pin 20  AGND", k: "gnd" }]);
+wiring("d-ain", "Line / preamp", [
+  { d: "Signal", s: "pin 16  IN L", k: "audio" },
+  { d: "Ground", s: "pin 20  AGND", k: "gnd" }]);
+
+/* Power diagram */
+(function power() {
+  const s = document.getElementById("pwr");
+  const box = (x, y, w, h, t, sub, fill, fg) => {
+    el("rect", { x, y, width: w, height: h, rx: 8, fill: fill || C("panel"), stroke: fill ? "none" : C("fg"), "stroke-width": 1.5 }, s);
+    el("text", { x: x + w / 2, y: y + h / 2 - (sub ? 3 : -4), "text-anchor": "middle", "font-size": 13, "font-weight": 700, fill: fg || C("fg"), "font-family": "var(--display)" }, s, t);
+    if (sub) el("text", { x: x + w / 2, y: y + h / 2 + 14, "text-anchor": "middle", "font-size": 11, fill: fg || C("muted"), class: "svgtext" }, s, sub);
+  };
+  const wire = (pts, k, label, lx, ly) => {
+    el("polyline", { points: pts, fill: "none", stroke: C(k), "stroke-width": 3, "stroke-linejoin": "round", "stroke-linecap": "round" }, s);
+    if (label) el("text", { x: lx, y: ly, "font-size": 11, fill: C(k), class: "svgtext", "font-weight": 600 }, s, label);
+  };
+  box(20, 30, 130, 56, "Mac / iPad", "USB-C");
+  box(290, 20, 170, 80, "Daisy Seed", "pin 38 3V3 · 40 GND", C("board"), C("board-fg"));
+  box(20, 150, 130, 56, "5 V supply", "breadboard PSU");
+  box(580, 20, 210, 56, "3.3 V parts", "SD, encoder, OLED, screen");
+  box(580, 120, 210, 56, "5 V parts", "backlight, USB-A VBUS");
+  box(580, 220, 210, 56, "APC40", "own power adapter");
+  wire("150,58 290,58", "usb", "USB-C", 196, 50);
+  el("text", { x: 220, y: 76, "text-anchor": "middle", "font-size": 10, fill: C("muted"), class: "svgtext" }, s, "power, data, audio");
+  wire("460,48 580,48", "pwr", "pin 38", 498, 40);
+  wire("150,170 540,170 540,148 580,148", "pwr", "5 V rail", 180, 162);
+  wire("430,100 430,248 580,248", "usb", "pins 36/37", 440, 240);
+  el("text", { x: 440, y: 262, "font-size": 10, fill: C("muted"), class: "svgtext" }, s, "via USB-A socket");
+  // ground rail and a bus on the right
+  el("line", { x1: 40, y1: 300, x2: 810, y2: 300, stroke: C("gnd"), "stroke-width": 5, "stroke-linecap": "round" }, s);
+  el("text", { x: 40, y: 322, "font-size": 12, fill: C("gnd"), class: "svgtext", "font-weight": 600 }, s, "GROUND RAIL: everything meets here");
+  wire("85,206 85,300", "gnd");
+  wire("330,100 330,300", "gnd", "pin 40", 338, 230);
+  wire("790,48 810,48 810,300", "gnd");
+  wire("790,148 810,148", "gnd");
+  wire("790,248 810,248", "gnd");
+})();
+
+/* Pi header */
+(function pi() {
+  const s = document.getElementById("pihdr");
+  const used = { 1: ["3.3V", "pwr"], 2: ["5V", "pwr"], 6: ["GND", "gnd"], 11: ["T_IRQ", "tft"], 18: ["DC", "tft"], 19: ["MOSI", "tft"], 21: ["T_DO", "tft"], 22: ["RST", "tft"], 23: ["SCK", "tft"], 24: ["CS", "tft"], 26: ["T_CS", "tft"] };
+  el("rect", { x: 120, y: 6, width: 100, height: 290, rx: 6, fill: C("board") }, s);
+  for (let p = 1; p <= 40; p++) {
+    const row = Math.floor((p - 1) / 2), odd = p % 2 === 1;
+    const x = odd ? 150 : 190, y = 20 + row * 14;
+    const u = used[p];
+    el("circle", { cx: x, cy: y, r: 5, fill: u ? C(u[1]) : "none", stroke: u ? C(u[1]) : C("pad"), "stroke-width": 1.5 }, s);
+    if (u) {
+      el("text", { x: odd ? 112 : 228, y: y + 4, "text-anchor": odd ? "end" : "start", "font-size": 11, fill: C("fg"), class: "svgtext", "font-weight": 600 }, s, `${p} ${u[0]}`);
+    }
+  }
+  el("text", { x: 150, y: 296 + 0, "text-anchor": "middle", "font-size": 9, fill: C("board-fg"), class: "svgtext" }, s, "");
+  el("text", { x: 6, y: 20, "font-size": 10, fill: C("muted"), class: "svgtext" }, s, "pin 1 ▸");
+})();
+
+/* table */
+(function table() {
+  const tb = document.querySelector("#pintable tbody");
+  for (let p = 1; p <= 40; p++) {
+    const [name, kind, to = "", part = "", note = ""] = PINS[p];
+    if (kind === "free" && !note) continue;
+    const tr = document.createElement("tr");
+    const chip = kind === "free" ? `<span style="color:var(--muted)">free</span>` : `<span class="chip" style="background:${C(kind)}">${part}</span>`;
+    tr.innerHTML = `<td class="pin">${p}</td><td class="mono">${name}</td><td>${to || "–"}</td><td>${chip}</td><td style="color:var(--muted)">${note}</td>`;
+    tb.appendChild(tr);
+  }
+})();
+</script>

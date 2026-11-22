@@ -1,0 +1,5 @@
+daisy/build/
+daisy/mac/build/
+daisy/hostbuild/
+.DS_Store
+*.o

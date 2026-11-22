@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ApcBox Monitor</title>
+<style>
+:root {
+  --bg: #0e0f10; --panel: #17191b; --line: #2a2d31; --text: #d9dcdf; --dim: #7d848c;
+  --green: #35d05a; --red: #ff4b3e; --yellow: #ffb833; --blue: #4ba3ff; --orange: #ff8a2a;
+  --off: #26292d; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.35 -apple-system, system-ui, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: #121416; position: sticky; top: 0; z-index: 2; }
+h1 { font-size: 15px; margin: 0; letter-spacing: .04em; }
+button { background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 5px 11px; font: inherit; cursor: pointer; }
+button:hover { background: #2d3237; }
+button.primary { background: #1f5130; border-color: #2c7a45; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 5px; background: var(--off); color: var(--dim); white-space: nowrap; }
+.chip.ok { background: #183d24; color: #8ff0a8; }
+.chip.warn { background: #4a2a10; color: #ffc27a; }
+.chip.bad { background: #4a1714; color: #ff9d94; }
+.big { font-family: var(--mono); font-size: 22px; font-weight: 600; }
+.lbl { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.stat { display: flex; flex-direction: column; }
+.cpu { width: 110px; height: 8px; background: var(--off); border-radius: 4px; overflow: hidden; position: relative; }
+.cpu i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); }
+.cpu b { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--red); }
+main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; padding: 14px 16px; }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+.col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* sequencer */
+.seq { display: grid; grid-template-columns: 22px minmax(90px, 170px) 66px repeat(16, minmax(14px, 1fr)) 120px; gap: 3px; align-items: center; overflow-x: auto; }
+.seq .hdr { color: var(--dim); font-family: var(--mono); font-size: 10px; text-align: center; }
+.seq .hdr.now { color: var(--yellow); }
+.tno { font-family: var(--mono); color: var(--dim); text-align: right; padding-right: 2px; }
+.tname { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 6px; border-radius: 5px; transition: background .25s; }
+.tname.hit { background: #2c6b3c; transition: none; }
+.tname.loading { color: var(--yellow); }
+.offpage { opacity: .38; }
+.pagegap { grid-column: 1 / -1; height: 6px; }
+.row-sel .tname { outline: 1px solid var(--yellow); }
+.flags { display: flex; gap: 3px; }
+.flag { font-family: var(--mono); font-size: 10px; width: 19px; text-align: center; border-radius: 3px; background: var(--off); color: #555c63; padding: 1px 0; }
+.flag.m.on { background: var(--red); color: #200; }
+.flag.s.on { background: var(--blue); color: #001428; }
+.flag.r.on { background: var(--orange); color: #2a1100; }
+.flag.x.on { background: var(--yellow); color: #2a2000; }
+.step { height: 22px; border-radius: 4px; background: var(--off); position: relative; }
+.step.q4 { margin-left: 4px; }
+.step.on { background: #2f9e4b; }
+.step.acc { background: var(--red); }
+.step .nt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 9px var(--mono); color: #fff; opacity: .9; pointer-events: none; }
+.step.slide::before { content: ""; position: absolute; right: -5px; top: 9px; width: 7px; height: 4px; background: var(--yellow); border-radius: 2px; z-index: 1; }
+.step.ph::after { content: ""; position: absolute; inset: -2px; border: 2px solid var(--yellow); border-radius: 5px; }
+.row-sel .step { filter: brightness(1.25); }
+.mix { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.bar { height: 5px; background: var(--off); border-radius: 3px; overflow: hidden; margin-top: 1px; }
+.bar i { display: block; height: 100%; background: #8fa3b5; }
+.bar.vol i { background: var(--green); }
+.bar.pan { position: relative; }
+.bar.pan i { position: absolute; width: 4px; background: var(--text); }
+
+/* tiles */
+.tiles { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+.tile { border-radius: 6px; padding: 6px 4px; background: var(--off); text-align: center; font-family: var(--mono); font-size: 11px; color: var(--dim); min-height: 30px; display: flex; align-items: center; justify-content: center; }
+.tile.green { background: #1f6a35; color: #c8ffd6; }
+.tile.yellow { background: #6b4d10; color: #ffe2a6; }
+.tile.red { background: #8a221b; color: #ffd2cd; }
+.blink { animation: blink .5s steps(1) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+/* knobs */
+.knobs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.knob { background: #111315; border: 1px solid var(--line); border-radius: 8px; padding: 6px 7px; min-width: 0; }
+.knob .n { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.knob .v { font-family: var(--mono); font-size: 13px; margin: 2px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pages { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+.pages span { font-family: var(--mono); font-size: 11px; padding: 3px 7px; border-radius: 4px; background: var(--off); color: var(--dim); }
+.pages span.on { background: #6b4d10; color: #ffe2a6; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-family: var(--mono); font-size: 12px; }
+.kv .k { color: var(--dim); }
+
+/* APC mirror */
+.apc { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.led { height: 16px; border-radius: 3px; background: var(--off); position: relative; }
+.led.c1, .led.c2 { background: var(--green); }
+.led.c3, .led.c4 { background: var(--red); }
+.led.c5, .led.c6 { background: var(--yellow); }
+.led.c2, .led.c4, .led.c6, .led.b2 { animation: blink .5s steps(1) infinite; }
+.led.tb { height: 9px; border-radius: 2px; }
+.led.tb.b1, .led.tb.b2 { background: var(--k); }
+.led.miss::after { content: ""; position: absolute; inset: -3px; border: 2px dashed #ff4b3e; border-radius: 4px; }
+.apcsep { grid-column: 1 / -1; height: 4px; }
+.legend { color: var(--dim); font-size: 11px; margin-top: 8px; }
+
+/* log */
+#log { height: 260px; overflow-y: auto; font-family: var(--mono); font-size: 11.5px; background: #0b0c0d; border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; word-break: break-all; }
+#log .e { color: #6f8fb0; }
+#log .w { color: #ffc27a; }
+.toolbar { display: flex; gap: 6px; align-items: center; }
+.toolbar label { color: var(--dim); font-size: 12px; display: flex; gap: 4px; align-items: center; }
+.empty { color: var(--dim); padding: 30px 10px; text-align: center; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>APCBOX</h1>
+  <button id="connect" class="primary">Connect Daisy</button>
+  <button id="demo">Demo</button>
+  <span id="c-link" class="chip">Daisy: not connected</span>
+  <span id="c-apc" class="chip">APC40: ?</span>
+  <span id="c-sd" class="chip">SD: ?</span>
+  <div class="stat"><span class="lbl">Transport</span><span id="transport" class="big">■</span></div>
+  <div class="stat"><span class="lbl">BPM</span><span id="bpm" class="big">-</span></div>
+  <div class="stat"><span class="lbl">Step</span><span id="stepno" class="big">-</span></div>
+  <div class="stat"><span class="lbl">Pattern</span><span id="pattern" class="big">-</span></div>
+  <span id="c-rec" class="chip">REC off</span>
+  <span id="c-metro" class="chip">click off</span>
+  <span id="c-shift" class="chip">SHIFT</span>
+  <span id="c-copy" class="chip hidden">COPY held</span>
+  <span id="c-set" class="chip hidden"></span>
+  <div class="stat"><span class="lbl">CPU <span id="cputxt"></span></span><div class="cpu"><i id="cpuavg"></i><b id="cpumax"></b></div></div>
+  <span id="c-clip" class="chip hidden">LIMITING</span>
+  <span id="c-nan" class="chip bad hidden">DSP RESET</span>
+  <span id="c-drop" class="chip warn hidden">serial overflow</span>
+  <span id="c-reset" class="chip bad hidden">RESETTING… keep holding</span>
+  <span id="c-tpage" class="chip">strips: 1-8</span>
+  <span id="c-lrec" class="chip bad hidden"></span>
+  <span id="c-in" class="chip hidden">input <span id="c-inbar" style="display:inline-block;width:60px;height:7px;background:var(--off);vertical-align:middle;border-radius:2px;overflow:hidden"><span id="c-inlvl" style="display:block;height:100%;width:0;background:var(--green)"></span></span></span>
+  <span id="c-ver" class="chip bad hidden">page doesn't match firmware: reload it</span>
+</header>
+
+<main>
+  <div class="col">
+    <section id="tftpanel" class="hidden">
+      <h2><span>3.5" screen preview</span><span>encoder: ← → turn · Enter push (next view) · Esc back</span></h2>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <img id="tft" width="480" height="320" alt="screen preview" style="image-rendering:pixelated;border-radius:6px;background:#0c0d10;max-width:100%">
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <button data-ui="turn&d=-1">◀ turn</button>
+          <button data-ui="turn&d=1">turn ▶</button>
+          <button data-ui="push">push</button>
+          <button data-ui="back">back</button>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2><span>Pattern <span id="seqpat">-</span> · all tracks</span><span id="seqhint">selected track outlined · yellow = playhead · 303 steps show their note, yellow tab = slide</span></h2>
+      <div id="seq" class="seq"></div>
+    </section>
+
+    <section>
+      <h2><span>Selected track: <span id="selname">-</span></span><span>device knobs</span></h2>
+      <div id="devknobs" class="knobs"></div>
+    </section>
+
+    <section>
+      <h2><span>Track knobs</span><span id="pagehint"></span></h2>
+      <div id="pages" class="pages"></div>
+      <div id="trkknobs" class="knobs"></div>
+    </section>
+
+    <section>
+      <h2><span>Log</span>
+        <span class="toolbar">
+          <label><input type="checkbox" id="showmidi" checked> MIDI in</label>
+          <button id="clearlog">Clear</button>
+        </span>
+      </h2>
+      <div id="log"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section>
+      <h2><span>OLED</span><span>what the 0.96" screen shows</span></h2>
+      <canvas id="oled" width="128" height="64" style="width:100%;max-width:384px;image-rendering:pixelated;background:#000;border-radius:4px;display:block"></canvas>
+    </section>
+    <section>
+      <h2><span>Patterns</span><span>row 3 · SHIFT + row 3 = bank · hold CLIP/TRACK: copy, double tap = clear · SHIFT + CLIP/TRACK = undo</span></h2>
+      <div id="banks" class="tiles" style="margin-bottom:6px"></div>
+      <div id="pats" class="tiles"></div>
+    </section>
+    <section>
+      <h2><span>Performance FX</span><span>row 4</span></h2>
+      <div id="fx" class="tiles"></div>
+    </section>
+    <section>
+      <h2><span>Master</span><span>faders + SEND C</span></h2>
+      <div id="globals" class="kv"></div>
+    </section>
+    <section>
+      <h2><span>Kits</span><span id="kitpage">scene launch</span></h2>
+      <div id="kits" class="kv"></div>
+    </section>
+    <section>
+      <h2><span>Sample browser</span><span>into selected track</span></h2>
+      <div id="browser" class="kv"></div>
+    </section>
+    <section>
+      <h2><span>APC40 LEDs</span><span>what the Daisy sent</span></h2>
+      <div id="apc" class="apc"></div>
+      <div class="legend">Dashed red outline = not confirmed by the APC40 yet. If one stays outlined, that LED message got lost.</div>
+    </section>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* ---------------- state ---------------- */
+const NT = 16, NS = 16;
+const REPORT_VERSION = 7; // firmware sends "V 7"
+const st = {
+  link: false, demo: false, gotData: false,
+  play: 0, step: 0, pat: 0, queued: -1, rec: 0, bpm: 0, metro: 0, sel: 0, page: 0, shift: 0, copy: 0,
+  cpuAvg: 0, cpuMax: 0, sd: 0, apcUp: 0, apcPresent: 0,
+  fxOn: 0, fxLat: 0, roll: 0, mute: 0, solo: 0, loading: 0, nonempty: 0, limit: 0, nan: 0, dropped: 0,
+  trig: new Array(NT).fill(0),
+  grid: "0".repeat(NT * NS), gridPat: 0,
+  tracks: Array.from({length: NT}, () => new Array(12).fill(0)),
+  names: new Array(NT).fill("-"), tpage: 0, ver: 0, xside: new Array(NT).fill(0),
+  g: new Array(9).fill(0),
+  browse: [0, 0, -1, 0], folder: "-", file: "-",
+  kit: [0, 1, 0, -1], kitNames: new Array(5).fill(["-", -1]),
+  want: "", sent: "",
+  synth: 0, notes: new Array(NT).fill(""), acid: Array.from({length: NT}, () => [38, 100, 85, 25, 100, 64, 38, 0]),
+};
+let lastTrig = new Array(NT).fill(0), hitUntil = new Array(NT).fill(0);
+let lastLimit = 0, limitUntil = 0;
+
+/* ---------------- value formatting (mirrors engine.cpp) ---------------- */
+const p01 = v => v / 127;
+const pct = v => Math.round(v / 127 * 100) + "%";
+const hz = f => f >= 1000 ? (f / 1000).toFixed(f >= 10000 ? 0 : 1) + "k" : Math.round(f) + "";
+function filt(v) {
+  const x = p01(v);
+  if (x < 0.46) return "LP " + hz(40 * Math.pow(2, x / 0.46 * 9));
+  if (x > 0.54) return "HP " + hz(20 * Math.pow(2, (x - 0.54) / 0.46 * 9));
+  return "off";
+}
+function pitch(v) { const s = Math.round((p01(v) - 0.5) * 24); return (s > 0 ? "+" : "") + s + " st"; }
+function decay(v) {
+  const d = p01(v);
+  if (d > 0.98) return "full";
+  const ms = 10 * Math.pow(400, d);
+  return ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : Math.round(ms) + " ms";
+}
+const DIVS = ["1/16", "1/8", "1/8 dot", "1/4", "1/4 dot", "1/2"];
+const div = v => DIVS[Math.min(5, Math.floor(p01(v) * 6))];
+const swing = v => Math.round(50 + p01(v) * 25) + "%";
+const pan = v => { const p = Math.round((p01(v) - 0.5) * 200); return Math.abs(p) <= 1 ? "C" : (p < 0 ? "L" + (-p) : "R" + p); };
+
+const xfRange = v => { const x = (v === 63 || v === 64) ? 0.5 : v / 127, a = Math.round(Math.min(1, 2 * (1 - x)) * 100), b = Math.round(Math.min(1, 2 * x) * 100);
+  return a === 100 && b === 100 ? "A + B full" : `A ${a}% · B ${b}%`; };
+const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const pitchName = n => NOTE_NAMES[n % 12] + (Math.floor(n / 12) - 1);
+const ACID = [["cutoff", v => hz(150 * Math.pow(2, p01(v) * 5)) + " Hz"], ["reso", pct], ["env mod", pct],
+              ["decay", v => Math.round(30 * Math.pow(80, p01(v))) + " ms"], ["accent", pct],
+              ["tune", v => { const x = (p01(v) - 0.5) * 24; return (x >= 0 ? "+" : "") + x.toFixed(1) + " st"; }],
+              ["slide", v => Math.round(12 * Math.pow(25, p01(v))) + " ms"], ["wave", v => v >= 64 ? "square" : "saw"]];
+const DEV = [["pitch", pitch], ["decay", decay], ["filter", filt], ["reso", pct],
+             ["start", pct], ["reverse", v => v >= 64 ? "reverse" : "forward"], ["drive", pct], ["probability", pct]];
+const PAGES = ["PAN", "SEND A reverb", "SEND B delay", "SEND C global"];
+const GLOBAL_KNOBS = ["tempo", "swing", "reverb size", "reverb tone", "delay time", "delay fb", "master drive", "fx return"];
+const FX = ["rpt 1/4", "rpt 1/8", "rpt 1/16", "rpt 1/32", "tape stop", "reverse", "crush", "gate"];
+
+/* ---------------- protocol ---------------- */
+function handleLine(line) {
+  line = line.replace(/\r$/, "");
+  if (!line) return;
+  const sp = line.indexOf(" ");
+  const tag = sp < 0 ? line : line.slice(0, sp);
+  const rest = sp < 0 ? "" : line.slice(sp + 1);
+  const nums = () => rest.split(" ").map(Number);
+  st.gotData = true;
+  switch (tag) {
+    case "S": {
+      const a = nums();
+      if (a.length < 34) return;
+      [st.play, st.step, st.pat, st.queued, st.rec] = a;
+      st.bpm = a[5] / 10; st.metro = a[6]; st.sel = a[7]; st.page = a[8]; st.shift = a[9]; st.copy = a[10];
+      st.cpuAvg = a[11] / 10; st.cpuMax = a[12] / 10; st.sd = a[13]; st.apcUp = a[14]; st.apcPresent = a[15];
+      [st.fxOn, st.fxLat, st.roll, st.mute, st.solo, st.loading, st.nonempty, st.limit, st.nan, st.dropped] = a.slice(16, 26);
+      st.trig = a.slice(26, 34).concat(a.length >= 47 ? a.slice(39, 47) : new Array(8).fill(0));
+      st.bank = a[34] || 0; st.bankMask = a[35] || 0; st.resetting = a[36] || 0; st.synth = a[37] || 0;
+      st.tpage = a[38] || 0;
+      st.lrec = a[47] || 0; st.lrecTrack = a[48] || 0; st.lrecBars = a[49] || 0; st.inPeak = a[50] || 0; st.inMon = a[51] || 0;
+      st.copySrc = a[52] ?? -1; st.openSet = a[53] ?? -1; st.dirty = a[54] || 0; st.setOp = a[55] || 0;
+      break;
+    }
+    case "G": { const [p, g] = rest.split(" "); st.gridPat = +p; if (g && g.length === NT * NS) st.grid = g; break; }
+    case "T": { const a = nums(); if (a.length >= 13 && a[0] < NT) { st.tracks[a[0]] = a.slice(1, 13); st.xside[a[0]] = a[13] || 0; } break; }
+    case "N": { const i = +rest.slice(0, rest.indexOf(" ")); if (i >= 0 && i < NT) st.names[i] = rest.slice(rest.indexOf(" ") + 1); break; }
+    case "Q": { const a = rest.split(" "); const t = +a[1]; if (t >= 0 && t < NT && a[2] && a[2].length === NS * 2) st.notes[t] = a[2]; break; }
+    case "A": { const a = nums(); if (a.length >= 9 && a[0] >= 0 && a[0] < NT) st.acid[a[0]] = a.slice(1, 9); break; }
+    case "M": { const a = nums(); if (a.length >= 9) st.g = a; break; }
+    case "V": { const v = +rest; if (v !== st.ver) { st.ver = v; if (v !== REPORT_VERSION) log(`firmware reports version ${v}, this page is ${REPORT_VERSION}: reload the page (or flash the matching firmware)`, "w"); } break; }
+    case "B": st.browse = nums(); break;
+    case "BF": st.folder = rest; break;
+    case "BN": st.file = rest; break;
+    case "K": st.kit = nums(); break;
+    case "KN": { const a = rest.split(" "); const i = +a[0]; if (i >= 0 && i < 5) st.kitNames[i] = [a.slice(2).join(" "), +a[1]]; break; }
+    case "W": { const [w, s] = rest.split(" "); st.want = w || ""; st.sent = s || ""; break; }
+    case "E": logMidi(nums()); break;
+    case "L": log(rest); break;
+    case "D": drawOled(rest); return;
+    default: log(line, "w");
+  }
+  dirty = true;
+}
+
+/* ---------------- OLED mirror ---------------- */
+const oledCtx = document.getElementById("oled").getContext("2d");
+const oledImg = oledCtx.createImageData(128, 64);
+function drawOled(hex) {
+  if (hex.length < 2048) return;
+  const d = oledImg.data;
+  for (let page = 0; page < 8; page++)
+    for (let x = 0; x < 128; x++) {
+      const b = parseInt(hex.substr((page * 128 + x) * 2, 2), 16);
+      for (let bit = 0; bit < 8; bit++) {
+        const i = ((page * 8 + bit) * 128 + x) * 4;
+        const on = (b >> bit) & 1;
+        d[i] = on ? 120 : 0; d[i + 1] = on ? 220 : 0; d[i + 2] = on ? 255 : 0; d[i + 3] = 255;
+      }
+    }
+  oledCtx.putImageData(oledImg, 0, 0);
+}
+
+/* ---------------- MIDI naming ---------------- */
+const DEVBTN = ["CLIP/TRACK", "DEVICE ON/OFF", "DEVICE <", "DEVICE >", "DETAIL VIEW", "REC QUANT", "MIDI OVERDUB", "METRONOME"];
+const SINGLE = { 0x50: "MASTER", 0x51: "STOP ALL CLIPS", 0x57: "PAN", 0x58: "SEND A", 0x59: "SEND B", 0x5A: "SEND C",
+  0x5B: "PLAY", 0x5C: "STOP", 0x5D: "REC", 0x5E: "UP", 0x5F: "DOWN", 0x60: "RIGHT", 0x61: "LEFT",
+  0x62: "SHIFT", 0x63: "TAP TEMPO", 0x64: "NUDGE +", 0x65: "NUDGE -" };
+const TRKBTN = ["REC ARM", "SOLO", "ACTIVATOR", "TRACK SELECT", "CLIP STOP"];
+function noteName(ch, n) {
+  if (n >= 0x35 && n <= 0x39) return `pad row ${n - 0x34} col ${ch + 1}`;
+  if (n >= 0x30 && n <= 0x34) return `${TRKBTN[n - 0x30]} ${ch + 1}`;
+  if (n >= 0x3A && n <= 0x41) return DEVBTN[n - 0x3A];
+  if (n >= 0x52 && n <= 0x56) return `SCENE ${n - 0x51}`;
+  return SINGLE[n] || `note 0x${n.toString(16)} ch${ch + 1}`;
+}
+function ccName(ch, c, v) {
+  if (c === 7) return `fader ${ch + 1} = ${v}`;
+  if (c === 14) return `master fader = ${v}`;
+  if (c === 15) return `crossfader = ${v}`;
+  if (c >= 0x10 && c <= 0x17) return `device knob ${c - 0x0F} = ${v}  (${ch < 8 ? "track " + (ch + 1) : "master"})`;
+  if (c >= 0x30 && c <= 0x37) return `track knob ${c - 0x2F} = ${v}`;
+  if (c === 0x2F) return `cue knob ${v < 64 ? "+" + v : v - 128}`;
+  return `CC ${c} ch${ch + 1} = ${v}`;
+}
+function logMidi(a) {
+  const [type, ch, d0, d1] = a;
+  let s;
+  if (type === 1 || type === 0) s = `${noteName(ch, d0)} ${type === 1 && d1 > 0 ? "down" : "up"}`;
+  else if (type === 3) s = ccName(ch, d0, d1);
+  else s = `type ${type} ch${ch + 1} ${d0} ${d1}`;
+  log("midi  " + s, "e");
+}
+
+/* ---------------- log ---------------- */
+const logEl = document.getElementById("log");
+const showMidi = document.getElementById("showmidi");
+function log(text, cls) {
+  if (cls === "e" && !showMidi.checked) return;
+  const div = document.createElement("div");
+  if (cls) div.className = cls;
+  const t = new Date();
+  div.textContent = `${t.toTimeString().slice(0, 8)}  ${text}`;
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 4;
+  logEl.appendChild(div);
+  while (logEl.childNodes.length > 400) logEl.removeChild(logEl.firstChild);
+  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+}
+document.getElementById("clearlog").onclick = () => { logEl.textContent = ""; };
+
+/* ---------------- build static DOM ---------------- */
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+const seq = $("seq"), rows = [];
+seq.append(el("div"), el("div", "hdr", ""), el("div", "hdr", "M S R"));
+const stepHdr = [];
+for (let s = 0; s < NS; s++) { const h = el("div", "hdr" + (s % 4 === 0 && s ? " q4" : ""), String(s + 1)); stepHdr.push(h); seq.append(h); }
+seq.append(el("div", "hdr", "vol · pan · rev · dly"));
+for (let t = 0; t < NT; t++) {
+  if (t === 8) seq.append(el("div", "pagegap"));
+  const r = { no: el("div", "tno", String(t + 1)), name: el("div", "tname", ""), flags: el("div", "flags"), steps: [], mix: el("div", "mix") };
+  r.m = el("span", "flag m", "M"); r.s = el("span", "flag s", "S"); r.r = el("span", "flag r", "R"); r.x = el("span", "flag x", "");
+  r.flags.append(r.m, r.s, r.r, r.x);
+  seq.append(r.no, r.name, r.flags);
+  for (let s = 0; s < NS; s++) { const c = el("div", "step" + (s % 4 === 0 && s ? " q4" : "")); r.steps.push(c); seq.append(c); }
+  r.vol = el("div", "bar vol"); r.vol.append(el("i"));
+  r.pan = el("div", "bar pan"); r.pan.append(el("i"));
+  r.rev = el("div", "bar"); r.rev.append(el("i"));
+  r.dly = el("div", "bar"); r.dly.append(el("i"));
+  r.mix.append(r.vol, r.pan, r.rev, r.dly);
+  seq.append(r.mix);
+  r.all = [r.no, r.name, r.flags, ...r.steps, r.mix];
+  rows.push(r);
+}
+
+function makeKnobs(container) {
+  const ks = [];
+  for (let k = 0; k < 8; k++) {
+    const d = el("div", "knob"), n = el("div", "n"), v = el("div", "v"), b = el("div", "bar"); b.append(el("i"));
+    d.append(n, v, b); container.append(d); ks.push({ n, v, b: b.firstChild });
+  }
+  return ks;
+}
+const devKnobs = makeKnobs($("devknobs")), trkKnobs = makeKnobs($("trkknobs"));
+const pageEls = PAGES.map(p => { const s = el("span", "", p); $("pages").append(s); return s; });
+const patTiles = [], fxTiles = [], bankTiles = [];
+const patName = p => p < 0 ? "-" : "ABCDEFGH"[p >> 3] + ((p & 7) + 1);
+for (let i = 0; i < 8; i++) { const t = el("div", "tile", "bank " + "ABCDEFGH"[i]); $("banks").append(t); bankTiles.push(t); }
+for (let i = 0; i < 8; i++) { const t = el("div", "tile", ""); $("pats").append(t); patTiles.push(t); }
+for (let i = 0; i < 8; i++) { const t = el("div", "tile", FX[i]); $("fx").append(t); fxTiles.push(t); }
+const apcLeds = [];
+for (let i = 0; i < 40; i++) { const l = el("div", "led"); $("apc").append(l); apcLeds.push(l); }
+$("apc").append(el("div", "apcsep"));
+const TB_COLORS = ["var(--red)", "var(--blue)", "var(--orange)", "var(--orange)", "var(--green)"];
+for (let i = 0; i < 40; i++) { const l = el("div", "led tb"); l.style.setProperty("--k", TB_COLORS[Math.floor(i / 8)]); $("apc").append(l); apcLeds.push(l); }
+
+function kv(container, pairs) {
+  container.textContent = "";
+  for (const [k, v] of pairs) container.append(el("span", "k", k), el("span", "", v));
+}
+const setBar = (b, v) => { b.style.width = (v / 127 * 100) + "%"; };
+
+/* ---------------- render ---------------- */
+let dirty = true;
+function chip(id, text, cls) { const c = $(id); c.textContent = text; c.className = "chip " + (cls || ""); }
+
+function render() {
+  requestAnimationFrame(render);
+  const now = performance.now();
+  for (let t = 0; t < NT; t++) if (st.trig[t] !== lastTrig[t]) { lastTrig[t] = st.trig[t]; hitUntil[t] = now + 90; dirty = true; }
+  if (!dirty && !hitUntil.some(h => h > now - 100)) return;
+  dirty = false;
+
+  const who = st.mac ? "Mac build" : "Daisy";
+  chip("c-link", st.demo ? "Demo data" : st.link ? (st.gotData ? who + ": connected" : who + ": waiting for data") : who + ": not connected",
+       st.demo ? "warn" : st.link ? (st.gotData ? "ok" : "warn") : "bad");
+  chip("c-apc", st.apcUp ? "APC40: running" : st.apcPresent ? "APC40: enumerating" : "APC40: not plugged", st.apcUp ? "ok" : st.apcPresent ? "warn" : "bad");
+  chip("c-sd", st.sd ? "SD: ok" : "SD: none", st.sd ? "ok" : "warn");
+  $("transport").textContent = st.play ? "▶" : "■";
+  $("transport").style.color = st.play ? "var(--green)" : "var(--dim)";
+  $("bpm").textContent = st.bpm ? st.bpm.toFixed(1) : "-";
+  $("stepno").textContent = st.play ? (st.step + 1) + "/16" : "-";
+  $("pattern").textContent = patName(st.pat) + (st.queued >= 0 ? " → " + patName(st.queued) : "");
+  chip("c-rec", st.rec ? (st.play ? "● RECORDING" : "● REC armed") : "REC off", st.rec ? "bad" : "");
+  chip("c-metro", st.metro ? "click on" : "click off", st.metro ? "ok" : "");
+  chip("c-shift", "SHIFT", st.shift ? "warn" : "");
+  $("c-copy").classList.toggle("hidden", !st.copy);
+  if (st.copy) $("c-copy").textContent = st.copySrc >= 0
+    ? `COPY ${"ABCDEFGH"[st.copySrc >> 3]}${(st.copySrc & 7) + 1} > tap a pad (SHIFT: track only)`
+    : "COPY: tap the source pad (double tap: clear)";
+  $("c-set").classList.toggle("hidden", st.openSet < 0 && !st.dirty && !st.setOp);
+  $("c-set").textContent = st.setOp === 1 ? "saving set..." : st.setOp === 2 ? "loading set..."
+    : (st.openSet >= 0 ? `set ${String(st.openSet + 1).padStart(2, "0")}` : "set: not saved") + (st.dirty ? " *" : "");
+  $("cputxt").textContent = `${st.cpuAvg.toFixed(0)}% / max ${st.cpuMax.toFixed(0)}%`;
+  $("cpuavg").style.width = Math.min(100, st.cpuAvg) + "%";
+  $("cpuavg").style.background = st.cpuAvg > 80 ? "var(--red)" : st.cpuAvg > 60 ? "var(--yellow)" : "var(--green)";
+  $("cpumax").style.left = Math.min(98, st.cpuMax) + "%";
+  if (st.limit !== lastLimit) { lastLimit = st.limit; limitUntil = now + 400; }
+  $("c-clip").className = "chip warn" + (now > limitUntil ? " hidden" : "");
+  $("c-nan").classList.toggle("hidden", !st.nan);
+  $("c-nan").textContent = `DSP RESET ×${st.nan}`;
+  $("c-drop").classList.toggle("hidden", !st.dropped);
+  $("c-reset").classList.toggle("hidden", !st.resetting);
+  $("c-tpage").textContent = "strips: " + (st.tpage ? "9-16" : "1-8");
+  $("c-lrec").classList.toggle("hidden", !st.lrec);
+  if (st.lrec) $("c-lrec").textContent = st.lrec === 1 ? `ARMED track ${st.lrecTrack + 1}` : `SAMPLING track ${st.lrecTrack + 1} · bar ${st.lrecBars + 1}`;
+  $("c-in").classList.toggle("hidden", !(st.lrec || st.inMon));
+  $("c-inlvl").style.width = Math.min(100, st.inPeak || 0) + "%";
+  $("c-inlvl").style.background = (st.inPeak || 0) > 90 ? "var(--red)" : "var(--green)";
+  $("c-ver").classList.toggle("hidden", !st.ver || st.ver === REPORT_VERSION);
+
+  /* sequencer */
+  $("seqpat").textContent = patName(st.gridPat);
+  stepHdr.forEach((h, s) => h.classList.toggle("now", !!st.play && s === st.step));
+  for (let t = 0; t < NT; t++) {
+    const r = rows[t], tp = st.tracks[t];
+    r.name.textContent = st.names[t];
+    r.name.title = st.names[t];
+    r.name.classList.toggle("hit", hitUntil[t] > now);
+    r.name.classList.toggle("loading", !!(st.loading >> t & 1));
+    r.m.classList.toggle("on", !!(st.mute >> t & 1));
+    r.s.classList.toggle("on", !!(st.solo >> t & 1));
+    r.r.classList.toggle("on", !!(st.roll >> t & 1));
+    const xs = ["", "A", "B"][st.xside[t] || 0];
+    if (r.x.textContent !== xs) { r.x.textContent = xs; r.x.classList.toggle("on", !!xs); }
+    const synth = !!(st.synth >> t & 1), nh = st.notes[t];
+    for (let s = 0; s < NS; s++) {
+      const v = st.grid[t * NS + s];
+      const c = r.steps[s];
+      c.classList.toggle("on", v === "1");
+      c.classList.toggle("acc", v === "2");
+      let nt = "", slide = false;
+      if (synth && nh && v !== "0") {
+        const b = parseInt(nh.substr(s * 2, 2), 16);
+        nt = pitchName(b & 0x7f); slide = !!(b & 0x80);
+      }
+      c.classList.toggle("slide", slide);
+      if (c._nt !== nt) { c._nt = nt; c.textContent = ""; if (nt) c.append(el("span", "nt", nt)); }
+      c.classList.toggle("ph", !!st.play && s === st.step);
+    }
+    setBar(r.vol.firstChild, tp[0]);
+    r.pan.firstChild.style.left = `calc(${tp[1] / 127 * 100}% - 2px)`;
+    setBar(r.rev.firstChild, tp[2]);
+    setBar(r.dly.firstChild, tp[3]);
+    const off = (t >> 3) !== st.tpage;
+    if (r._off !== off) { r._off = off; r.all.forEach(e => e.classList.toggle("offpage", off)); }
+    const sel = t === st.sel;
+    r.name.style.outline = sel ? "1px solid var(--yellow)" : "";
+    r.no.style.color = sel ? "var(--yellow)" : "";
+    r.steps.forEach(c => c.style.filter = sel ? "brightness(1.3)" : "");
+  }
+
+  /* selected track */
+  const tp = st.tracks[st.sel];
+  $("selname").textContent = `${st.sel + 1} · ${st.names[st.sel]}`;
+  if (st.synth >> st.sel & 1) {
+    const a = st.acid[st.sel];
+    ACID.forEach(([n, f], k) => { devKnobs[k].n.textContent = n; devKnobs[k].v.textContent = f(a[k]); setBar(devKnobs[k].b, a[k]); });
+  } else
+    DEV.forEach(([n, f], k) => { devKnobs[k].n.textContent = n; devKnobs[k].v.textContent = f(tp[4 + k]); setBar(devKnobs[k].b, tp[4 + k]); });
+
+  /* track knob page */
+  pageEls.forEach((e, i) => e.classList.toggle("on", i === st.page));
+  for (let k = 0; k < 8; k++) {
+    const tk = k + 8 * st.tpage; // the strips show the current track page
+    const K = trkKnobs[k], t = st.tracks[tk];
+    let name, val, raw;
+    if (st.page === 0) { name = `${tk + 1} ${st.names[tk]}`; raw = t[1]; val = pan(raw); }
+    else if (st.page === 1) { name = `${tk + 1} ${st.names[tk]}`; raw = t[2]; val = pct(raw); }
+    else if (st.page === 2) { name = `${tk + 1} ${st.names[tk]}`; raw = t[3]; val = pct(raw); }
+    else {
+      name = GLOBAL_KNOBS[k];
+      const g = st.g;
+      const map = [[Math.max(0, Math.min(127, Math.round(st.bpm) - 60)), st.bpm.toFixed(1) + " bpm"],
+                   [g[8], swing(g[8])], [g[2], pct(g[2])], [g[3], pct(g[3])], [g[4], div(g[4])],
+                   [g[5], pct(g[5])], [g[6], pct(g[6])], [g[7], pct(g[7])]];
+      [raw, val] = map[k];
+    }
+    K.n.textContent = name; K.v.textContent = val; setBar(K.b, raw);
+  }
+  $("pagehint").textContent = "PAN / SEND A / SEND B / SEND C";
+
+  /* patterns and fx */
+  const bank = st.bank || 0;
+  bankTiles.forEach((t, b) => {
+    let cls = "tile";
+    if (b === bank) cls += " green";
+    else if (b === st.pat >> 3) cls += " green blink";
+    else if (st.bankMask >> b & 1) cls += " yellow";
+    t.className = cls;
+  });
+  patTiles.forEach((t, i) => {
+    const p = bank * 8 + i;
+    t.textContent = patName(p);
+    let cls = "tile";
+    if (st.copy && p === st.copySrc) cls += " yellow blink";
+    else if (p === st.pat) cls += " green";
+    else if (p === st.queued) cls += " green blink";
+    else if (st.nonempty >> i & 1) cls += " yellow";
+    t.className = cls;
+  });
+  fxTiles.forEach((t, f) => {
+    t.className = "tile " + ((st.fxLat >> f & 1) ? "red blink" : (st.fxOn >> f & 1) ? "red" : "yellow");
+  });
+
+  /* master */
+  const g = st.g;
+  kv($("globals"), [
+    ["master", pct(g[0])], ["crossfader", xfRange(g[1])], ["cue filter", g.length > 9 ? filt(g[9]) : "-"], ["reverb", `size ${pct(g[2])} · tone ${pct(g[3])}`],
+    ["delay", `${div(g[4])} · fb ${pct(g[5])}`], ["drive", pct(g[6])], ["fx return", pct(g[7])], ["swing", swing(g[8])],
+  ]);
+
+  /* kits */
+  const [kpage, nkits, loaded, loadingKit] = st.kit;
+  $("kitpage").textContent = `page ${kpage + 1} of ${Math.max(1, Math.ceil(nkits / 5))} · UP/DOWN`;
+  kv($("kits"), st.kitNames.map(([name, k], i) => [
+    `SCENE ${i + 1}`,
+    name === "-" ? "-" : name + (k === loadingKit ? "  (loading)" : k === loaded ? "  ◀ loaded" : ""),
+  ]));
+
+  /* browser */
+  const [fi, nf, file, nfiles] = st.browse;
+  kv($("browser"), [
+    ["folder", nf ? `${st.folder}  (${fi + 1}/${nf})` : "no /samples folder"],
+    ["sample", file >= 0 ? `${st.file}  (${file + 1}/${nfiles})` : `-  (${nfiles} in folder)`],
+    ["keys", "BANK ◀▶ folder · DEVICE ◀▶ sample"],
+  ]);
+
+  /* APC mirror */
+  for (let i = 0; i < 80; i++) {
+    const w = st.want[i] || "0", s = st.sent[i];
+    const l = apcLeds[i];
+    l.className = "led" + (i >= 40 ? " tb b" + w : " c" + w) + (st.apcUp && s !== undefined && s !== w && st.want ? " miss" : "");
+  }
+}
+
+/* ---------------- Web Serial ---------------- */
+let port = null, reader = null;
+async function connect() {
+  if (!("serial" in navigator)) {
+    alert("This browser has no Web Serial. Open this file in Chrome or Edge.");
+    return;
+  }
+  stopDemo();
+  try {
+    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x1209, usbProductId: 0x0001 }, { usbVendorId: 0x0483 }] });
+    await port.open({ baudRate: 115200 });
+  } catch (e) { log("connect: " + e.message, "w"); return; }
+  st.link = true; st.gotData = false; dirty = true;
+  log("port open, asking the Daisy for a full state dump");
+  try { const w = port.writable.getWriter(); await w.write(new TextEncoder().encode("R")); w.releaseLock(); } catch (e) { log("write: " + e.message, "w"); }
+  readLoop();
+}
+async function readLoop() {
+  const dec = new TextDecoder();
+  let buf = "";
+  try {
+    reader = port.readable.getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) { handleLine(buf.slice(0, i)); buf = buf.slice(i + 1); }
+      if (buf.length > 4096) buf = "";
+    }
+  } catch (e) { log("serial: " + e.message, "w"); }
+  try { reader.releaseLock(); await port.close(); } catch (e) {}
+  st.link = false; dirty = true;
+  log("disconnected. Replug or reset the Daisy, then Connect again.", "w");
+}
+if ("serial" in navigator) navigator.serial.addEventListener("disconnect", () => { st.link = false; dirty = true; });
+$("connect").onclick = connect;
+
+/* Served by the Mac build (http://localhost:8040): read its event stream */
+function connectMac() {
+  $("connect").classList.add("hidden"); // the Mac build has no Daisy to connect
+  const es = new EventSource("/events");
+  es.onopen = () => { st.link = true; st.mac = true; st.gotData = false; dirty = true; log("connected to the Mac build"); };
+  es.onmessage = e => handleLine(e.data);
+  es.onerror = () => { if (st.link) log("lost the Mac build, retrying", "w"); st.link = false; dirty = true; };
+}
+if (location.protocol.startsWith("http")) {
+  connectMac();
+  $("tftpanel").classList.remove("hidden");
+  const ui = a => fetch("/ui?a=" + a).catch(() => {});
+  document.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => ui(b.dataset.ui));
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.key === "ArrowLeft") ui("turn&d=-1");
+    else if (e.key === "ArrowRight") ui("turn&d=1");
+    else if (e.key === "Enter") ui("push");
+    else if (e.key === "Escape") ui("back");
+    else return;
+    e.preventDefault();
+  });
+  const tft = $("tft");
+  tft.style.cursor = "crosshair";
+  tft.title = "click = tap the touch screen";
+  tft.addEventListener("click", e => { // the touch screen
+    const r = tft.getBoundingClientRect();
+    const x = Math.round((e.clientX - r.left) * 480 / r.width), y = Math.round((e.clientY - r.top) * 320 / r.height);
+    ui(`touch&x=${x}&y=${y}`);
+  });
+  let tftBusy = false;
+  setInterval(() => {
+    if (tftBusy || document.hidden) return;
+    tftBusy = true;
+    const img = new Image();
+    img.onload = () => { tft.src = img.src; tftBusy = false; };
+    img.onerror = () => { tftBusy = false; };
+    img.src = "/tft.bmp?" + Date.now();
+  }, 120);
+}
+
+/* ---------------- demo: fake device, same protocol ---------------- */
+let demoTimer = null;
+function stopDemo() { if (demoTimer) { clearInterval(demoTimer); demoTimer = null; st.demo = false; } }
+function startDemo() {
+  if (demoTimer) { stopDemo(); return; }
+  st.demo = true;
+  const grid = Array.from({ length: NT }, () => new Array(NS).fill(0));
+  [0, 4, 8, 12].forEach(s => grid[0][s] = 2); grid[1][4] = grid[1][12] = 2;
+  for (let s = 0; s < 16; s += 2) if (s !== 14) grid[2][s] = s % 4 ? 2 : 1;
+  grid[3][14] = 1; grid[4][12] = 1; grid[6][3] = grid[6][7] = grid[6][13] = 1;
+  const trig = new Array(NT).fill(0);
+  const tr = Array.from({ length: NT }, (_, t) => [100, 64 + (t - 4) * 6, t === 4 ? 70 : 0, t === 7 ? 60 : 0, 64, 127, 64, 25, 0, 0, 0, 127]);
+  let t0 = performance.now(), lastStep = -1, sel = 0, fx = 0, n = 0;
+  handleLine("L ApcBox start (demo)");
+  handleLine("L SD ok: 4 kits, 6 sample folders");
+  handleLine("B 2 6 4 23"); handleLine("BF samples/breaks"); handleLine("BN amen_170.wav");
+  handleLine("K 0 5 1 -1");
+  ["built-in", "808 classic", "909 dirt", "lofi tapes", "perc box"].forEach((k, i) => handleLine(`KN ${i} ${i} ${k}`));
+  handleLine("N 0 BD_tape_03.wav"); handleLine("N 1 SD_crack.wav");
+  handleLine("M 108 64 70 76 40 45 0 100 30 64");
+  ["kick", "snare", "closed hat", "open hat", "clap", "tom", "rim", "cowbell"].forEach((n, i) => { if (i > 1) handleLine(`N ${i} [808 ${n}]`); handleLine(`N ${i + 8} [909 ${n}]`); });
+  demoTimer = setInterval(() => {
+    n++;
+    const bpm = 124, stepLen = 60000 / bpm / 4;
+    const step = Math.floor((performance.now() - t0) / stepLen) % 16;
+    if (step !== lastStep) {
+      lastStep = step;
+      for (let t = 0; t < NT; t++) if (grid[t][step]) trig[t]++;
+      if (step === 0 && Math.random() < 0.3) sel = (sel + 1) % NT;
+    }
+    if (n % 90 === 0) { fx = Math.random() < 0.5 ? 1 << Math.floor(Math.random() * 8) : 0; handleLine(`E 1 0 ${0x37} 127`); }
+    if (n % 7 === 0) { tr[sel][6] = Math.round(64 + 50 * Math.sin(n / 40)); handleLine(`E 3 ${sel} 18 ${tr[sel][6]}`); }
+    handleLine(`S 1 ${step} 0 -1 0 ${bpm * 10} 0 ${sel} ${Math.floor(n / 150) % 4} 0 0 ${380 + Math.round(40 * Math.random())} 520 1 1 1 ${fx} 0 0 32 0 0 3 0 0 0 ${trig.slice(0, 8).join(" ")} 0 1 0 0 ${sel >> 3} ${trig.slice(8).join(" ")}`);
+    handleLine("G 0 " + grid.map(r => r.join("")).join(""));
+    tr.forEach((v, t) => handleLine(`T ${t} ${v.join(" ")}`));
+    const want = [], sent = [];
+    for (let i = 0; i < 16; i++) want.push(i === step ? 5 : grid[sel][i] === 2 ? 3 : grid[sel][i]);
+    for (let i = 0; i < 8; i++) want.push(i === 0 ? 1 : 0);
+    for (let i = 0; i < 8; i++) want.push(fx >> i & 1 ? 3 : 5);
+    for (let i = 0; i < 8; i++) want.push(i === sel ? 5 : 0);
+    for (let i = 0; i < 8; i++) want.push(0);                  // rec arm
+    for (let i = 0; i < 8; i++) want.push(0);                  // solo
+    for (let i = 0; i < 8; i++) want.push(i === 5 ? 0 : 1);    // activator
+    for (let i = 0; i < 8; i++) want.push(i === sel ? 1 : 0);  // track select
+    for (let i = 0; i < 8; i++) want.push(grid[i].some(v => v) ? 1 : 0); // clip stop
+    want.forEach((w, i) => sent.push(i === 20 && n % 200 < 100 ? 9 : w));
+    handleLine(`W ${want.join("")} ${sent.join("")}`);
+  }, 33);
+}
+$("demo").onclick = startDemo;
+if (location.hash === "#demo") startDemo();
+render();
+</script>
+</body>
+</html>
