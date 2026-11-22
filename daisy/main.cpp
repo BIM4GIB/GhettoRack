@@ -91,6 +91,50 @@ DIR                 dir;
 FILINFO             fno;
 
 T95Ports t95; // controllers on the T95, through the bridge
+
+/* Main loop timing: MIDI from either USB port waits for the next pass, so a
+   slow part of the loop is input latency. The slowest parts are logged. */
+const char* const kLoopPart[8] = {"usb-a", "serial in", "box", "t95", "serial out", "oled", "tft", "sd"};
+uint32_t          loop_part_max[8];
+uint32_t          loop_max = 0, loop_mark = 0, loop_log_time = 0;
+inline void       LoopPart(int i)
+{
+    uint32_t u = System::GetUs();
+    if(u - loop_mark > loop_part_max[i])
+        loop_part_max[i] = u - loop_mark;
+    loop_mark = u;
+}
+void LoopReport(uint32_t now, uint32_t start_us)
+{
+    uint32_t d = System::GetUs() - start_us;
+    if(d > loop_max)
+        loop_max = d;
+    if(now - loop_log_time < 10000)
+        return;
+    loop_log_time = now;
+    if(loop_max > 5000) // only when a pass took more than 5 ms
+    {
+        int o[8] = {0, 1, 2, 3, 4, 5, 6, 7}; // parts, slowest first
+        for(int i = 0; i < 8; i++)
+            for(int j = i + 1; j < 8; j++)
+                if(loop_part_max[o[j]] > loop_part_max[o[i]])
+                {
+                    int t = o[i];
+                    o[i]  = o[j];
+                    o[j]  = t;
+                }
+        int a = o[0], b = o[1], c = o[2];
+        Log("loop: slowest pass %lu.%lu ms in 10 s; %s %lu.%lu, %s %lu.%lu, %s %lu.%lu",
+            (unsigned long)(loop_max / 1000), (unsigned long)(loop_max % 1000 / 100), kLoopPart[a],
+            (unsigned long)(loop_part_max[a] / 1000), (unsigned long)(loop_part_max[a] % 1000 / 100),
+            kLoopPart[b], (unsigned long)(loop_part_max[b] / 1000),
+            (unsigned long)(loop_part_max[b] % 1000 / 100), kLoopPart[c],
+            (unsigned long)(loop_part_max[c] / 1000), (unsigned long)(loop_part_max[c] % 1000 / 100));
+    }
+    loop_max = 0;
+    for(int i = 0; i < 8; i++)
+        loop_part_max[i] = 0;
+}
 bool     SendLine(const char* l) { return ui_link.TryLine(l); }
 void     OnHostCmd(const HostCmd& c, HostCmd::Cmd cmd) { t95.OnCmd(c, cmd, System::GetNow()); }
 
@@ -728,7 +772,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.5 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.6 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */
@@ -852,6 +896,8 @@ int main(void)
             blink_time = now + (usbHost.GetPresent() ? 400 : 80);
         }
 
+        uint32_t loop_start = System::GetUs();
+        loop_mark           = loop_start;
         diag::Stage(101);
         usbHost.Process();
 
@@ -881,6 +927,7 @@ int main(void)
             }
         }
 
+        LoopPart(0);
         diag::Stage(103);
         ui_link.Poll(); // host commands, T95 controller frames
         if(ui_link.BootRequested())
@@ -896,17 +943,25 @@ int main(void)
             BoxResync();
             t95.ForceReport();
         }
+        LoopPart(1);
         BoxPoll(now);
+        LoopPart(2);
         t95.Poll(now, up); // after BoxPoll: LED states are fresh
         diag::Stage(104);
         if(up && mode_sent)
             LedFlush(now);
+        LoopPart(3);
         diag::Stage(105);
         ui_link.Flush();
+        LoopPart(4);
         diag::Stage(106);
         oled.Poll(now);
+        LoopPart(5);
         tft.Poll(now);
+        LoopPart(6);
         SdPoll(now);
+        LoopPart(7);
+        LoopReport(now, loop_start);
         {
             /* USB audio: say when a host starts / stops listening */
             static bool     was = false;

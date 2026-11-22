@@ -575,6 +575,20 @@ class MidiTest(unittest.TestCase):
         kinds = {c["name"]: c["kind"] for c in h["controllers"]}
         self.assertEqual(kinds, {"APC40 mkII-ish APC40": "apc40 (driving)", "LPK25": "keys"})
 
+    def test_m7b_daisy_forgets_a_port(self):
+        # The Daisy's P line stops listing a port we still have: re-announce it
+        self.daisy.frames.clear()
+        end = time.time() + 4
+        while len(self.daisy.got("N")) < 2 and time.time() < end:
+            self.daisy.send("P 1 00 00 00 -1\n")  # the Daisy sends one a second
+            time.sleep(0.5)
+        self.assertGreaterEqual(len(self.daisy.got("N")), 2)
+        n = len(self.daisy.got("N"))
+        self.daisy.send("P 1 00 00 00 -1\nP 1 00 00 00 -1\n")
+        time.sleep(0.5)
+        self.assertEqual(len(self.daisy.got("N")), n, "re-announced more than every 2 s")
+        self.daisy.send("P 1 03 01 02 1\n")
+
     def test_m8_daisy_stops_reading_controller_floods(self):
         self.daisy.reading = False
         k = self.port_of("LPK25")

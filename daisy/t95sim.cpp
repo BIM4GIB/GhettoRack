@@ -128,6 +128,10 @@ int main(int argc, char** argv)
     uint32_t last = NowMs();
     for(;;)
     {
+        /* Like main.cpp: `now` is read at the top of the pass, frames are
+           stamped when parsed, a little later */
+        uint32_t now = NowMs();
+        usleep(1500);
         uint8_t buf[512];
         ssize_t n = read(master, buf, sizeof(buf));
         for(ssize_t i = 0; i < n; i++)
@@ -141,7 +145,6 @@ int main(int argc, char** argv)
             else if(c > HostCmd::kBoot)
                 t95.OnCmd(cmd, c, NowMs());
         }
-        uint32_t now = NowMs();
         while(last != now) // 1 ms of audio per ms, like the Daisy
         {
             eng_.SetInput(in, in);
@@ -150,6 +153,5 @@ int main(int argc, char** argv)
         }
         BoxPoll(now);
         t95.Poll(now, false);
-        usleep(500);
     }
 }

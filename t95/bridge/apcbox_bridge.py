@@ -253,11 +253,12 @@ class MidiPort:
         self.out_led = collections.OrderedDict()
         self.out_buf = b""      # bytes of a message the device took only part of
         self.writing = False
+        self.announced = 0.0
         self.in_msgs = self.out_msgs = 0
         self.dropped_in = self.dropped_out = self.coalesced = 0
 
     def info(self, kinds):
-        return {"port": self.num, "name": self.name, "path": self.path, "kind": kinds.get(self.num, "?"),
+        return {"port": self.num, "name": self.name, "path": self.path, "kind": kinds.get(self.num, "not on the Daisy"),
                 "in": self.in_msgs, "out": self.out_msgs, "dropped_in": self.dropped_in,
                 "dropped_out": self.dropped_out, "coalesced": self.coalesced,
                 "realtime_dropped": self.parser.realtime, "bad_in": self.parser.dropped}
@@ -508,7 +509,23 @@ class Bridge:
             self.ctl = v
             log.info("Daisy speaks control protocol %d: forwarding controllers", v)
             for p in self.ports.values():  # (re)announce everything
-                self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
+                self.announce_port(p)
+            return
+        # The Daisy dropped a port we still have (its keepalive timed out, it
+        # rebooted without a USB reset...): tell it again, at most every 2 s
+        try:
+            att = int(line.split()[2], 16)
+        except (IndexError, ValueError):
+            return
+        t = now()
+        for p in self.ports.values():
+            if not att & (1 << (p.num - 1)) and t - p.announced > 2.0:
+                log.info("Daisy doesn't list port %d (%s): announcing it again", p.num, p.name)
+                self.announce_port(p)
+
+    def announce_port(self, p):
+        p.announced = now()
+        self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
 
     def pong(self, line):
         sent = self.pings.pop(line[2:].strip(), None)
@@ -606,7 +623,7 @@ class Bridge:
         self.ports[p.num] = p
         asyncio.get_running_loop().add_reader(fd, self.on_midi_readable, p)
         log.info("controller %s on %s: port %d", p.name, path, p.num)
-        self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
+        self.announce_port(p)
         self.announce()
 
     def detach_midi(self, p, why=""):

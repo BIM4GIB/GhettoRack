@@ -62,7 +62,7 @@ class T95Ports
     /** Main loop. direct_up: an APC40 is running on the Daisy's own USB-A */
     void Poll(uint32_t now, bool direct_up)
     {
-        if(any_attached() && now - last_frame_ > kKeepalive)
+        if(any_attached() && Since(now, last_frame_) > (int32_t)kKeepalive)
         {
             ab::BoxLog("T95 bridge silent for 2 s: dropping its controllers");
             for(int p = 1; p <= kPorts; p++)
@@ -76,7 +76,7 @@ class T95Ports
             static const uint8_t kInquiry[6] = {0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7};
             if(!o.inquiry_sent && SendHex(p, kInquiry, 6))
                 o.inquiry_sent = true;
-            if(o.kind == kUnknown && now - o.attach_time > kIdentify)
+            if(o.kind == kUnknown && Since(now, o.attach_time) > (int32_t)kIdentify)
             {
                 o.kind   = LooksLikeApc(o.name) ? kApc : kKeys;
                 changed_ = true;
@@ -107,7 +107,7 @@ class T95Ports
         if(active_ > 0)
             Drive(port_[active_], active_, now);
 
-        if(changed_ || now - p_time_ >= 1000)
+        if(changed_ || Since(now, p_time_) >= 1000)
         {
             char l[48];
             snprintf(l, sizeof(l), "P %d %02x %02x %02x %d", kVersion, Mask(-1), Mask(kApc),
@@ -129,6 +129,12 @@ class T95Ports
     uint32_t Unattached() const { return unattached_; } // M frames for unknown ports
 
   private:
+    /* Signed: frames are stamped when they're parsed, which on the Daisy can
+       be a millisecond or two after the main loop read `now`. Unsigned
+       now - t then wrapped to ~49 days and dropped every T95 controller
+       (v13.5 on the rig, 2026-11-22). */
+    static int32_t Since(uint32_t now, uint32_t t) { return (int32_t)(now - t); }
+
     enum Kind : uint8_t
     {
         kUnknown,
@@ -282,7 +288,7 @@ class T95Ports
     {
         if(!o.mode_done)
         {
-            if(now - o.intro_time < 60) // a gap between SysEx messages, as on USB-A
+            if(Since(now, o.intro_time) < 60) // a gap between SysEx messages, as on USB-A
                 return;
             /* Known device id: one intro. Otherwise the broadcast and the two
                ids these units usually have, like the USB-A path */
@@ -305,7 +311,7 @@ class T95Ports
             changed_ = true;
             return;
         }
-        if(now - o.mode_time < 100)
+        if(Since(now, o.mode_time) < 100)
             return;
         /* Up to 16 changed LEDs per line; marked sent once the line is queued */
         int          n;

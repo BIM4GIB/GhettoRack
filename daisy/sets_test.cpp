@@ -730,6 +730,21 @@ int main()
         CHECK(!shift); // held buttons released
         CHECK(T95Count("P 1 00 00 00 -1") >= 1);
 
+        /* A frame stamped a moment after the main loop read the clock (how the
+           Daisy does it) must not look like 49 days of silence */
+        T95Frame("\x1bN4 LPK25\n");
+        {
+            HostCmd h;
+            for(unsigned char b : std::string("\x1bK"))
+                if(h.Feed(b) == HostCmd::kKeepalive)
+                    t95p.OnCmd(h, HostCmd::kKeepalive, now_ms + 3);
+        }
+        t95p.Poll(now_ms, false);
+        CHECK(t95p.AnyAttached());
+        T95Tick(5);
+        CHECK(t95p.AnyAttached());
+        T95Frame("\x1bN4 -\n");
+
         /* garbage and frames for ports nobody announced do nothing */
         T95Frame("\x1bM3 903c64\n\x1bM9 903c64\n\x1bMx\n\x1bN\n");
         CHECK(t95p.Unattached() == 1);
