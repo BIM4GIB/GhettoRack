@@ -19,6 +19,24 @@ button, key or touch during the countdown stays on the selector.
 It takes the HDMI console (tty1); SSH keeps working. `--remove` gives the
 console back. Packages stay installed.
 
+## Speed
+
+`python3 t95/kiosk/gpuinfo.py` prints what `chrome://gpu` would: whether
+compositing and rasterization run on the Mali (panfrost) or in software.
+It uses Chromium's DevTools, which the service opens on 127.0.0.1:9222
+only (anyone logged into the T95 could drive the browser through it).
+
+Try Chromium flags without editing the service:
+
+```
+echo 'CHROMIUM_FLAGS=--ignore-gpu-blocklist --enable-gpu-rasterization' | sudo tee /etc/default/kiosk
+sudo systemctl restart kiosk
+sudo rm /etc/default/kiosk; sudo systemctl restart kiosk     # back to plain
+```
+
+Seen on the T95 (2026-11-22): panfrost loaded, `/dev/dri/renderD128`
+present, HDMI at 1920x1080, pages very slow to draw, slowest at first.
+
 **Not tried on the T95 yet:** whether cage and Chromium get GPU
 acceleration from the H616's Mali (panfrost) on this kernel, how fast the
 pages are, and the TV's resolution. If Chromium is too slow, try
