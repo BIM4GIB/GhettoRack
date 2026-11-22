@@ -1,7 +1,12 @@
 # GhettoRack: brief for agents
 
-GhettoRack is Rene's DIY groovebox rig. Read this first, then the folder you're
-working in.
+GhettoRack is Rene's modular standalone electronic instrument for home jams and
+portable live use. Read this first, then the folder you're working in.
+
+The Daisy Seed 3 running ApcBox is a core component, not an optional peripheral.
+The planned startup selector chooses one module or compatible combinations,
+with focused views. ApcBox, the Numark DJ mode, and network clock mode are parts
+of the wider project; do not narrow the architecture to any one controller.
 
 ## What it is
 
@@ -46,7 +51,10 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 ## Rules that matter
 
 - **Timing lives on the Daisy.** Sequencer, voices, FX and mixer run on the
-  Daisy's audio clock. Other devices send controls, never the beat.
+  Daisy's audio clock. The T95 handles controls and networking; browser or Linux
+  scheduling must not become the per-step timing source. Planned external MIDI /
+  network clock leader and follower modes must explicitly translate and track
+  tempo/phase on the Daisy. Do not confuse musical sync with the audio sample clock.
 - **Daisy works standalone.** With nothing but the APC40 on its USB host port.
 - **Keep the protocol in step.** Change a report line: bump `kReportVersion` in
   `daisy/box.cpp` and `REPORT_VERSION` in `daisy/ui/apcbox-ui.html`, and update
@@ -56,10 +64,42 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   hot-swap, sync set switching on the real card). Say so.
 - `box.cpp` is shared by the firmware and the Mac build: no Daisy-only calls
   there; Daisy specifics go in `main.cpp`, `tft.h`, `usbdev.cpp`.
-- SDRAM is ~93% used (slots + staging pool). Check `arm-none-eabi-size -A` before
-  adding big buffers.
+- SDRAM is reported ~93% used (slots + staging pool). Verify against the current
+  build with `arm-none-eabi-size -A` before adding buffers. 64 MB total SDRAM is
+  not 64 MB available for incoming samples.
 - The screen (SunFounder 3.5", ST7796U behind shift registers) needs 16-bit
   command words; `tft.h` defaults to that, encoder held at power-up switches.
+
+## T95 integration rules
+
+- Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
+  before changing the bridge or USB transport. Firmware v13.x and serial report
+  version 7 are separate version numbers.
+- Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
+  uses SSE at `/events`; reuse it for initial telemetry rather than introducing
+  another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
+  must be capability-gated for a Daisy-backed bridge.
+- Current Daisy CDC input supports only `R` (state dump) and `B` (bootloader).
+  Do not send MIDI or sample payloads until a framed, versioned receive protocol
+  exists. Payload bytes must not fall through to those legacy commands.
+- One bridge owns the Daisy serial port. Identify the device by VID/PID and
+  serial, not a hardcoded tty index. Raw MIDI card indices are also unstable.
+  Separate device connection, telemetry freshness and browser connection status.
+- Use bounded queues and explicit overflow handling. Slow browsers and sample
+  transfers must not block MIDI forwarding or the Daisy audio callback.
+  Apply real-time scheduling only to measured, bounded timing work, not the
+  web server, filesystem operations or logging. Measure latency and jitter.
+- Keep bootable recovery media and board-specific DTB/firmware changes intact.
+  Re-identify disks before a write; device numbers in docs are observations,
+  not portable install targets. Do not include destructive commands in general
+  setup scripts without explicit target validation.
+- Never commit Wi-Fi credentials, private keys, raw eMMC dumps or personal
+  samples. Follow the existing release convention for firmware binaries;
+  large OS images belong in release assets with checksums and build provenance.
+- For documentation-only changes, check facts, paths and the diff. For protocol
+  or bridge changes, test fragmentation, reconnects, multiple clients and queue
+  pressure. Hardware claims require hardware evidence; desktop tests alone do
+  not establish USB compatibility or gig readiness.
 
 ## Working with Rene
 
