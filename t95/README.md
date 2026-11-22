@@ -16,8 +16,9 @@ quantisation and network clock roles are also in scope.
 HDMI console, Wi-Fi, SSH and root filesystem expansion have been observed.
 The post-install check reported zero failed systemd services.
 
-The bridge, kiosk, controller forwarding and sample transfer below remain
-planned. Existing ApcBox firmware and its Mac UI are the starting point, not
+The read-only telemetry bridge is written and desktop-tested
+([`bridge/`](bridge/README.md)), not yet run on the T95. Kiosk, controller
+forwarding and sample transfer remain planned. Existing ApcBox firmware and its Mac UI are the starting point, not
 features already deployed on the T95.
 
 ## Hardware and evidence
@@ -34,6 +35,8 @@ features already deployed on the T95.
 | Debug UART | Pads labelled GND / TX / RX. Adapter loopback passed, but no board console was obtained. Root access came from Android `adb root`, not UART |
 | Audio | User reports enumerated H616 analogue, SPDIF and HDMI cards; enumeration is not a playback/latency qualification |
 | IR | User verified receiver with `ir-keytable`: extended NEC (`necx`), remote address `0x2fe` |
+| Daisy link | v13.2 Daisy on USB1: bus 5, full-speed OHCI, alone. CDC `ttyACM0` and UAC card `ApcBox`; `arecord` showed signal at 48 kHz stereo. Serial reports not yet read (see below) |
+| Second socket | USB0: an LPK25 enumerated on bus 8 (OHCI). The USB 2.0 side of that socket is not yet confirmed |
 | MIDI | User verified raw MIDI, e.g. an LPK25 at `/dev/snd/midiC3D0`. `CONFIG_SND_RAWMIDI=y`; ALSA sequencer support absent in this build |
 | Power | 5 V DC input. Size the supply and powered hub for measured peripheral load; verify polarity and prevent backfeeding |
 
@@ -157,8 +160,10 @@ VID `1209`, PID `0001`, product `ApcBox`, serial derived from STM32 unique ID.
 - UAC1 stereo 48 kHz / 16-bit audio **from Daisy to host**. The asynchronous
   stream follows the Daisy's audio clock.
 - No USB-MIDI class and no host-to-Daisy audio stream yet.
-- CDC host commands currently consist only of `R` (full state dump) and
-  `B` (enter bootloader). Musical control and sample transfer need new firmware.
+- CDC host commands currently consist only of `ESC R` (full state dump) and
+  `ESC BOOT` (enter bootloader), from v13.3. Older firmware acts on any bare
+  `R`/`B`: on 2026-11-22 an echoing `stty`/`cat` sent a v13.2 Daisy into its
+  bootloader. Musical control and sample transfer need new firmware.
 
 Planned wiring:
 
@@ -174,7 +179,7 @@ same port for the standalone APC40 host; role selection needs an explicit design
 
 ## Implementation sequence
 
-1. **Read-only telemetry bridge.** Own the serial connection, request `R`,
+1. **Read-only telemetry bridge.** Own the serial connection, request `ESC R`,
    assemble complete report lines, and serve them over SSE at `/events`.
    Preserve the existing parser and direct Web Serial path. Support reconnect,
    multiple browsers and bounded buffering. Show Daisy link health separately

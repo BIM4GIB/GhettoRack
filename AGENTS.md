@@ -45,7 +45,8 @@ daisy/mac/build.sh                 # macOS build of the same engine
 tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
-touch), `liverec_test.cpp`, `acid_engine_test.cpp`, `host_test.cpp`; build lines
+touch), `hostcmd_test.cpp` (serial commands vs echo), `liverec_test.cpp`,
+`acid_engine_test.cpp`, `host_test.cpp`, `t95/bridge/test_bridge.py`; build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
 
 ## Rules that matter
@@ -79,7 +80,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
   must be capability-gated for a Daisy-backed bridge.
-- Current Daisy CDC input supports only `R` (state dump) and `B` (bootloader).
+- Current Daisy CDC input supports only `ESC R` (state dump) and `ESC BOOT`
+  (bootloader); v13.2 and older act on any bare `R`/`B` byte, so never open the
+  port with echo on (plain `cat`/`stty`/`screen` on Linux).
   Do not send MIDI or sample payloads until a framed, versioned receive protocol
   exists. Payload bytes must not fall through to those legacy commands.
 - One bridge owns the Daisy serial port. Identify the device by VID/PID and

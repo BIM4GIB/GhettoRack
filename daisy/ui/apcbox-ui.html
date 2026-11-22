@@ -114,6 +114,7 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
   <button id="connect" class="primary">Connect Daisy</button>
   <button id="demo">Demo</button>
   <span id="c-link" class="chip">Daisy: not connected</span>
+  <span id="c-bridge" class="chip hidden">T95 bridge: ?</span>
   <span id="c-apc" class="chip">APC40: ?</span>
   <span id="c-sd" class="chip">SD: ?</span>
   <div class="stat"><span class="lbl">Transport</span><span id="transport" class="big">■</span></div>
@@ -278,7 +279,7 @@ function handleLine(line) {
   const tag = sp < 0 ? line : line.slice(0, sp);
   const rest = sp < 0 ? "" : line.slice(sp + 1);
   const nums = () => rest.split(" ").map(Number);
-  st.gotData = true;
+  st.gotData = true; st.lastData = performance.now();
   switch (tag) {
     case "S": {
       const a = nums();
@@ -445,6 +446,12 @@ function render() {
   dirty = false;
 
   const who = st.mac ? "Mac build" : "Daisy";
+  if (st.bridge) {
+    const fresh = st.gotData && now - st.lastData < 3000;
+    chip("c-bridge", st.bridge.up ? "T95 bridge: connected" : "T95 bridge: lost, retrying", st.bridge.up ? "ok" : "bad");
+    chip("c-link", !st.bridge.up ? "Daisy: unknown" : !st.bridge.daisy ? "Daisy: not on the T95" : fresh ? "Daisy: connected" : "Daisy: no data",
+         !st.bridge.up ? "warn" : !st.bridge.daisy ? "bad" : fresh ? "ok" : "warn");
+  } else
   chip("c-link", st.demo ? "Demo data" : st.link ? (st.gotData ? who + ": connected" : who + ": waiting for data") : who + ": not connected",
        st.demo ? "warn" : st.link ? (st.gotData ? "ok" : "warn") : "bad");
   chip("c-apc", st.apcUp ? "APC40: running" : st.apcPresent ? "APC40: enumerating" : "APC40: not plugged", st.apcUp ? "ok" : st.apcPresent ? "warn" : "bad");
@@ -621,7 +628,7 @@ async function connect() {
   } catch (e) { log("connect: " + e.message, "w"); return; }
   st.link = true; st.gotData = false; dirty = true;
   log("port open, asking the Daisy for a full state dump");
-  try { const w = port.writable.getWriter(); await w.write(new TextEncoder().encode("R")); w.releaseLock(); } catch (e) { log("write: " + e.message, "w"); }
+  try { const w = port.writable.getWriter(); await w.write(new TextEncoder().encode("\x1bR")); w.releaseLock(); } catch (e) { log("write: " + e.message, "w"); }
   readLoop();
 }
 async function readLoop() {
@@ -653,7 +660,26 @@ function connectMac() {
   es.onmessage = e => handleLine(e.data);
   es.onerror = () => { if (st.link) log("lost the Mac build, retrying", "w"); st.link = false; dirty = true; };
 }
-if (location.protocol.startsWith("http")) {
+/* Served by the T95 bridge (t95/bridge): the Daisy's own report lines over SSE.
+   Read-only: the Mac build's /ui controls and /tft.bmp don't exist there. */
+function connectBridge(caps) {
+  $("connect").classList.add("hidden");
+  $("c-bridge").classList.remove("hidden");
+  st.bridge = { up: false, daisy: false };
+  const es = new EventSource("/events");
+  es.onopen = () => { st.bridge.up = true; st.link = true; st.gotData = false; dirty = true; log("connected to the T95 bridge"); };
+  es.onmessage = e => handleLine(e.data);
+  es.addEventListener("bridge", e => {
+    try {
+      const b = JSON.parse(e.data);
+      if (b.daisy !== st.bridge.daisy) log(b.daisy ? `bridge: Daisy on ${b.port}` : "bridge: Daisy not connected to the T95", b.daisy ? "" : "w");
+      st.bridge.daisy = !!b.daisy; dirty = true;
+    } catch (err) {}
+  });
+  es.onerror = () => { if (st.bridge.up) log("lost the T95 bridge, retrying", "w"); st.bridge.up = false; st.link = false; dirty = true; };
+  setInterval(() => { dirty = true; }, 1000); // data freshness
+}
+function setupMacUi() {
   connectMac();
   $("tftpanel").classList.remove("hidden");
   const ui = a => fetch("/ui?a=" + a).catch(() => {});
@@ -684,6 +710,11 @@ if (location.protocol.startsWith("http")) {
     img.onerror = () => { tftBusy = false; };
     img.src = "/tft.bmp?" + Date.now();
   }, 120);
+}
+if (location.protocol.startsWith("http")) {
+  // The bridge answers /caps; the Mac build doesn't (404), so it keeps its controls
+  fetch("/caps").then(r => r.ok ? r.json() : null).catch(() => null)
+    .then(caps => caps && caps.source === "daisy-bridge" ? connectBridge(caps) : setupMacUi());
 }
 
 /* ---------------- demo: fake device, same protocol ---------------- */

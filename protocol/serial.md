@@ -14,15 +14,28 @@ There is no USB-MIDI interface and no audio OUT (host to Daisy) yet.
 
 ## Host to Daisy
 
-| Byte | Does |
-|---|---|
-| `R` | Send a full state dump (every line below, now) |
-| `B` | Reboot into the Daisy bootloader (used by `tools/flash-seed.sh`) |
+From firmware v13.3, every command starts with ESC (0x1B):
 
-Everything else is ignored. **There is no control path yet.** Planned next:
-a framed MIDI-in command so the T95 bridge can forward controller MIDI into the
-same handler the USB-host APC40 uses (`BoxMidi` in `daisy/box.cpp`), and LED
-output coming back the same way.
+| Bytes | Does |
+|---|---|
+| `ESC R` (1B 52) | Send a full state dump (every line below, now) |
+| `ESC BOOT` (1B 42 4F 4F 54) | Reboot into the Daisy bootloader (used by `tools/flash-seed.sh`) |
+
+Bare bytes are ignored, and so are other letters after ESC (reserved for the
+framed control protocol). The Daisy never sends ESC, so a host tty that
+echoes the Daisy's output back (the Linux default until `-echo` is set) can't
+trigger a command. Before v13.3 any single `R` or `B` byte did, and report
+lines are full of both: an echoing `stty`/`cat` on the T95 sent a v13.2 Daisy
+into its bootloader. Hosts should still open the port raw with echo off.
+
+Older firmware ignores the ESC and acts on the `R` or `B` after it, so hosts
+can send the ESC forms to any version. Parser: `daisy/hostcmd.h`, test
+`daisy/hostcmd_test.cpp`.
+
+**There is no control path yet.** Planned next: a framed MIDI-in command so
+the T95 bridge can forward controller MIDI into the same handler the USB-host
+APC40 uses (`BoxMidi` in `daisy/box.cpp`), and LED output coming back the
+same way.
 
 ## Daisy to host
 

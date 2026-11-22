@@ -5,10 +5,11 @@
  *  in chunks from two alternating buffers: a buffer is only refilled after
  *  a later transmit has been accepted, which means it has been delivered.
  *
- *  Anything received from the Mac containing 'R' asks for a full resend
- *  of the state (the UI sends it when it connects).
+ *  Host commands (ESC R = full resend, ESC BOOT = bootloader) are parsed by
+ *  HostCmd in hostcmd.h; bare bytes are ignored.
  */
 #pragma once
+#include "hostcmd.h"
 #include "daisy_seed.h"
 #include "usbdev.h"
 #include <cstdarg>
@@ -112,12 +113,16 @@ class Link
     {
         for(uint32_t i = 0; i < len; i++)
         {
-            if(buf[i] == 'R')
-                resync_ = true;
-            if(buf[i] == 'B') // flash script: go to the bootloader
-                boot_ = true;
+            switch(cmd_.Feed(buf[i]))
+            {
+                case HostCmd::kResync: resync_ = true; break;
+                case HostCmd::kBoot: boot_ = true; break; // flash script
+                default: break;
+            }
         }
     }
+
+    static HostCmd cmd_;
 
     char                 ring_[kRing];
     uint32_t             head_ = 0, tail_ = 0;

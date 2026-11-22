@@ -20,8 +20,8 @@ if [ "$(mode)" = none ]; then
   PORT=$(ls /dev/cu.usbmodem* 2>/dev/null | head -1)
   if [ -n "$PORT" ]; then
     echo "asking ApcBox on $PORT to go to the bootloader..."
-    stty -f "$PORT" 115200 2>/dev/null
-    printf B > "$PORT" 2>/dev/null || echo "couldn't write to $PORT (monitor page still connected?)"
+    stty -f "$PORT" 115200 raw -echo 2>/dev/null
+    printf '\033BOOT' > "$PORT" 2>/dev/null || echo "couldn't write to $PORT (monitor page still connected?)"
   fi
   echo "waiting for the Daisy bootloader (if nothing happens in a few seconds,"
   echo "unplug the Daisy's USB-C and plug it back in)..."

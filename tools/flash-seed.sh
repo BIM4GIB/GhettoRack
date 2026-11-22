@@ -67,8 +67,8 @@ if [ "$PORT" != none ]; then
   [ -e "$PORT" ] || fail "$PORT isn't there."
   echo "$PORT" > "$SAVED"
   say "asking the Seed on $PORT to go to its bootloader..."
-  $STTY "$PORT" 115200 2>/dev/null
-  printf B > "$PORT" 2>/dev/null || fail "can't write to $PORT. Close the monitor page's connection to it."
+  $STTY "$PORT" 115200 raw -echo 2>/dev/null
+  printf '\033BOOT' > "$PORT" 2>/dev/null || fail "can't write to $PORT. Close the monitor page's connection to it."
 fi
 
 echo "  waiting for exactly one Seed in the bootloader..."

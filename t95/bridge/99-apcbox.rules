@@ -1,0 +1,4 @@
+# ApcBox (Daisy Seed) USB serial: stable /dev/apcbox link, dialout access,
+# and keep ModemManager from probing it with AT commands.
+# The bridge finds the Daisy by VID/PID itself; the link is for people.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", SYMLINK+="apcbox", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"

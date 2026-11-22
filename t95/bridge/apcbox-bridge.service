@@ -1,0 +1,19 @@
+[Unit]
+Description=ApcBox telemetry bridge (Daisy USB serial to SSE on :8040)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ui /opt/apcbox-bridge/apcbox-ui.html
+Restart=always
+RestartSec=2
+# Own throwaway user; dialout for the serial port, nothing else
+DynamicUser=yes
+SupplementaryGroups=dialout
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+# No real-time priority: this is telemetry and web serving, not timing work
+
+[Install]
+WantedBy=multi-user.target
