@@ -1,6 +1,8 @@
 [Unit]
 Description=GhettoRack kiosk: Chromium full screen on HDMI (cage)
-After=systemd-user-sessions.service apcbox-bridge.service
+# After getty@tty1 too: Conflicts alone stops the console login in parallel,
+# and its hangup of tty1 killed our first start (seen on the T95)
+After=systemd-user-sessions.service apcbox-bridge.service getty@tty1.service
 Wants=apcbox-bridge.service
 # It takes over the HDMI console; SSH still works
 Conflicts=getty@tty1.service
