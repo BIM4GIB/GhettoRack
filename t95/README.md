@@ -36,6 +36,7 @@ features already deployed on the T95.
 | Audio | User reports enumerated H616 analogue, SPDIF and HDMI cards; enumeration is not a playback/latency qualification |
 | IR | User verified receiver with `ir-keytable`: extended NEC (`necx`), remote address `0x2fe` |
 | Daisy link | Daisy on USB1: bus 5, full-speed OHCI, alone. CDC `ttyACM0` and UAC card `ApcBox`; `arecord` showed signal at 48 kHz stereo |
+| Kiosk | 2026-11-22: cage + Chromium 156 on HDMI at 1920x1080, GPU compositing on the Mali-G31 (panfrost, Mesa 25.0.7) with `--ignore-gpu-blocklist --enable-gpu-rasterization` in `/etc/default/kiosk`. Selector shows; ApcBox page keeps up at 120 BPM after the page drew less (user: "better, snappier"). First start after boot is slow |
 | Controllers via T95 | 2026-11-22, v13.6: APC40 and LPK25 on the USB0 hub, found by the bridge, identified by the Daisy (APC40 driving, LPK25 keys). APC40 LEDs lit through the T95; 635 APC40 and 29 LPK25 messages reached the Daisy, none dropped. **Sound not yet checked.** v13.5 dropped T95 controllers at once (unsigned time compare), fixed in v13.6 |
 | Ping T95 to Daisy | 2026-11-22, 291 pings: min 0.87, avg 3.1, p99 42.6, max 55.7 ms round trip. The spikes are unexplained; v13.6 logs slow main-loop parts (`loop:` lines) to tell Daisy-side from T95-side. Not yet read |
 | Bridge | 2026-11-22, v13.3 Daisy: bridge running under systemd, found the Daisy by serial, about 83 lines/s for 4.5 min with 0 bad lines; page live over Wi-Fi with APC40 events. Short run only: no long-run, load or latency figures yet |
