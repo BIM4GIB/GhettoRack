@@ -66,10 +66,12 @@ image. Its board INI matched the extracted Android INI. The Linux
 `wcnmodem.bin` differed from Android's and was retained for the successful boot.
 Do not copy Android 4.9.170 kernel modules into Linux 6.18.
 
-A separately delivered `t95-wifi-prep.zip` prepared the tested SD image; its
-source has not been established as committed here. Import/review that helper,
-DTB source and diff before describing this repository as a complete image build.
-Personalised images contain a usable Wi-Fi key and must stay private.
+The helper from the tested `t95-wifi-prep.zip` is committed under
+[`wifi-prep/`](wifi-prep/README.md), together with the DTB source, reviewed patch,
+compiled DTB and checksum. Follow that README to recreate the adaptation from
+the pinned upstream image. This is an image-customisation workflow, not a full
+Armbian/kernel build from source. Wi-Fi credentials are entered locally at run
+time; personalised images contain a usable Wi-Fi key and must stay private.
 
 Kernel/DTB upgrades can replace these board-specific changes. Preserve the
 working configuration and recovery card, and validate upgrades on SD before

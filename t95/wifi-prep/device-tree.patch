@@ -1,0 +1,41 @@
+--- original-t95.dts
++++ t95-uwe5622.dts
+@@ -761,6 +761,7 @@
+ 			cap-sd-highspeed;
+ 			cap-mmc-highspeed;
+ 			mmc-ddr-3_3v;
++			mmc-ddr-1_8v;
+ 			cap-sdio-irq;
+ 			#address-cells = <0x01>;
+ 			#size-cells = <0x00>;
+@@ -771,14 +772,6 @@
+ 			non-removable;
+ 			phandle = <0x86>;
+ 
+-			wifi@1 {
+-				compatible = "xradio,xr819";
+-				reg = <0x01>;
+-				interrupt-parent = <0x23>;
+-				interrupts = <0x06 0x0f 0x01>;
+-				interrupt-names = "host-wake";
+-				phandle = <0x87>;
+-			};
+ 		};
+ 
+ 		mmc@4022000 {
+@@ -2004,7 +1997,6 @@
+ 		mmc1 = "/soc/mmc@4021000";
+ 		mmc2 = "/soc/mmc@4022000";
+ 		ethernet0 = "/soc/ethernet@5030000";
+-		ethernet1 = "/soc/mmc@4021000/wifi@1";
+ 		serial0 = "/soc/serial@5000000";
+ 	};
+ 
+@@ -2270,7 +2262,6 @@
+ 		iommu = "/soc/iommu@30f0000";
+ 		mmc0 = "/soc/mmc@4020000";
+ 		mmc1 = "/soc/mmc@4021000";
+-		wlan = "/soc/mmc@4021000/wifi@1";
+ 		mmc2 = "/soc/mmc@4022000";
+ 		uart0 = "/soc/serial@5000000";
+ 		uart1 = "/soc/serial@5000400";

@@ -1,0 +1,12 @@
+# Personalised OS images and extracted filesystems may contain Wi-Fi keys.
+*.img
+*.img.*
+*.ext4
+# Runtime network configuration and local credentials.
+30-t95-wifi.yaml
+*.local.yaml
+.env
+.env.*
+# Python intermediates.
+__pycache__/
+*.py[cod]
