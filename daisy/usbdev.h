@@ -1,5 +1,5 @@
 /** The Daisy's own USB socket as a composite device:
- *   - serial port (CDC-ACM): the monitor link, logs, 'B' for flashing
+ *   - serial port (CDC-ACM): the monitor link, logs, ESC BOOT for flashing
  *   - USB audio input (UAC1): the master output, stereo, 48 kHz, 16 bit
  *  Both are standard classes, so macOS, iPadOS, Windows and Linux need
  *  no driver. The Daisy's audio clock is the master: each 1 ms packet

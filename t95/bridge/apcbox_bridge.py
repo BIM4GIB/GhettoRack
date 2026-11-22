@@ -320,7 +320,10 @@ class Bridge:
             self.connected_at = now()
             self.last_line = None
             self.asm.reset()
-            self.cache.clear()          # a different Daisy, or the same one rebooted
+            # The Daisy streams all the time: the first bytes after open are
+            # usually the middle of a line. Drop up to the first newline.
+            self.asm.skipping = True
+            self.cache.clear()         # a different Daisy, or the same one rebooted
             for c in self.clients:
                 c.q.clear(); c.qbytes = 0; c.need_snapshot = True; c.wake.set()
             self.lost.clear()

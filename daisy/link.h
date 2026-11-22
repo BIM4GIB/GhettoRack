@@ -63,7 +63,8 @@ class Link
         {
             while(pending_ < kChunk && tail_ != head_)
             {
-                tx_[cur_][pending_++] = ring_[tail_];
+                last_out_             = ring_[tail_];
+                tx_[cur_][pending_++] = last_out_;
                 tail_                 = (tail_ + 1) % kRing;
             }
         }
@@ -82,7 +83,22 @@ class Link
         if(!resync_)
             return false;
         resync_ = false;
-        tail_   = head_; // stale queued lines are useless now
+        // Stale queued lines are useless now, but if the start of a line has
+        // already gone out, its rest must follow or the next line gets glued
+        // onto it. Keep that remainder, moved up against head_.
+        uint32_t len = 0;
+        if(last_out_ != '\n')
+        {
+            uint32_t i = tail_;
+            while(i != head_ && ring_[i] != '\n')
+                i = (i + 1) % kRing;
+            if(i != head_)
+                len = (i + kRing - tail_) % kRing + 1;
+        }
+        uint32_t to = (head_ + kRing - len) % kRing;
+        for(uint32_t k = len; k-- > 0;) // backwards: to is at or after tail_
+            ring_[(to + k) % kRing] = ring_[(tail_ + k) % kRing];
+        tail_ = to;
         return true;
     }
 
@@ -130,6 +146,7 @@ class Link
     int                  cur_     = 0;
     uint32_t             pending_ = 0;
     uint32_t             dropped_ = 0;
+    char                 last_out_ = '\n'; // last byte handed to USB
     static volatile bool resync_;
     static volatile bool boot_;
 };

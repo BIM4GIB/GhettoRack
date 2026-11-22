@@ -45,7 +45,7 @@ daisy/mac/build.sh                 # macOS build of the same engine
 tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
-touch), `hostcmd_test.cpp` (serial commands vs echo), `liverec_test.cpp`,
+touch), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
 `acid_engine_test.cpp`, `host_test.cpp`, `t95/bridge/test_bridge.py`; build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
 

@@ -719,7 +719,7 @@ int main(void)
        re-inits the audio hardware, so don't */
     diag::Stage(19);
     ui_link.Init();
-    ui_link.Printf("L ApcBox 13.3 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.4 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

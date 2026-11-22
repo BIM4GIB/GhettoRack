@@ -16,8 +16,8 @@ quantisation and network clock roles are also in scope.
 HDMI console, Wi-Fi, SSH and root filesystem expansion have been observed.
 The post-install check reported zero failed systemd services.
 
-The read-only telemetry bridge is written and desktop-tested
-([`bridge/`](bridge/README.md)), not yet run on the T95. Kiosk, controller
+The read-only telemetry bridge ([`bridge/`](bridge/README.md)) runs on the
+T95 with a real Daisy (short run, see the table). Kiosk, controller
 forwarding and sample transfer remain planned. Existing ApcBox firmware and its Mac UI are the starting point, not
 features already deployed on the T95.
 
@@ -35,7 +35,8 @@ features already deployed on the T95.
 | Debug UART | Pads labelled GND / TX / RX. Adapter loopback passed, but no board console was obtained. Root access came from Android `adb root`, not UART |
 | Audio | User reports enumerated H616 analogue, SPDIF and HDMI cards; enumeration is not a playback/latency qualification |
 | IR | User verified receiver with `ir-keytable`: extended NEC (`necx`), remote address `0x2fe` |
-| Daisy link | v13.2 Daisy on USB1: bus 5, full-speed OHCI, alone. CDC `ttyACM0` and UAC card `ApcBox`; `arecord` showed signal at 48 kHz stereo. Serial reports not yet read (see below) |
+| Daisy link | Daisy on USB1: bus 5, full-speed OHCI, alone. CDC `ttyACM0` and UAC card `ApcBox`; `arecord` showed signal at 48 kHz stereo |
+| Bridge | 2026-11-22, v13.3 Daisy: bridge running under systemd, found the Daisy by serial, about 83 lines/s for 4.5 min with 0 bad lines; page live over Wi-Fi with APC40 events. Short run only: no long-run, load or latency figures yet |
 | Second socket | USB0: an LPK25 enumerated on bus 8 (OHCI). The USB 2.0 side of that socket is not yet confirmed |
 | MIDI | User verified raw MIDI, e.g. an LPK25 at `/dev/snd/midiC3D0`. `CONFIG_SND_RAWMIDI=y`; ALSA sequencer support absent in this build |
 | Power | 5 V DC input. Size the supply and powered hub for measured peripheral load; verify polarity and prevent backfeeding |

@@ -315,8 +315,10 @@ class BridgeTest(unittest.TestCase):
         self.daisy.plug()
         self.wait_health(lambda h: h["daisy"] and h["connects"] == connects + 1, 10)
         self.assertTrue(self.daisy.read_rx(0.5).startswith(b"\x1bR"))
-        self.daisy.send("V 7\nL back again\n")
+        # Opened mid-stream: the first bytes are the tail of an OLED line
+        self.daisy.send("0000ff00c1\nV 7\nL back again\n")
         self.assertTrue(c.wait_for(lambda c: "L back again" in c.lines))
+        self.assertFalse(any(l.startswith("0000ff") for l in c.lines), "line fragment forwarded")
         self.assertTrue(c.events[-1]["daisy"])
         self.assertFalse(c.closed, "browser dropped across a Daisy replug")
         c.close()
