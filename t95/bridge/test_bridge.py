@@ -3,11 +3,18 @@
 
     python3 t95/bridge/test_bridge.py        (Linux; about 30 s)
 
-Covers: echo off at open, ESC R on connect and when the Daisy goes quiet,
-lines split across reads, garbage and over-long lines, the snapshot a new
-browser gets, several browsers, a browser that stops reading while lines
+BridgeTest: echo off at open, ESC R on connect and when the Daisy goes
+quiet, lines split across reads, garbage and over-long lines, the snapshot a
+new browser gets, several browsers, a browser that stops reading while lines
 pour in, too many browsers, and the Daisy unplugging and coming back.
+
+MidiTest: fake controllers on ptys. Nothing forwarded before the Daisy says
+"P 1", port names and keepalives after, running status, clock bytes mid
+message, sysex in pieces, LED lines out in order, LED coalescing when a
+controller stops reading, controller and Daisy hotplug, a Daisy that stops
+reading while a controller floods, ping round trips.
 """
+import errno
 import json
 import os
 import socket
@@ -160,7 +167,7 @@ class BridgeTest(unittest.TestCase):
         cls.http = free_port()
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
-             "--http-port", str(cls.http), "--ui", UI],
+             "--http-port", str(cls.http), "--ui", UI, "--no-midi"],
             stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.wait_health(lambda h: h["daisy"], 10)
 
@@ -322,6 +329,425 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(c.events[-1]["daisy"])
         self.assertFalse(c.closed, "browser dropped across a Daisy replug")
         c.close()
+
+
+
+class FakeController:
+    """A MIDI controller: the bridge opens the pty slave through a symlink"""
+
+    def __init__(self, link):
+        self.link = link
+        self.plug()
+
+    def plug(self):
+        self.master, slave = os.openpty()
+        tty.setraw(self.master)
+        name = os.ttyname(slave)
+        os.close(slave)
+        tmp = self.link + ".new"
+        os.symlink(name, tmp)
+        os.replace(tmp, self.link)
+
+    def unplug(self):
+        os.unlink(self.link)
+        os.close(self.master)
+
+    def play(self, data):
+        os.write(self.master, bytes(data))
+
+    def received(self, wait=0.3):
+        out = b""
+        os.set_blocking(self.master, False)
+        end = time.time() + wait
+        while time.time() < end:
+            try:
+                d = os.read(self.master, 65536)
+                out += d
+                end = max(end, time.time() + 0.1)
+            except BlockingIOError:
+                time.sleep(0.02)
+        os.set_blocking(self.master, True)
+        return out
+
+
+class RespondingDaisy(FakeDaisy):
+    """Records the frames the bridge sends and answers pings"""
+
+    def plug(self):
+        super().plug()
+        self.frames = []
+        self.reading = True
+        self.alive = True
+        threading.Thread(target=self._run, args=(self.master,), daemon=True).start()
+
+    def unplug(self):
+        self.alive = False
+        super().unplug()
+
+    def _run(self, fd):
+        buf = b""
+        while self.alive:
+            if not self.reading:
+                time.sleep(0.05)
+                continue
+            try:
+                d = os.read(fd, 65536)
+            except OSError as e:
+                if e.errno == errno.EIO and self.alive:
+                    time.sleep(0.02)  # no slave open yet (the bridge hasn't opened it)
+                    continue
+                return
+            if not d:
+                return
+            buf += d
+            while True:
+                i = buf.find(b"\x1b")
+                if i < 0:
+                    buf = b""
+                    break
+                buf = buf[i:]
+                if len(buf) < 2:
+                    break
+                c = buf[1:2]
+                if c in (b"R", b"K"):
+                    self.frames.append(c.decode())
+                    buf = buf[2:]
+                    continue
+                j = buf.find(b"\n")
+                if j < 0:
+                    break
+                f = buf[1:j].decode()
+                buf = buf[j + 1:]
+                self.frames.append(f)
+                if f.startswith("P "):
+                    try:
+                        os.write(fd, ("Y %s\n" % f[2:]).encode())
+                    except OSError:
+                        return
+
+    def got(self, prefix):
+        return [f for f in list(self.frames) if f.startswith(prefix)]
+
+
+class MidiTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.link = os.path.join(cls.dir, "daisy")
+        cls.daisy = RespondingDaisy(cls.link)
+        cls.apc = FakeController(os.path.join(cls.dir, "apc"))
+        cls.keys = FakeController(os.path.join(cls.dir, "keys"))
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1",
+             "--http-port", str(cls.http), "--ui", UI,
+             "--midi", cls.apc.link + "=APC40 mkII-ish APC40", "--midi", cls.keys.link + "=LPK25"],
+            stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        BridgeTest.http = cls.http
+        cls.health = BridgeTest.health
+        cls.wait_health = BridgeTest.wait_health
+        cls.get = BridgeTest.get
+        cls.wait_health(lambda h: h["daisy"] and len(h["controllers"]) == 2, 10)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.terminate()
+        cls.proc.wait(5)
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def wait(self, pred, timeout=3):
+        end = time.time() + timeout
+        while time.time() < end:
+            if pred():
+                return True
+            time.sleep(0.02)
+        return False
+
+    def port_of(self, name):
+        for c in self.health()["controllers"]:
+            if c["name"].startswith(name):
+                return c["port"]
+
+    def test_m1_nothing_before_the_daisy_says_p(self):
+        self.keys.play([0x90, 0x3C, 0x64])
+        time.sleep(0.5)
+        self.assertEqual(self.daisy.got("M"), [])
+        self.assertEqual(self.daisy.got("N"), [])
+        self.assertEqual(self.daisy.got("K"), [])
+        h = self.health()
+        self.assertEqual(h["control"], 0)
+        k = [c for c in h["controllers"] if c["name"] == "LPK25"][0]
+        self.assertEqual(k["dropped_in"], 1)
+
+    def test_m2_names_keepalive_ping_after_p(self):
+        self.daisy.send("V 8\nP 1 00 00 00 -1\n")
+        self.assertTrue(self.wait(lambda: len(self.daisy.got("N")) >= 2))
+        names = sorted(self.daisy.got("N"))
+        a, k = self.port_of("APC40"), self.port_of("LPK25")
+        self.assertIn("N%d APC40 mkII-ish APC40" % a, names)
+        self.assertIn("N%d LPK25" % k, names)
+        self.assertTrue(self.wait(lambda: len(self.daisy.got("K")) >= 2, 2))
+        h = self.wait_health(lambda h: h["ping_ms"]["count"] >= 2, 5)
+        print("\n  ping over a pty: %s" % h["ping_ms"])
+        self.assertEqual(h["control"], 1)
+
+    def test_m3_parser_running_status_clock_sysex(self):
+        k = self.port_of("LPK25")
+        self.daisy.frames.clear()
+        # running status, a clock byte in the middle of a message, note off
+        self.keys.play([0x90, 0x3C, 0x64, 0xF8, 0x3E, 0xF8, 0x64, 0x80, 0x3C, 0x00, 0xFE, 0xC0, 0x05])
+        self.assertTrue(self.wait(lambda: len(self.daisy.got("M")) >= 4))
+        self.assertEqual(self.daisy.got("M"), ["M%d 903c64" % k, "M%d 903e64" % k, "M%d 803c00" % k, "M%d c005" % k])
+        # identity reply in three pieces, clock inside
+        a = self.port_of("APC40")
+        self.daisy.frames.clear()
+        reply = bytes.fromhex("f07e000602477300190001000000 7f7f7f7f004b020009000700020308000301 0601f7".replace(" ", ""))
+        self.apc.play(reply[:3]); time.sleep(0.05)
+        self.apc.play(reply[3:20] + b"\xf8"); time.sleep(0.05)
+        self.apc.play(reply[20:])
+        self.assertTrue(self.wait(lambda: self.daisy.got("M")))
+        self.assertEqual(self.daisy.got("M"), ["M%d %s" % (a, reply.hex())])
+
+    def test_m4_leds_out_in_order_not_to_browsers(self):
+        a = self.port_of("APC40")
+        c = SseClient(self.http)
+        self.assertTrue(c.wait_for(lambda c: c.events))
+        self.apc.received(0.1)
+        self.daisy.send("X %d f04700736000044201010" "1f7\nX %d 903501903601b03040\nL leds sent\n" % (a, a))
+        got = self.apc.received(0.5)
+        self.assertEqual(got.hex(), "f047007360000442010101f7" "903501903601b03040")
+        self.assertTrue(c.wait_for(lambda c: "L leds sent" in c.lines))
+        self.assertFalse(any(l.startswith("X ") for l in c.lines), "X lines reached a browser")
+        c.close()
+
+    def test_m5_leds_coalesce_when_controller_stalls(self):
+        a = self.port_of("APC40")
+        self.apc.received(0.1)
+        # The controller stops reading; the Daisy keeps changing 16 LEDs
+        last = {}
+        lines = []
+        for i in range(3000):
+            msgs = ""
+            for n in range(16):
+                v = (i * 7 + n) % 128
+                msgs += "90%02x%02x" % (0x35 + n, v)
+                last[0x35 + n] = v
+            lines.append("X %d %s" % (a, msgs))
+        self.daisy.send("\n".join(lines) + "\n")
+        time.sleep(1.0)
+        got = self.apc.received(1.0)
+        final = {}
+        for i in range(0, len(got) - 2, 3):
+            if got[i] == 0x90:
+                final[got[i + 1]] = got[i + 2]
+        self.assertEqual(final, last, "controller didn't end on the newest LED values")
+        h = self.health()
+        pc = [c for c in h["controllers"] if c["port"] == a][0]
+        print("\n  LED flood: %d bytes reached the controller instead of %d, %d coalesced"
+              % (len(got), 3000 * 16 * 3, pc["coalesced"]))
+        self.assertGreater(pc["coalesced"], 0)
+        self.assertLess(len(got), 3000 * 16 * 3)
+
+    def test_m6_controller_unplug_replug(self):
+        k = self.port_of("LPK25")
+        self.daisy.frames.clear()
+        self.keys.unplug()
+        self.assertTrue(self.wait(lambda: "N%d -" % k in self.daisy.got("N")))
+        self.wait_health(lambda h: len(h["controllers"]) == 1)
+        self.keys.plug()
+        self.assertTrue(self.wait(lambda: "N%d LPK25" % k in self.daisy.got("N")))
+        self.keys.play([0x90, 0x40, 0x7F])
+        self.assertTrue(self.wait(lambda: "M%d 90407f" % k in self.daisy.got("M")))
+
+    def test_m7_daisy_reconnect_reannounces(self):
+        self.daisy.unplug()
+        self.wait_health(lambda h: not h["daisy"])
+        self.daisy.plug()
+        self.wait_health(lambda h: h["daisy"], 10)
+        self.keys.play([0x90, 0x41, 0x7F])  # before P: dropped
+        time.sleep(0.3)
+        self.assertEqual(self.daisy.got("M"), [])
+        self.daisy.send("V 8\nP 1 03 01 02 1\n")
+        self.assertTrue(self.wait(lambda: len(self.daisy.got("N")) >= 2))
+        h = self.health()
+        kinds = {c["name"]: c["kind"] for c in h["controllers"]}
+        self.assertEqual(kinds, {"APC40 mkII-ish APC40": "apc40 (driving)", "LPK25": "keys"})
+
+    def test_m8_daisy_stops_reading_controller_floods(self):
+        self.daisy.reading = False
+        k = self.port_of("LPK25")
+        flood = bytes([0x90, 0x30, 0x40]) * 30000
+        t0 = time.time()
+        for i in range(0, len(flood), 3000):
+            self.keys.play(flood[i:i + 3000])
+        h = self.wait_health(lambda h: h["serial_dropped"] > 0, 10)
+        t = time.time()
+        self.health()
+        self.assertLess(time.time() - t, 1.0, "bridge unresponsive under pressure")
+        self.assertLessEqual(h["serial_out_bytes"], 64 * 1024 + 64)
+        kc = [c for c in h["controllers"] if c["port"] == k][0]
+        print("\n  Daisy not reading: %d MIDI messages dropped, queue %d bytes"
+              % (kc["dropped_in"], h["serial_out_bytes"]))
+        self.daisy.reading = True
+        # It drains and works again
+        self.daisy.frames.clear()
+        self.assertTrue(self.wait(lambda: self.health()["serial_out_bytes"] == 0, 10))
+        self.keys.play([0x90, 0x42, 0x7F])
+        self.assertTrue(self.wait(lambda: "M%d 90427f" % k in self.daisy.got("M"), 5))
+
+
+
+class FindMidiTest(unittest.TestCase):
+    """Controller discovery against a sysfs tree shaped like the T95's"""
+
+    def test_names_and_keys_from_usb(self):
+        sys.path.insert(0, HERE)
+        import apcbox_bridge as b
+        root = tempfile.mkdtemp()
+        def dev(card, usbpath, product, mididevs):
+            usb = os.path.join(root, "sys/devices/platform/soc/usb" + usbpath)
+            intf = usb + "/" + usbpath.split("/")[-1] + ":1.0"
+            os.makedirs(intf)
+            if product:
+                open(usb + "/product", "w").write(product + "\n")
+            cd = os.path.join(root, "sys/devices/sound/card%d" % card)
+            os.makedirs(cd)
+            open(cd + "/id", "w").write("Card%d\n" % card)
+            os.symlink(intf, cd + "/device")
+            os.makedirs(os.path.join(root, "sys/class/sound"), exist_ok=True)
+            os.symlink(cd, os.path.join(root, "sys/class/sound/card%d" % card))
+            for m in mididevs:
+                os.symlink(cd, os.path.join(root, "sys/class/sound/midiC%dD%d" % (card, m)))
+        dev(3, "8/8-1", "LPK25", [0])
+        dev(4, "4/4-1/4-1.2", "Akai APC40", [0])
+        dev(5, "4/4-1/4-1.3", "", [0, 1])          # no product string: ALSA id
+        dev(2, "5/5-1", "ApcBox", [])               # the Daisy: audio only, no MIDI
+        f = b.find_midi(root)
+        names = sorted(n for _, n in f.values())
+        self.assertEqual(names, ["Akai APC40", "Card5", "Card5 1", "LPK25"])
+        self.assertTrue(all(k.split(":")[-1] in ("0", "1") for k in f))
+        self.assertIn("/dev/snd/midiC3D0", [p for p, _ in f.values()])
+        # Same controller, different ALSA card number: same key
+        k1 = [k for k, v in f.items() if v[1] == "LPK25"][0]
+        root2 = tempfile.mkdtemp()
+        root, root_old = root2, root
+        dev(7, "8/8-1", "LPK25", [0])
+        k2 = [k for k, v in b.find_midi(root2).items() if v[1] == "LPK25"][0]
+        self.assertEqual(k1.replace(root_old, ""), k2.replace(root2, ""))
+
+
+
+SIM = os.path.join(HERE, "..", "..", "daisy", "hostbuild", "t95sim")
+
+
+@unittest.skipUnless(os.path.exists(SIM), "build daisy/hostbuild/t95sim first (see daisy/t95sim.cpp)")
+class EndToEndTest(unittest.TestCase):
+    """The real firmware control code (box.cpp, ports.h, hostcmd.h in
+    daisy/t95sim) behind a pty, the real bridge, fake APC40 and LPK25."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        link = os.path.join(cls.dir, "daisy")
+        cls.sim = subprocess.Popen([SIM, link], stderr=subprocess.DEVNULL)
+        end = time.time() + 5
+        while not os.path.exists(link) and time.time() < end:
+            time.sleep(0.05)
+        cls.apc = FakeController(os.path.join(cls.dir, "apc"))
+        cls.keys = FakeController(os.path.join(cls.dir, "keys"))
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--http-port", str(cls.http),
+             "--ui", UI, "--midi", cls.apc.link + "=Akai APC40", "--midi", cls.keys.link + "=LPK25"],
+            stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["control"] == 1 and len(h["controllers"]) == 2, 10)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.terminate()
+        cls.sim.terminate()
+        cls.proc.wait(5)
+        cls.sim.wait(5)
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def test_e1_apc40_identified_driven_leds(self):
+        c = SseClient(self.http)
+        self.assertTrue(c.wait_for(lambda c: c.events))
+        got = b""
+        end = time.time() + 3
+        while b"\xf0\x7e\x7f\x06\x01\xf7" not in got and time.time() < end:
+            got += self.apc.received(0.1)
+        self.assertIn(b"\xf0\x7e\x7f\x06\x01\xf7", got, "no identity request reached the APC40")
+        # Answer like the real one did on 2026-11-22
+        self.apc.play(bytes.fromhex("f07e000602477300190001000000" "7f7f7f7f004b020009000700020308000301" "0601f7"))
+        got = b""
+        end = time.time() + 3
+        while time.time() < end and not (b"\xf0\x47\x00\x73\x60\x00\x04\x42\x01\x01\x01\xf7" in got and len(got) > 60):
+            got += self.apc.received(0.2)
+        intro = got.find(bytes.fromhex("f047007360000442010101f7"))
+        self.assertGreaterEqual(intro, 0, "no mode switch to device id 0")
+        leds = got[intro + 12:]
+        self.assertGreater(len(leds), 30, "no LEDs after the mode switch")
+        self.assertTrue(all(leds[i] & 0xF0 in (0x80, 0x90, 0xB0) for i in range(0, len(leds) - 2, 3)),
+                        "LED bytes aren't whole note/CC messages: %s" % leds[:30].hex())
+        h = BridgeTest.wait_health(lambda h: any(x["kind"] == "apc40 (driving)" for x in h["controllers"]), 5)
+        # SHIFT on the APC40 shows in the S line (field 9)
+        self.apc.play([0x90, 0x62, 0x7F])
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("S ") and l.split()[10] == "1" for l in c.lines[-20:])))
+        self.apc.play([0x80, 0x62, 0x00])
+        self.assertTrue(c.wait_for(lambda c: c.lines and [l for l in c.lines if l.startswith("S ")][-1].split()[10] == "0"))
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("S ") and l.split()[15] == "1" and l.split()[16] == "1" for l in c.lines[-20:])),
+                        "S line doesn't say APC40 up/present")
+        c.close()
+
+    def test_e2_keyboard_note_plays_selected_track(self):
+        c = SseClient(self.http)
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("S ") for l in c.lines)))
+        def trig(c):
+            # trigger count of the selected track (field 7); e1's SHIFT tap flipped the page
+            f = [l for l in c.lines if l.startswith("S ")][-1].split()[1:]
+            t = int(f[7])
+            return int(f[26 + t] if t < 8 else f[39 + t - 8])
+        before = trig(c)
+        self.keys.play([0x90, 0x3C, 0x64])
+        k = [x for x in BridgeTest.health()["controllers"] if x["name"] == "LPK25"][0]["port"]
+        self.assertTrue(c.wait_for(lambda c: "I %d 903c64" % k in c.lines), "no I line for the key")
+        self.assertTrue(c.wait_for(lambda c: trig(c) > before), "the selected track didn't play")
+        self.keys.play([0x80, 0x3C, 0x00])
+        h = BridgeTest.wait_health(lambda h: h["ping_ms"]["count"] >= 3, 6)
+        kinds = sorted(x["kind"] for x in h["controllers"])
+        self.assertEqual(kinds, ["apc40 (driving)", "keys"])
+        print("\n  end to end ping (pty, desktop): %s" % h["ping_ms"])
+        c.close()
+
+    def test_e3_page_runs_in_a_browser(self):
+        """The page itself: no script errors, bridge mode, controller chip.
+        Needs Playwright with Chromium (desktop only; skipped otherwise)."""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page()
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            pg.goto("http://127.0.0.1:%d/" % self.http)
+            pg.wait_for_timeout(2500)
+            chips = pg.eval_on_selector_all("header .chip:not(.hidden)", "es => es.map(e => e.textContent)")
+            hidden_tft = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
+            b.close()
+        self.assertEqual(errors, [], "script errors on the page")
+        self.assertIn("T95 bridge: connected", chips)
+        self.assertIn("Daisy: connected", chips)
+        self.assertTrue(any(c.startswith("T95 controllers: APC40 1 (driving)") and "keys 2" in c for c in chips), chips)
+        self.assertTrue(hidden_tft)
 
 
 if __name__ == "__main__":

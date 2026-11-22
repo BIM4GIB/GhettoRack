@@ -216,7 +216,20 @@ void Engine::LiveNote(int t, int note, bool on)
     uint32_t w = note_w_;
     if(w - note_r_ >= (uint32_t)kNoteQueue)
         return; // audio isn't running: drop
-    note_q_[w % kNoteQueue] = {(int8_t)t, (int8_t)note, on};
+    note_q_[w % kNoteQueue] = {(int8_t)t, (int8_t)note, on, 0};
+    __sync_synchronize();
+    note_w_ = w + 1;
+}
+
+void Engine::KeyNote(int t, int note, int vel, bool on)
+{
+    if(t < 0 || t >= kTracks || note < 0 || note > 127)
+        return;
+    uint32_t w = note_w_;
+    if(w - note_r_ >= (uint32_t)kNoteQueue)
+        return;
+    vel = vel < 1 ? 1 : (vel > 127 ? 127 : vel);
+    note_q_[w % kNoteQueue] = {(int8_t)t, (int8_t)note, on, (uint8_t)vel};
     __sync_synchronize();
     note_w_ = w + 1;
 }
@@ -952,7 +965,7 @@ void Engine::UpdateBlockParams(size_t size)
     }
 }
 
-void Engine::StartVoice(int t, float vel)
+void Engine::StartVoice(int t, float vel, float rate)
 {
     Slot& sl = slots_[t];
     if(locked_[t] || lock_req_[t])
@@ -978,6 +991,7 @@ void Engine::StartVoice(int t, float vel)
     v.fade       = 1.f;
     v.fade_step  = 0.f;
     v.gain       = vel;
+    v.rate       = rate;
     /* Reverse playback or a start offset lands mid-waveform: soften it */
     if(off > 0 || v.dir < 0)
     {
@@ -1011,7 +1025,7 @@ inline float Engine::RenderVoice(Voice& v, const Slot& sl, float inc)
     float s1 = sl.data[i1];
     float s  = (s0 + (s1 - s0) * v.frac) * (1.f / 32768.f);
 
-    v.frac += inc;
+    v.frac += inc * v.rate;
     int32_t adv = (int32_t)v.frac;
     v.frac -= (float)adv;
     v.idx += adv * v.dir;
@@ -1054,7 +1068,13 @@ void Engine::LiveHit(int t, bool record)
     }
     else
         StartVoice(t, 0.9f);
-    if(record && playing_ && record_)
+    if(record)
+        RecordHit(t);
+}
+
+void Engine::RecordHit(int t)
+{
+    if(playing_ && record_)
     {
         /* Quantize to the nearest step. If that is the next step, write it
            and skip it once so the hit isn't played twice. */
@@ -1303,7 +1323,15 @@ void Engine::AcidLiveEvents()
         note_r_     = note_r_ + 1;
         int t       = e.track;
         if(!synth_prev_[t])
+        {
+            /* Keyboard on a sample track: one-shot, pitched; note off does nothing */
+            if(e.vel && e.on && !loop_on_[t] && !(lr_state_ != 0 && lr_track_ == t))
+            {
+                StartVoice(t, 0.25f + 0.75f * (e.vel / 127.f), exp2f((e.note - 60) / 12.f));
+                RecordHit(t);
+            }
             continue;
+        }
         int8_t* stack = live_stack_[t];
         int&    n     = live_n_[t];
         if(e.on)
@@ -1312,7 +1340,7 @@ void Engine::AcidLiveEvents()
                 continue;
             bool legato = n > 0;
             stack[n++]  = e.note;
-            acid_[t].Trigger(e.note, false, legato);
+            acid_[t].Trigger(e.note, e.vel >= 100, legato); // keyboard: hard = accent
             acid_gate_[t] = -1;
             acid_tie_[t]  = false;
             acid_last_[t] = e.note;

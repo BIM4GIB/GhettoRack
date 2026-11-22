@@ -1,15 +1,20 @@
-# ApcBox telemetry bridge
+# ApcBox bridge
 
-Runs on the T95. Owns the Daisy's USB serial port and serves the existing
-monitor page to any browser on the network, fed by the Daisy's report lines.
-**Read-only:** the only thing it sends the Daisy is `ESC R` (state dump).
+Runs on the T95. Owns the Daisy's USB serial port, forwards the T95's MIDI
+controllers to the Daisy (and the APC40's LEDs back), and serves the
+monitor page to any browser on the network.
 
 ```
-Daisy --USB serial--> apcbox-bridge (T95) --SSE /events--> browsers
-                       | line assembler: complete lines only, junk dropped
-                       | state cache: latest S/G/T/N/M/D... + last 100 logs
-                       | per-browser bounded queue (512 KB)
-                       '- / (monitor page)  /health  /caps
+APC40 / LPK25 / MPK249 --USB--> T95 hub --raw MIDI--+
+                                                    |  ESC M p hex   (MIDI in)
+                     apcbox-bridge (T95) <----------+  ESC N p name  (plugged / gone)
+                       | MIDI parser                   ESC K, ESC P  (keepalive, ping)
+                       | per-controller out queue      X p hex       (LEDs back)
+                       | line assembler, state cache
+                       | per-browser queue (512 KB)
+                       '- / (page)  /events  /health  /caps
+                                  ^
+Daisy <-----USB serial------------'
 ```
 
 Python 3 standard library only. Files:
@@ -24,7 +29,8 @@ Python 3 standard library only. Files:
 
 ## Install on the T95
 
-Flash the Daisy with firmware **v13.3 or later first** (see below), then:
+Flash the Daisy with firmware **v13.3 or later first** (v13.5 for
+controllers; see below), then:
 
 ```
 cd ~ && git clone https://github.com/BIM4GIB/GhettoRack.git   # or git pull
@@ -49,6 +55,32 @@ bootloader (seen on the T95, 2026-11-22). v13.3 only acts on `ESC R` and
 open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 `/health` or the page.
 
+## Controllers (firmware v13.5 on)
+
+- Controllers are found under `/sys/class/sound/midiC*D*` and named from
+  their USB product string, keyed by USB device path, so ALSA card numbers
+  can change. Rescanned every second; each gets port 1-8 while plugged in.
+- Nothing goes to the Daisy until it sends a `P` line (control protocol 1).
+  A v13.3/v13.4 Daisy never does, so the bridge stays read-only with it.
+- MIDI in: running status, clock and other realtime bytes in the middle of
+  messages, sysex split across reads. Clock, active sensing and system
+  common are dropped (and counted): tempo sync will live on the Daisy.
+- The Daisy decides what each port is: an APC40 (its identity reply) drives
+  the box unless one is plugged into the Daisy's own USB-A; anything else is
+  a keyboard and its notes play the selected track (303: the note, folded
+  into the 303's range, velocity 100+ = accent; sample track: the sample
+  pitched, C4 = as recorded, velocity = level).
+- LEDs out: sysex in order, then the newest value per note/CC. If a
+  controller stops taking bytes, older LED values are replaced instead of
+  queueing up (`coalesced` in `/health`).
+- Daisy not taking bytes: at most 64 KB waits; beyond that controller MIDI
+  is dropped and counted (`serial_dropped`, per port `dropped_in`).
+- Keepalive every 500 ms. If the bridge stops (crash, restart), the Daisy
+  drops the T95 controllers after 2 s and releases anything held.
+- Ping every second: `ping_ms` in `/health` is the round trip bridge to
+  Daisy main loop and back (min/avg/p99/max/jitter). It doesn't include the
+  controller's own USB delay or the audio output.
+
 ## Behaviour
 
 - Finds the Daisy by USB VID `1209` / PID `0001` under `/sys`, not by tty
@@ -71,8 +103,8 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 |---|---|
 | `/` | `daisy/ui/apcbox-ui.html`. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |
-| `/health` | JSON: `daisy`, `port`, `serial`, `data_age_s`, `lines`, `bad_lines`, `connects`, `clients`, `client_resyncs`, `rejected_clients` |
-| `/caps` | `{"source": "daisy-bridge", "control": false, "ui": false, "tft": false}` |
+| `/health` | JSON: `daisy`, `port`, `serial`, `data_age_s`, `lines`, `bad_lines`, `connects`, `clients`, `client_resyncs`, `rejected_clients`, `control`, `serial_out_bytes`, `serial_dropped`, `controllers` (port, name, kind, counters), `ping_ms` |
+| `/caps` | `{"source": "daisy-bridge", "midi": true, "control": false, "ui": false, "tft": false}` |
 
 ## Tests
 
@@ -80,15 +112,20 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 python3 t95/bridge/test_bridge.py
 ```
 
-Fake Daisy on a pty, reached through a symlink so it can be unplugged and
-replugged. Checks echo off at open, `ESC R` on connect and when quiet, lines
-split across reads, junk and over-long lines, the late-browser snapshot,
-5 browsers at once, a stalled browser while 10 MB of `D` lines go through
-(the others get every line in order), the 16-browser limit, and unplug/replug
-with a browser connected. Passing on a desktop says nothing about the real
+Fake Daisy and fake controllers on ptys, reached through symlinks so they
+can be unplugged and replugged. Telemetry: echo off at open, `ESC R` on
+connect and when quiet, lines split across reads, junk and over-long lines,
+the late-browser snapshot, 5 browsers at once, a stalled browser while 10 MB
+of `D` lines go through, the 16-browser limit, unplug/replug. Controllers:
+nothing sent before `P`, names and keepalive after, running status, clock
+bytes mid-message, sysex in pieces, LEDs out in order and not to browsers,
+LED coalescing when a controller stalls, controller and Daisy hotplug, a
+Daisy that stops reading while a keyboard floods, ping, discovery against a
+T95-shaped `/sys` tree. Passing on a desktop says nothing about the real
 T95 with a real Daisy: latency, CPU load and long runs still need measuring there.
 
 ## Not here yet
 
-MIDI forwarding and LED output (needs the framed control protocol in the
-firmware first), kiosk, IR, sample transfer.
+Knobs, pads and pitch bend on the keyboards (notes only so far), MIDI clock
+in/out, kiosk, IR, sample transfer. No real-time priority: add it only if
+the ping figures on the T95 say so.

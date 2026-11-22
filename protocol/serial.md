@@ -1,4 +1,4 @@
-# ApcBox serial protocol (report version 7)
+# ApcBox serial protocol (report version 8)
 
 The Daisy's USB-C is a composite USB device, full speed (12 Mbit/s):
 
@@ -21,8 +21,23 @@ From firmware v13.3, every command starts with ESC (0x1B):
 | `ESC R` (1B 52) | Send a full state dump (every line below, now) |
 | `ESC BOOT` (1B 42 4F 4F 54) | Reboot into the Daisy bootloader (used by `tools/flash-seed.sh`) |
 
-Bare bytes are ignored, and so are other letters after ESC (reserved for the
-framed control protocol). The Daisy never sends ESC, so a host tty that
+From v13.5, the T95 control protocol (version 1). Send these only after the
+Daisy has sent a `P` line: older firmware would act on the `R`/`B` letters
+inside them.
+
+| Frame | Does |
+|---|---|
+| `ESC K` | Keepalive. No frame for 2 s: the Daisy drops every T95 controller and releases what they held. The bridge sends one every 500 ms |
+| `ESC M` *p* *hex* `\n` | One complete MIDI message from T95 port *p* (`1`-`8`), as hex digits (spaces ignored, at most 128 bytes). Channel messages or one whole sysex; no running status, no realtime bytes |
+| `ESC N` *p* *name* `\n` | Port *p* now has a controller called *name* (printable ASCII, at most 32). `-` = gone. Re-announcing the same name is harmless |
+| `ESC P` *id* `\n` | Ping. The Daisy answers `Y` *id* from its main loop (*id*: printable, at most 32) |
+
+Example: `ESC M2 903c64 \n` = note on, C4, velocity 100, from port 2.
+The Daisy asks each new port for its identity. An Akai APC40 reply (47 73)
+makes it an APC40: it drives the box like one on the Daisy's own USB-A,
+which always wins. Anything else is a keyboard: notes play the selected track.
+
+Bare bytes are ignored, and so are unknown letters after ESC. The Daisy never sends ESC, so a host tty that
 echoes the Daisy's output back (the Linux default until `-echo` is set) can't
 trigger a command. Before v13.3 any single `R` or `B` byte did, and report
 lines are full of both: an echoing `stty`/`cat` on the T95 sent a v13.2 Daisy
@@ -32,10 +47,9 @@ Older firmware ignores the ESC and acts on the `R` or `B` after it, so hosts
 can send the ESC forms to any version. Parser: `daisy/hostcmd.h`, test
 `daisy/hostcmd_test.cpp`.
 
-**There is no control path yet.** Planned next: a framed MIDI-in command so
-the T95 bridge can forward controller MIDI into the same handler the USB-host
-APC40 uses (`BoxMidi` in `daisy/box.cpp`), and LED output coming back the
-same way.
+Inside a framed command an ESC starts over and the payload is text, so a
+corrupted frame can't turn into another command. Parser: `daisy/hostcmd.h`;
+routing: `daisy/ports.h`; tests: `daisy/hostcmd_test.cpp`, `daisy/sets_test.cpp`.
 
 ## Daisy to host
 
@@ -62,7 +76,11 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `Q pat t hex` | 303 notes of track `t`: 16 bytes hex, bit 7 = slide |
 | `A t v0..v7` | 303 knobs of track `t`, 0-127 |
 | `L text` | Log text |
-| `V n` | Report version (7). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
+| `X p hex` | MIDI for T95 controller *p*: APC40 mode switch (sysex) and LED messages, up to 16 per line. For the bridge, which doesn't pass X to browsers |
+| `I p hex` | MIDI the Daisy got from a T95 keyboard on port *p* (for the page log) |
+| `P ver att apc keys active` | T95 control protocol version (1), then hex port masks (bit 0 = port 1): attached, identified as APC40, keyboards; then who drives the box: -1 none, 0 the Daisy's USB-A, 1-8 a T95 port. On change and every second |
+| `Y id` | Answer to `ESC P id` |
+| `V n` | Report version (8). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields
 

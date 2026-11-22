@@ -180,12 +180,13 @@ same port for the standalone APC40 host; role selection needs an explicit design
 
 ## Implementation sequence
 
-1. **Read-only telemetry bridge.** Own the serial connection, request `ESC R`,
+1. **Read-only telemetry bridge.** Done, running on the T95 (see `bridge/`). Own the serial connection, request `ESC R`,
    assemble complete report lines, and serve them over SSE at `/events`.
    Preserve the existing parser and direct Web Serial path. Support reconnect,
    multiple browsers and bounded buffering. Show Daisy link health separately
    from browser-to-bridge connectivity.
-2. **Versioned MIDI/control transport.** Add framed MIDI input routed into the
+2. **Versioned MIDI/control transport.** Built in firmware v13.5 and the
+   bridge, desktop-tested; not yet run on the rig. Add framed MIDI input routed into the
    existing Daisy handler and explicit outbound MIDI for controller LEDs.
    Identify controller sources, define ownership and disconnect behaviour, and
    prevent payload bytes from triggering legacy `R`/`B` commands.

@@ -231,6 +231,10 @@ class Engine
      *  a second key while one is held slides to it. Records into the
      *  pattern while recording. */
     void LiveNote(int track, int note, bool on);
+    /** A MIDI keyboard note on any track: 303 tracks play the note (velocity
+     *  100+ = accent), sample tracks play the sample pitched, note 60 = as is.
+     *  Recorded like pads when recording. vel 1..127 */
+    void KeyNote(int track, int note, int vel, bool on);
 
     /* ---- live sampling from the audio input (mic / line into L) ---- */
     /** Audio callback, before Process: this block's input */
@@ -359,6 +363,7 @@ class Engine
         float   att       = 1.f; // short attack when starting mid-sample
         float   att_step  = 0.f;
         float   gain      = 1.f; // velocity
+        float   rate      = 1.f; // keyboard pitch on top of the track's
     };
 
     struct Ramp
@@ -375,7 +380,8 @@ class Engine
         }
     };
 
-    void  StartVoice(int t, float vel);
+    void  StartVoice(int t, float vel, float rate = 1.f);
+    void  RecordHit(int t);
     void  AcidStep(int t, int s);
     void  LiveRecBar();
     void  LiveRecFinish();
@@ -463,8 +469,9 @@ class Engine
     int           live_n_[kTracks] = {};
     struct NoteEvent
     {
-        int8_t track, note;
-        bool   on;
+        int8_t  track, note;
+        bool    on;
+        uint8_t vel; // 0 = from the pads (no velocity)
     };
     static constexpr int kNoteQueue = 32;
     NoteEvent            note_q_[kNoteQueue];

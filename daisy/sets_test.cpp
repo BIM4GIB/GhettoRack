@@ -1,6 +1,7 @@
 /** Desktop test for pattern copy/undo and sets (save, load in sync, transitions).
  *  Builds the real box.cpp into this file with a folder as the "SD card". */
 #include "box.cpp"
+#include "ports.h"
 #include <cassert>
 #include <cmath>
 #include <dirent.h>
@@ -202,6 +203,45 @@ static int WaitIdle(int max_ms = 20000)
         Tick();
         n++;
     }
+    return n;
+}
+
+/* ---- T95 controllers (ports.h) ---- */
+static std::vector<std::string> t95_lines;
+static bool                     t95_room = true;
+static bool T95Send(const char* l)
+{
+    if(!t95_room)
+        return false;
+    t95_lines.push_back(l);
+    return true;
+}
+static T95Ports t95p;
+static HostCmd  t95cmd;
+static void     T95Frame(const std::string& f)
+{
+    for(unsigned char b : f)
+    {
+        HostCmd::Cmd c = t95cmd.Feed(b);
+        if(c > HostCmd::kBoot)
+            t95p.OnCmd(t95cmd, c, now_ms);
+    }
+}
+static void T95Tick(int n, bool direct = false, bool keepalive = true)
+{
+    for(int i = 0; i < n; i++)
+    {
+        Tick();
+        if(keepalive && now_ms % 500 == 0)
+            T95Frame("\x1bK");
+        t95p.Poll(now_ms, direct);
+    }
+}
+static int T95Count(const char* prefix)
+{
+    int n = 0;
+    for(auto& l : t95_lines)
+        n += l.rfind(prefix, 0) == 0;
     return n;
 }
 
@@ -576,6 +616,125 @@ int main()
     BoxTftCompose(now_ms);
     sets_mode = kSetsRename;
     BoxTftCompose(now_ms);
+
+    /* ---------- T95 controllers: APC40 and keyboards through the bridge ---------- */
+    {
+        t95p.Init(T95Send);
+        T95Tick(10);
+        CHECK(T95Count("P 1 00 00 00 -1") >= 1); // version line with nothing attached
+        t95_lines.clear();
+        T95Frame("\x1bN1 APC40 mkI\n");
+        T95Tick(5);
+        CHECK(T95Count("X 1 f07e7f0601f7") == 1); // identity request
+        T95Frame("\x1bM1 F07E000602477300190001000000 7F7F7F7F004B020009000700020308000301 0601F7\n");
+        T95Tick(5);
+        CHECK(t95p.Active() == 1);
+        T95Tick(200);
+        CHECK(T95Count("X 1 f04700736000044201010" "1f7") == 1); // one intro, to device id 0
+        CHECK(t95p.ApcUp());
+        int led_lines = 0;
+        for(auto& l : t95_lines)
+            led_lines += l.rfind("X 1 9", 0) == 0 || l.rfind("X 1 b", 0) == 0 || l.rfind("X 1 8", 0) == 0;
+        CHECK(led_lines >= 1); // LEDs went out to it
+        int nl, unsent = 0;
+        LedSlot* lt = BoxLeds(&nl);
+        for(int i = 0; i < nl; i++)
+            unsent += lt[i].want != lt[i].sent;
+        CHECK(unsent == 0);
+
+        /* its buttons drive the box */
+        char f[64];
+        snprintf(f, sizeof(f), "\x1bM1 90%02x7f\n", apc::kShift);
+        T95Frame(f);
+        CHECK(shift);
+        snprintf(f, sizeof(f), "\x1bM1 80%02x00\n", apc::kShift);
+        T95Frame(f);
+        CHECK(!shift);
+
+        /* no room in the serial queue: LEDs wait, nothing is marked sent */
+        t95_room = false;
+        InvalidateLeds();
+        T95Tick(20);
+        unsent = 0;
+        for(int i = 0; i < nl; i++)
+            unsent += lt[i].want != lt[i].sent;
+        CHECK(unsent > 0);
+        t95_room = true;
+        T95Tick(50);
+        unsent = 0;
+        for(int i = 0; i < nl; i++)
+            unsent += lt[i].want != lt[i].sent;
+        CHECK(unsent == 0);
+
+        /* an APC40 on the Daisy's own USB-A wins */
+        T95Tick(5, true);
+        CHECK(t95p.Active() == 0 && !t95p.ApcUp());
+        snprintf(f, sizeof(f), "\x1bM1 90%02x7f\n", apc::kShift);
+        T95Frame(f);
+        CHECK(!shift); // ignored while USB-A drives
+        T95Tick(5, false);
+        CHECK(t95p.Active() == 1);
+        T95Tick(300);
+        CHECK(t95p.ApcUp());
+
+        /* keyboard: no identity reply, notes play the selected track */
+        T95Frame("\x1bN2 LPK25\n");
+        T95Tick(1100);
+        SelectTrack(0);
+        uint32_t trig0 = e.TriggerCount(0);
+        t95_lines.clear();
+        T95Frame("\x1bM2 903c64\n"); // C4 vel 100
+        T95Tick(5);
+        CHECK(e.TriggerCount(0) == trig0 + 1);
+        CHECK(T95Count("I 2 903c64") == 1);
+        CHECK(kb_track[60] == 0);
+        T95Frame("\x1bM2 9043 50\n"); // another key, held
+        T95Tick(5);
+        T95Frame("\x1bM2 803c00\n");
+        T95Tick(5);
+        CHECK(kb_track[60] == -1 && kb_track[67] == 0);
+        T95Tick(1000);
+        CHECK(T95Count("P 1 03 01 02 1") >= 1);
+
+        /* a 303 track: the note is folded into the 303's range and played */
+        e.SetSynth(1, true);
+        Tick(5);
+        SelectTrack(1);
+        uint32_t trig1 = e.TriggerCount(1);
+        T95Frame("\x1bM2 906478\n"); // E7, hard: accent
+        T95Tick(5);
+        CHECK(e.TriggerCount(1) == trig1 + 1);
+        CHECK(kb_track[100] == 1 && kb_note[100] >= kAcidLowNote && kb_note[100] <= kAcidHighNote
+              && kb_note[100] % 12 == 100 % 12);
+        T95Frame("\x1bM2 806400\n");
+        T95Tick(5);
+        CHECK(kb_track[100] == -1);
+        e.SetSynth(1, false);
+        SelectTrack(0);
+
+        /* ping */
+        T95Frame("\x1bP abc123\n");
+        CHECK(T95Count("Y abc123") == 1);
+
+        /* keyboard unplugged: its held note is released */
+        T95Frame("\x1bN2 -\n");
+        T95Tick(5);
+        CHECK(kb_track[67] == -1);
+
+        /* the bridge goes silent: everything from the T95 is dropped */
+        snprintf(f, sizeof(f), "\x1bM1 90%02x7f\n", apc::kShift);
+        T95Frame(f);
+        CHECK(shift);
+        T95Tick(2100, false, false);
+        CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
+        CHECK(!shift); // held buttons released
+        CHECK(T95Count("P 1 00 00 00 -1") >= 1);
+
+        /* garbage and frames for ports nobody announced do nothing */
+        T95Frame("\x1bM3 903c64\n\x1bM9 903c64\n\x1bMx\n\x1bN\n");
+        CHECK(t95p.Unattached() == 1);
+        printf("t95 ports ok\n");
+    }
 
     CHECK(e.nan_count == 0);
     printf("%s (%d failures), peak %.2f\n", fails ? "FAILED" : "all ok", fails, peak_last);

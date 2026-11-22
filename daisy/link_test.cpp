@@ -7,6 +7,8 @@
 volatile bool Link::resync_ = false;
 volatile bool Link::boot_   = false;
 HostCmd       Link::cmd_;
+uint8_t           Link::rx_[Link::kRx];
+volatile uint32_t Link::rx_w_ = 0, Link::rx_r_ = 0, Link::rx_dropped_ = 0;
 
 static usbdev::RxFn rx;
 static std::string  wire; // what the host received
@@ -71,6 +73,7 @@ int main()
         {
             const uint8_t esc_r[] = {0x1B, 'R'};
             rx(esc_r, 2);
+            link_.Poll();
             resyncs += link_.TakeResync();
             link_.Printf("V 7");
             link_.Printf("L dump %d", round);
@@ -99,6 +102,7 @@ int main()
     link_.Printf("L stale 2");
     const uint8_t esc_r[] = {0x1B, 'R'};
     rx(esc_r, 2);
+    link_.Poll();
     link_.TakeResync();
     link_.Printf("V 7");
     link_.Flush();

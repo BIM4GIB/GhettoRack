@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""ApcBox telemetry bridge: Daisy USB serial -> SSE for browsers.
+"""ApcBox bridge: Daisy USB serial <-> T95 controllers, and SSE for browsers.
 
-Read-only. The only thing it ever sends the Daisy is ESC R (full state dump):
-on connect, and again if the Daisy goes quiet. Python 3 standard library only.
+    controllers --raw MIDI--> bridge --ESC M frames--> Daisy
+    controllers <--raw MIDI-- bridge <--X lines------- Daisy (APC40 LEDs)
+    Daisy --report lines--> bridge --SSE /events--> browsers
 
-    Daisy --USB serial--> bridge --SSE /events--> browsers
+To the Daisy it sends ESC R (state dump) on connect and when the Daisy goes
+quiet. Only once the Daisy reports a "P" line (firmware v13.5 on, control
+protocol 1) does it also send controller MIDI (ESC M), port names (ESC N),
+keepalives (ESC K) and pings (ESC P). Python 3 standard library only.
 
   /             the monitor page (daisy/ui/apcbox-ui.html)
   /events       SSE: a snapshot of the latest state, then every line live.
                 Default events carry one report line each; "bridge" events
                 carry the bridge's own status as JSON.
-  /health       JSON: Daisy link, data age, counters, clients
+  /health       JSON: Daisy link, data age, counters, clients, controllers,
+                round-trip times to the Daisy
   /caps         JSON: what this server supports (the page reads it to hide
                 the Mac build's /ui and /tft.bmp controls)
 
 The Daisy is found by USB VID/PID (and optionally serial) under /sys, not by
-tty index. --port forces a path instead (tests, odd setups).
+tty index; controllers by their USB device under /sys/class/sound, not by
+ALSA card number. --port and --midi force paths instead (tests, odd setups).
 See t95/bridge/README.md.
 """
 import argparse
@@ -38,6 +44,14 @@ STALE_S = 3.0             # no line for this long: ask for a dump again
 RESCAN_S = 1.0
 LOG_KEEP = 100            # L lines replayed to a new browser
 CACHE_MAX = 512
+ESC = b"\x1b"
+MAX_PORTS = 8             # T95 controller ports 1..8
+SERIAL_OUT_MAX = 64 * 1024  # bytes waiting for the Daisy before MIDI is dropped
+SYSEX_MAX = 128           # one ESC M frame (HostCmd::kMaxMidi on the Daisy)
+OUT_SYSEX_MAX = 16        # sysex messages waiting for one controller
+KEEPALIVE_S = 0.5         # the Daisy drops T95 controllers after 2 s without one
+PING_S = 1.0
+PING_KEEP = 300
 
 # Line types whose second field says which track/slot they describe
 KEYED = {"T", "N", "Q", "A", "KN"}
@@ -76,21 +90,26 @@ def open_raw(path):
     """Open a tty raw, echo off, before reading anything"""
     fd = os.open(path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     try:
-        a = termios.tcgetattr(fd)
-        # cfmakeraw
-        a[0] &= ~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP
-                  | termios.INLCR | termios.IGNCR | termios.ICRNL | termios.IXON)
-        a[1] &= ~termios.OPOST
-        a[2] &= ~(termios.CSIZE | termios.PARENB)
-        a[2] |= termios.CS8 | termios.CLOCAL | termios.CREAD
-        a[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN)
-        a[6][termios.VMIN] = 1
-        a[6][termios.VTIME] = 0
-        termios.tcsetattr(fd, termios.TCSANOW, a)
+        open_raw_fd(fd)
     except termios.error:
         os.close(fd)
         raise
     return fd
+
+
+def open_raw_fd(fd):
+    """Raw, echo off (cfmakeraw)"""
+    a = termios.tcgetattr(fd)
+    # cfmakeraw
+    a[0] &= ~(termios.IGNBRK | termios.BRKINT | termios.PARMRK | termios.ISTRIP
+              | termios.INLCR | termios.IGNCR | termios.ICRNL | termios.IXON)
+    a[1] &= ~termios.OPOST
+    a[2] &= ~(termios.CSIZE | termios.PARENB)
+    a[2] |= termios.CS8 | termios.CLOCAL | termios.CREAD
+    a[3] &= ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.ISIG | termios.IEXTEN)
+    a[6][termios.VMIN] = 1
+    a[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, a)
 
 
 class LineAssembler:
@@ -131,6 +150,117 @@ class LineAssembler:
     def reset(self):
         self.buf.clear()
         self.skipping = False
+
+
+# ---------------------------------------------------------------- MIDI
+
+def data_len(status):
+    """Data bytes after a channel status byte"""
+    return 1 if status & 0xF0 in (0xC0, 0xD0) else 2
+
+
+class MidiParser:
+    """Raw MIDI bytes in, complete messages out.
+
+    Handles running status, realtime bytes (F8-FF) arriving anywhere, even
+    inside other messages, and sysex split across reads. Realtime and system
+    common messages are dropped and counted: clock and tempo sync belong on
+    the Daisy, later. Sysex longer than one frame is dropped too."""
+
+    def __init__(self):
+        self.status = 0         # running status
+        self.data = []
+        self.sysex = None       # bytearray while inside F0..F7
+        self.realtime = 0
+        self.dropped = 0
+
+    def feed(self, data):
+        out = []
+        for b in data:
+            if b >= 0xF8:
+                self.realtime += 1
+                continue
+            if self.sysex is not None:
+                if b == 0xF7:
+                    self.sysex.append(b)
+                    if len(self.sysex) <= SYSEX_MAX:
+                        out.append(bytes(self.sysex))
+                    else:
+                        self.dropped += 1
+                    self.sysex = None
+                    continue
+                if b < 0x80:
+                    self.sysex.append(b)
+                    continue
+                self.sysex = None   # unterminated: a new status ends it
+                self.dropped += 1
+            if b == 0xF0:
+                self.sysex = bytearray([b])
+                self.status = 0
+            elif b >= 0xF0:         # system common: not forwarded
+                self.status = 0
+                self.data = []
+                self.dropped += 1
+            elif b >= 0x80:
+                self.status = b
+                self.data = []
+            elif self.status:
+                self.data.append(b)
+                if len(self.data) == data_len(self.status):
+                    out.append(bytes([self.status] + self.data))
+                    self.data = []
+            # data byte without a status: ignored
+        return out
+
+
+def find_midi(root=""):
+    """{key: (device path, name)} for the raw MIDI ports under /sys.
+    The key is the USB device path, so it survives ALSA renumbering."""
+    found = {}
+    for d in sorted(glob.glob(root + "/sys/class/sound/midiC*D*")):
+        base = os.path.basename(d)              # midiC3D0
+        try:
+            card, dev = base[5:].split("D")
+            card_dir = root + "/sys/class/sound/card" + card
+            name = open(os.path.join(card_dir, "id")).read().strip()
+            key = os.path.realpath(os.path.join(card_dir, "device"))
+            usb = os.path.dirname(key)          # the USB device above the interface
+            fp = os.path.join(usb, "product")
+            if os.path.exists(fp):
+                name = open(fp).read().strip() or name
+        except (OSError, ValueError):
+            continue
+        if dev != "0":
+            name += " " + dev
+        found[key + ":" + dev] = ("/dev/snd/" + base, name)
+    return found
+
+
+def clean_name(name):
+    name = "".join(c if 0x20 <= ord(c) < 0x7F else "?" for c in name).strip()
+    return (name or "MIDI")[:32]
+
+
+class MidiPort:
+    """One controller on the T95. Out queue: sysex in order, then the newest
+    value per note/CC (LED states): if it backs up, old LED values are
+    replaced rather than piling up."""
+
+    def __init__(self, num, key, path, name, fd):
+        self.num, self.key, self.path, self.name, self.fd = num, key, path, name, fd
+        self.parser = MidiParser()
+        self.out_sysex = collections.deque()
+        self.out_led = collections.OrderedDict()
+        self.out_buf = b""      # bytes of a message the device took only part of
+        self.writing = False
+        self.in_msgs = self.out_msgs = 0
+        self.dropped_in = self.dropped_out = self.coalesced = 0
+
+    def info(self, kinds):
+        return {"port": self.num, "name": self.name, "path": self.path, "kind": kinds.get(self.num, "?"),
+                "in": self.in_msgs, "out": self.out_msgs, "dropped_in": self.dropped_in,
+                "dropped_out": self.dropped_out, "coalesced": self.coalesced,
+                "realtime_dropped": self.parser.realtime, "bad_in": self.parser.dropped}
 
 
 # ---------------------------------------------------------------- state
@@ -229,6 +359,17 @@ class Bridge:
         self.client_resyncs = 0
         self.rejected = 0
         self.lost = asyncio.Event()
+        self.sout = bytearray()          # waiting to go to the Daisy
+        self.serial_dropped = 0
+        self.ctl = 0                     # Daisy control protocol version (P line)
+        self.p_line = None
+        self.ports = {}                  # num -> MidiPort
+        self.pings = {}                  # id -> send time
+        self.ping_seq = 0
+        self.rtts = collections.deque(maxlen=PING_KEEP)
+        self.pings_lost = 0
+        self.midi_paths = dict(x.split("=", 1) if "=" in x else (x, os.path.basename(x))
+                               for x in (args.midi or []))
         with open(args.ui, "rb") as f:
             self.page = f.read()
 
@@ -247,7 +388,40 @@ class Bridge:
             "clients": len(self.clients),
             "client_resyncs": self.client_resyncs + sum(c.resyncs for c in self.clients),
             "rejected_clients": self.rejected,
+            "control": self.ctl,
+            "serial_out_bytes": len(self.sout),
+            "serial_dropped": self.serial_dropped,
+            "controllers": [p.info(self.kinds()) for p in sorted(self.ports.values(), key=lambda p: p.num)],
+            "ping_ms": self.ping_stats(),
         }
+
+    def kinds(self):
+        """Port kinds from the Daisy's P line: P ver attached apc keys active"""
+        k = {}
+        try:
+            v, att, apc, keys, active = self.p_line.split()[1:6]
+            att, apc, keys, active = int(att, 16), int(apc, 16), int(keys, 16), int(active)
+        except (AttributeError, ValueError):
+            return k
+        for n in range(1, MAX_PORTS + 1):
+            bit = 1 << (n - 1)
+            if apc & bit:
+                k[n] = "apc40 (driving)" if active == n else "apc40"
+            elif keys & bit:
+                k[n] = "keys"
+            elif att & bit:
+                k[n] = "identifying"
+        return k
+
+    def ping_stats(self):
+        if not self.rtts:
+            return {"count": 0, "lost": self.pings_lost}
+        r = sorted(self.rtts)
+        avg = sum(r) / len(r)
+        jitter = (sum((x - avg) ** 2 for x in r) / len(r)) ** 0.5
+        return {"count": len(r), "lost": self.pings_lost, "min": round(r[0], 2), "avg": round(avg, 2),
+                "p99": round(r[min(len(r) - 1, int(len(r) * 0.99))], 2), "max": round(r[-1], 2),
+                "jitter": round(jitter, 2)}
 
     def announce(self):
         ev = sse_event("bridge", self.status())
@@ -257,10 +431,43 @@ class Bridge:
     # -- serial side
     def ask_dump(self):
         self.last_ask = now()
+        self.serial_send(ESC_R, essential=True)
+
+    def serial_send(self, data, essential=False):
+        """Queue bytes for the Daisy. Never blocks: if the Daisy isn't taking
+        them, MIDI beyond SERIAL_OUT_MAX is dropped and counted."""
+        if self.fd is None:
+            return False
+        if not essential and len(self.sout) + len(data) > SERIAL_OUT_MAX:
+            self.serial_dropped += 1
+            return False
+        self.sout += data
+        self.serial_flush()
+        return True
+
+    def serial_flush(self):
+        loop = asyncio.get_running_loop()
+        if self.fd is None:
+            return
         try:
-            os.write(self.fd, ESC_R)
+            while self.sout:
+                n = os.write(self.fd, self.sout)
+                del self.sout[:n]
+        except BlockingIOError:
+            pass
         except OSError as e:
             log.warning("write to %s: %s", self.port, e)
+            self.sout.clear()
+        if self.sout:
+            loop.add_writer(self.fd, self.serial_flush)
+        else:
+            loop.remove_writer(self.fd)
+
+    def ctl_send(self, data):
+        """Control frames: only to a Daisy that said it understands them"""
+        if self.ctl >= 1:
+            return self.serial_send(data)
+        return False
 
     def on_readable(self):
         try:
@@ -277,14 +484,45 @@ class Bridge:
         for line in self.asm.feed(data):
             self.lines += 1
             self.last_line = now()
+            t = line.split(" ", 1)[0]
+            if t == "X":
+                self.midi_out(line)
+                continue
+            if t == "Y":
+                self.pong(line)
+                continue
+            if t == "P":
+                self.on_p_line(line)
             self.cache.put(line)
             chunk = sse_data(line)
             for c in list(self.clients):
                 c.push(chunk)
 
+    def on_p_line(self, line):
+        self.p_line = line
+        try:
+            v = int(line.split()[1])
+        except (IndexError, ValueError):
+            return
+        if v >= 1 and self.ctl == 0:
+            self.ctl = v
+            log.info("Daisy speaks control protocol %d: forwarding controllers", v)
+            for p in self.ports.values():  # (re)announce everything
+                self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
+
+    def pong(self, line):
+        sent = self.pings.pop(line[2:].strip(), None)
+        if sent is not None:
+            self.rtts.append((now() - sent) * 1000.0)
+
     def close_port(self):
         loop = asyncio.get_running_loop()
+        self.ctl = 0
+        self.p_line = None
+        self.sout.clear()
+        self.pings.clear()
         if self.fd is not None:
+            loop.remove_writer(self.fd)
             loop.remove_reader(self.fd)
             try:
                 os.close(self.fd)
@@ -324,6 +562,7 @@ class Bridge:
             # usually the middle of a line. Drop up to the first newline.
             self.asm.skipping = True
             self.cache.clear()         # a different Daisy, or the same one rebooted
+            self.ctl = 0               # until it sends a P line
             for c in self.clients:
                 c.q.clear(); c.qbytes = 0; c.need_snapshot = True; c.wake.set()
             self.lost.clear()
@@ -346,6 +585,143 @@ class Bridge:
             self.close_port()
             self.announce()
 
+    # -- controllers
+    def midi_candidates(self):
+        if self.midi_paths:            # --midi: fixed paths (tests)
+            return {path: (path, name) for path, name in self.midi_paths.items() if os.path.exists(path)}
+        return find_midi()
+
+    def attach_midi(self, key, path, name):
+        free = [n for n in range(1, MAX_PORTS + 1) if n not in self.ports]
+        if not free:
+            return
+        try:
+            fd = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)
+            if os.isatty(fd):          # tests use ptys: make them raw
+                open_raw_fd(fd)
+        except OSError as e:
+            log.warning("open %s: %s", path, e)
+            return
+        p = MidiPort(free[0], key, path, clean_name(name), fd)
+        self.ports[p.num] = p
+        asyncio.get_running_loop().add_reader(fd, self.on_midi_readable, p)
+        log.info("controller %s on %s: port %d", p.name, path, p.num)
+        self.ctl_send(b"%sN%d %s\n" % (ESC, p.num, p.name.encode()))
+        self.announce()
+
+    def detach_midi(self, p, why=""):
+        loop = asyncio.get_running_loop()
+        loop.remove_reader(p.fd)
+        loop.remove_writer(p.fd)
+        try:
+            os.close(p.fd)
+        except OSError:
+            pass
+        self.ports.pop(p.num, None)
+        log.info("controller %s (port %d) gone%s", p.name, p.num, why)
+        self.ctl_send(b"%sN%d -\n" % (ESC, p.num))
+        self.announce()
+
+    def on_midi_readable(self, p):
+        try:
+            data = os.read(p.fd, 4096)
+        except BlockingIOError:
+            return
+        except OSError:
+            data = b""
+        if not data:
+            self.detach_midi(p, ": read failed")
+            return
+        for msg in p.parser.feed(data):
+            p.in_msgs += 1
+            if not self.ctl_send(b"%sM%d %s\n" % (ESC, p.num, msg.hex().encode())):
+                p.dropped_in += 1
+
+    def midi_out(self, line):
+        """X p hex: from the Daisy to controller p"""
+        try:
+            _, num, hexs = line.split(" ", 2)
+            p = self.ports.get(int(num))
+            data = bytes.fromhex(hexs)
+        except ValueError:
+            self.asm.bad += 1
+            return
+        if p is None:
+            return
+        for msg in MidiParser().feed(data):
+            if msg[0] == 0xF0:
+                if len(p.out_sysex) >= OUT_SYSEX_MAX:
+                    p.dropped_out += 1
+                    continue
+                p.out_sysex.append(msg)
+            else:
+                key = msg[:2] if msg[0] < 0xC0 else msg[:1]
+                if key in p.out_led:
+                    p.coalesced += 1
+                    del p.out_led[key]
+                p.out_led[key] = msg
+        self.midi_flush(p)
+
+    def midi_flush(self, p):
+        loop = asyncio.get_running_loop()
+        try:
+            while True:
+                if not p.out_buf:
+                    if p.out_sysex:
+                        p.out_buf = p.out_sysex.popleft()
+                    elif p.out_led:
+                        p.out_buf = p.out_led.popitem(last=False)[1]
+                    else:
+                        break
+                    p.out_msgs += 1
+                n = os.write(p.fd, p.out_buf)
+                p.out_buf = p.out_buf[n:]
+        except BlockingIOError:
+            pass
+        except OSError:
+            self.detach_midi(p, ": write failed")
+            return
+        busy = bool(p.out_buf or p.out_sysex or p.out_led)
+        if busy and not p.writing:
+            loop.add_writer(p.fd, self.midi_flush, p)
+        elif not busy and p.writing:
+            loop.remove_writer(p.fd)
+        p.writing = busy
+
+    async def midi_task(self):
+        if self.args.no_midi:
+            return
+        while True:
+            have = {p.key: p for p in self.ports.values()}
+            cand = self.midi_candidates()
+            for key, p in have.items():
+                if key not in cand:
+                    self.detach_midi(p, ": unplugged")
+            for key, (path, name) in cand.items():
+                if key not in have:
+                    self.attach_midi(key, path, name)
+            await asyncio.sleep(RESCAN_S)
+
+    async def control_task(self):
+        """Keepalive and ping, while the Daisy speaks the control protocol"""
+        last_ping = 0.0
+        while True:
+            await asyncio.sleep(KEEPALIVE_S)
+            if self.ctl < 1:
+                continue
+            self.ctl_send(ESC + b"K")
+            t = now()
+            for k, sent in list(self.pings.items()):
+                if t - sent > 2.0:
+                    del self.pings[k]
+                    self.pings_lost += 1
+            if t - last_ping >= PING_S:
+                last_ping = t
+                self.ping_seq += 1
+                pid = "%d" % self.ping_seq
+                self.pings[pid] = now()
+                self.ctl_send(b"%sP %s\n" % (ESC, pid.encode()))
+
     # -- browser side
     async def handle_http(self, reader, writer):
         peer = writer.get_extra_info("peername")
@@ -367,7 +743,7 @@ class Bridge:
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
-                caps = {"source": "daisy-bridge", "bridge": 1, "control": False, "ui": False, "tft": False}
+                caps = {"source": "daisy-bridge", "bridge": 2, "control": False, "midi": True, "ui": False, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")
             elif path == "/events":
                 await self.stream(reader, writer, peer)
@@ -447,7 +823,7 @@ async def main_async(args):
     server = await asyncio.start_server(b.handle_http, args.host, args.http_port, limit=16384)
     log.info("serving http://%s:%d/", args.host, args.http_port)
     async with server:
-        await asyncio.gather(server.serve_forever(), b.serial_task())
+        await asyncio.gather(server.serve_forever(), b.serial_task(), b.midi_task(), b.control_task())
 
 
 def main(argv=None):
@@ -457,6 +833,9 @@ def main(argv=None):
     ap.add_argument("--http-port", type=int, default=8040)
     ap.add_argument("--serial", help="USB serial number of the Daisy to use (several connected)")
     ap.add_argument("--port", help="tty path instead of finding the Daisy by VID/PID")
+    ap.add_argument("--midi", action="append", metavar="PATH=NAME",
+                    help="controller device path instead of scanning /sys (repeatable)")
+    ap.add_argument("--no-midi", action="store_true", help="don't touch MIDI controllers")
     ap.add_argument("--ui", default=os.path.join(here, "apcbox-ui.html")
                     if os.path.exists(os.path.join(here, "apcbox-ui.html"))
                     else os.path.join(here, "..", "..", "daisy", "ui", "apcbox-ui.html"))

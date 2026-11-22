@@ -25,6 +25,7 @@
 #include "engine.h"
 #include "box.h"
 #include "link.h"
+#include "ports.h"
 #include "diag.h"
 #include "tft.h"
 #include "usbdev.h"
@@ -57,6 +58,8 @@ Link           ui_link; // USB serial to the Mac UI
 volatile bool  Link::resync_ = false;
 volatile bool  Link::boot_   = false;
 HostCmd        Link::cmd_;
+uint8_t           Link::rx_[Link::kRx];
+volatile uint32_t Link::rx_w_ = 0, Link::rx_r_ = 0, Link::rx_dropped_ = 0;
 
 #define Log BoxLog
 
@@ -86,6 +89,10 @@ constexpr uint32_t   kStageCap = 4600 * 1024;
 DSY_SDRAM_BSS int16_t stage_mem[kStageCap];
 DIR                 dir;
 FILINFO             fno;
+
+T95Ports t95; // controllers on the T95, through the bridge
+bool     SendLine(const char* l) { return ui_link.TryLine(l); }
+void     OnHostCmd(const HostCmd& c, HostCmd::Cmd cmd) { t95.OnCmd(c, cmd, System::GetNow()); }
 
 volatile bool midi_ready    = false;
 bool          mode_sent     = false;
@@ -498,8 +505,8 @@ class DaisyPlatform : public Platform
 
     float    CpuAvg() override { return cpu.GetAvgCpuLoad(); }
     float    CpuMax() override { return cpu.GetMaxCpuLoad(); }
-    bool     ControllerUp() override { return UsbMidiUp(); }
-    bool     ControllerPresent() override { return usbHost.GetPresent(); }
+    bool     ControllerUp() override { return UsbMidiUp() || t95.ApcUp(); }
+    bool     ControllerPresent() override { return usbHost.GetPresent() || t95.AnyAttached(); }
     uint32_t Dropped() override { return ui_link.Dropped(); }
     bool     AudioRunning() override { return audio_running; }
 
@@ -719,7 +726,9 @@ int main(void)
        re-inits the audio hardware, so don't */
     diag::Stage(19);
     ui_link.Init();
-    ui_link.Printf("L ApcBox 13.4 start"); // not Log: the box code isn't set up yet
+    ui_link.OnCmd(OnHostCmd);
+    t95.Init(SendLine);
+    ui_link.Printf("L ApcBox 13.5 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */
@@ -873,6 +882,7 @@ int main(void)
         }
 
         diag::Stage(103);
+        ui_link.Poll(); // host commands, T95 controller frames
         if(ui_link.BootRequested())
         {
             /* flash.sh asked: reboot into the Daisy bootloader and wait
@@ -882,8 +892,12 @@ int main(void)
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
         if(ui_link.TakeResync())
+        {
             BoxResync();
+            t95.ForceReport();
+        }
         BoxPoll(now);
+        t95.Poll(now, up); // after BoxPoll: LED states are fresh
         diag::Stage(104);
         if(up && mode_sent)
             LedFlush(now);

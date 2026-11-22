@@ -115,6 +115,7 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
   <button id="demo">Demo</button>
   <span id="c-link" class="chip">Daisy: not connected</span>
   <span id="c-bridge" class="chip hidden">T95 bridge: ?</span>
+  <span id="c-ctl" class="chip hidden">T95 controllers: ?</span>
   <span id="c-apc" class="chip">APC40: ?</span>
   <span id="c-sd" class="chip">SD: ?</span>
   <div class="stat"><span class="lbl">Transport</span><span id="transport" class="big">■</span></div>
@@ -216,7 +217,7 @@ section h2 { margin: 0 0 10px; font-size: 12px; color: var(--dim); text-transfor
 "use strict";
 /* ---------------- state ---------------- */
 const NT = 16, NS = 16;
-const REPORT_VERSION = 7; // firmware sends "V 7"
+const REPORT_VERSION = 8; // firmware sends "V 8"
 const st = {
   link: false, demo: false, gotData: false,
   play: 0, step: 0, pat: 0, queued: -1, rec: 0, bpm: 0, metro: 0, sel: 0, page: 0, shift: 0, copy: 0,
@@ -309,6 +310,9 @@ function handleLine(line) {
     case "KN": { const a = rest.split(" "); const i = +a[0]; if (i >= 0 && i < 5) st.kitNames[i] = [a.slice(2).join(" "), +a[1]]; break; }
     case "W": { const [w, s] = rest.split(" "); st.want = w || ""; st.sent = s || ""; break; }
     case "E": logMidi(nums()); break;
+    case "X": case "Y": return; // MIDI out to T95 controllers, ping replies: for the bridge
+    case "I": logKeys(rest); return;
+    case "P": { const a = rest.split(" "); st.t95 = { ver: +a[0], att: parseInt(a[1], 16) || 0, apc: parseInt(a[2], 16) || 0, keys: parseInt(a[3], 16) || 0, active: +a[4] }; break; }
     case "L": log(rest); break;
     case "D": drawOled(rest); return;
     default: log(line, "w");
@@ -355,6 +359,14 @@ function ccName(ch, c, v) {
   if (c >= 0x30 && c <= 0x37) return `track knob ${c - 0x2F} = ${v}`;
   if (c === 0x2F) return `cue knob ${v < 64 ? "+" + v : v - 128}`;
   return `CC ${c} ch${ch + 1} = ${v}`;
+}
+/* MIDI from a keyboard on the T95: "port hexbytes" */
+function logKeys(rest) {
+  const [port, hex] = rest.split(" ");
+  const b = (hex || "").match(/../g)?.map(h => parseInt(h, 16)) || [];
+  const t = b[0] >> 4, nn = pitchName;
+  const what = t === 9 && b[2] ? `note ${nn(b[1])} vel ${b[2]}` : (t === 8 || t === 9) ? `note off ${nn(b[1])}` : t === 11 ? `cc ${b[1]} = ${b[2]}` : hex;
+  log(`keys (T95 port ${port}): ${what}`);
 }
 function logMidi(a) {
   const [type, ch, d0, d1] = a;
@@ -448,6 +460,14 @@ function render() {
   const who = st.mac ? "Mac build" : "Daisy";
   if (st.bridge) {
     const fresh = st.gotData && now - st.lastData < 3000;
+    const ports = m => [1, 2, 3, 4, 5, 6, 7, 8].filter(p => m & (1 << (p - 1))).join(",");
+    const t9 = st.t95;
+    $("c-ctl").classList.toggle("hidden", !t9);
+    if (t9) {
+      const parts = [t9.apc ? `APC40 ${ports(t9.apc)}${t9.active > 0 ? " (driving)" : t9.active === 0 ? " (USB-A wins)" : ""}` : "",
+                     t9.keys ? `keys ${ports(t9.keys)}` : ""].filter(Boolean);
+      chip("c-ctl", "T95 controllers: " + (!t9.att ? "none" : parts.length ? parts.join(" · ") : `identifying ${ports(t9.att)}`), t9.att ? "ok" : "");
+    }
     chip("c-bridge", st.bridge.up ? "T95 bridge: connected" : "T95 bridge: lost, retrying", st.bridge.up ? "ok" : "bad");
     chip("c-link", !st.bridge.up ? "Daisy: unknown" : !st.bridge.daisy ? "Daisy: not on the T95" : fresh ? "Daisy: connected" : "Daisy: no data",
          !st.bridge.up ? "warn" : !st.bridge.daisy ? "bad" : fresh ? "ok" : "warn");

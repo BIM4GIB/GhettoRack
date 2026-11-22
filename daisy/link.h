@@ -5,8 +5,9 @@
  *  in chunks from two alternating buffers: a buffer is only refilled after
  *  a later transmit has been accepted, which means it has been delivered.
  *
- *  Host commands (ESC R = full resend, ESC BOOT = bootloader) are parsed by
- *  HostCmd in hostcmd.h; bare bytes are ignored.
+ *  Received bytes go from the USB interrupt into a small ring; Poll() in the
+ *  main loop parses them with HostCmd (hostcmd.h). ESC R and ESC BOOT are
+ *  handled here, the T95 control frames go to the handler set with OnCmd.
  */
 #pragma once
 #include "hostcmd.h"
@@ -38,6 +39,45 @@ class Link
             n = sizeof(line) - 2;
         line[n++] = '\n';
         Put(line, n);
+    }
+
+    using CmdFn = void (*)(const HostCmd& c, HostCmd::Cmd cmd);
+    void OnCmd(CmdFn fn) { on_cmd_ = fn; }
+
+    /** Main loop: parse what the host sent since last time */
+    void Poll()
+    {
+        while(rx_r_ != rx_w_)
+        {
+            uint8_t b = rx_[rx_r_ % kRx];
+            rx_r_     = rx_r_ + 1;
+            HostCmd::Cmd c = cmd_.Feed(b);
+            switch(c)
+            {
+                case HostCmd::kNone: break;
+                case HostCmd::kResync: resync_ = true; break;
+                case HostCmd::kBoot: boot_ = true; break; // flash script
+                default:
+                    if(on_cmd_)
+                        on_cmd_(cmd_, c);
+                    break;
+            }
+        }
+    }
+
+    uint32_t RxDropped() const { return rx_dropped_; }
+
+    /** A line that must not be lost: false (and nothing queued) if there's
+     *  no room, so the caller can try again later */
+    bool TryLine(const char* s)
+    {
+        size_t   n    = strlen(s);
+        uint32_t used = (head_ + kRing - tail_) % kRing;
+        if(used + n + 1 >= kRing - 1)
+            return false;
+        Put(s, (int)n);
+        Put("\n", 1);
+        return true;
     }
 
     /** One raw line of any length (no formatting), newline added */
@@ -125,20 +165,27 @@ class Link
         }
     }
 
+    /* USB interrupt: just store the bytes */
     static void Rx(const uint8_t* buf, uint32_t len)
     {
         for(uint32_t i = 0; i < len; i++)
         {
-            switch(cmd_.Feed(buf[i]))
+            if(rx_w_ - rx_r_ >= kRx)
             {
-                case HostCmd::kResync: resync_ = true; break;
-                case HostCmd::kBoot: boot_ = true; break; // flash script
-                default: break;
+                rx_dropped_ = rx_dropped_ + 1;
+                continue;
             }
+            rx_[rx_w_ % kRx] = buf[i];
+            __sync_synchronize();
+            rx_w_ = rx_w_ + 1;
         }
     }
 
-    static HostCmd cmd_;
+    static constexpr uint32_t  kRx = 4096;
+    static uint8_t             rx_[kRx];
+    static volatile uint32_t   rx_w_, rx_r_, rx_dropped_;
+    static HostCmd             cmd_;
+    CmdFn                      on_cmd_ = nullptr;
 
     char                 ring_[kRing];
     uint32_t             head_ = 0, tail_ = 0;

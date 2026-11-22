@@ -2350,7 +2350,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 7;
+constexpr int kReportVersion = 8;
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
 uint8_t  rep_track[kTracks][13];
@@ -2780,6 +2780,60 @@ void BoxMidi(int type, int ch, int d0, int d1, uint32_t now)
 void BoxControllerGone()
 {
     ReleaseAllHeld();
+}
+
+/* MIDI keyboards (via the T95): notes play the selected track */
+int8_t kb_track[128];
+int8_t kb_note[128];
+bool   kb_init = false;
+
+void BoxKeys(int type, int ch, int d0, int d1, uint32_t now)
+{
+    g_now = now;
+    (void)ch;
+    if(!kb_init)
+    {
+        memset(kb_track, -1, sizeof(kb_track));
+        kb_init = true;
+    }
+    if(d0 < 0 || d0 > 127)
+        return;
+    bool on = type == kMidiNoteOn && d1 > 0;
+    if(!on && type != kMidiNoteOn && type != kMidiNoteOff)
+        return; // CCs, bends: not mapped yet
+    if(kb_track[d0] >= 0) // release what this key started (also on a repeat)
+    {
+        eng->KeyNote(kb_track[d0], kb_note[d0], 64, false);
+        kb_track[d0] = -1;
+    }
+    if(!on)
+        return;
+    int t = sel_track, n = d0;
+    if(eng->IsSynth(t)) // fold into the 303's range
+    {
+        while(n < kAcidLowNote)
+            n += 12;
+        while(n > kAcidHighNote)
+            n -= 12;
+    }
+    kb_track[d0] = (int8_t)t;
+    kb_note[d0]  = (int8_t)n;
+    eng->KeyNote(t, n, d1, true);
+    char nn[12];
+    NoteName(nn, sizeof(nn), n);
+    Popup("%s  track %d", nn, t + 1);
+}
+
+void BoxKeysGone()
+{
+    if(!kb_init)
+        return;
+    for(int k = 0; k < 128; k++)
+        if(kb_track[k] >= 0)
+        {
+            eng->KeyNote(kb_track[k], kb_note[k], 64, false);
+            kb_track[k] = -1;
+        }
 }
 
 void BoxPoll(uint32_t now)

@@ -84,6 +84,11 @@ void BoxStorageGone();
 void BoxMidi(int type, int ch, int d0, int d1, uint32_t now);
 /** The controller went away: release everything held */
 void BoxControllerGone();
+/** MIDI from a keyboard (LPK25, MPK249 via the T95): notes play the
+ *  selected track. Same type numbers as BoxMidi */
+void BoxKeys(int type, int ch, int d0, int d1, uint32_t now);
+/** All keyboards gone: release their notes */
+void BoxKeysGone();
 /** Main loop: loader, browser, LED states, monitor stream */
 void BoxPoll(uint32_t now);
 /** Resend the whole state on the monitor stream */
