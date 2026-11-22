@@ -28,7 +28,8 @@ output coming back the same way.
 
 Newline-terminated ASCII lines, fields separated by single spaces, first
 character = line type. Lines are sent when their content changes, except S
-(every UI tick) and V (once a second). Source: `daisy/box.cpp`, search for `Out("`.
+(every UI tick) and V (once a second). A parser must accept unknown line
+types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 
 | Line | Fields |
 |---|---|
@@ -38,7 +39,11 @@ character = line type. Lines are sent when their content changes, except S
 | `N t name` | Track `t` sound name, or `[303]`, `[loop n bars]`, `[kit sound]` |
 | `M v0..v9` | Global values 0-127 (index 9 = master filter) |
 | `B folder nfolders file nfiles` | Sample browser position |
+| `BF name` | Sample browser folder name |
+| `BN name` | Sample browser file name (`-` when none) |
 | `K k0 k1 k2 k3` | Kit page |
+| `KN i k name` | Name of kit `k` in slot `i` (0-4) of the shown kit page (`-` when none) |
+| `D hex` | OLED picture: 1024 bytes (128x64, 1 bit per pixel, SSD1306 page order) as 2048 hex digits, at most every 200 ms when it changes. The monitor page draws it; it is not the TFT picture |
 | `W want sent` | APC40 LEDs wanted / confirmed (hex strings) |
 | `E type ch d0 d1` | Raw MIDI received from the APC40 |
 | `Q pat t hex` | 303 notes of track `t`: 16 bytes hex, bit 7 = slide |
