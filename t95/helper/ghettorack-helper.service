@@ -14,7 +14,8 @@ RuntimeDirectoryMode=0755
 StateDirectory=ghettorack
 StateDirectoryMode=0700
 ProtectHome=yes
-PrivateTmp=yes
+# No PrivateTmp: wpa_cli puts its reply socket in /tmp, and wpa_supplicant has to
+# reach it there. With a private /tmp every scan and status timed out (rig, 2026-11-23).
 
 [Install]
 WantedBy=multi-user.target
