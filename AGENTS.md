@@ -28,7 +28,8 @@ daisy/      ApcBox firmware (Makefile), desktop tests, mac/ (same engine on macO
             with the APC40 on the Mac), ui/ (monitor page, Chrome Web Serial),
             release/ApcBox.bin (latest built firmware)
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
-            remote), ui/ (module selector), kiosk/ (Chromium on HDMI)
+            remote, router, network MIDI), ui/ (module selector, MIDI hub),
+            kiosk/ (Chromium on HDMI)
 protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed),
             flash-seed.sh (flash one chosen Seed; macOS and Linux)

@@ -87,7 +87,10 @@ class WebMixin:
             c.push(chunk)
 
     def state_json(self):
-        return {"modules": MODULES, "last": self.state.data["last"],
+        have = {"daisy": self.fd is not None}
+        return {"modules": [dict({k: m[k] for k in ("id", "name", "url", "ready", "needs", "about")},
+                                 missing=[n for n in m["needs"] if not have.get(n)]) for m in MODULES],
+                "module": self.module()["id"], "last": self.state.data["last"],
                 "autostart_s": self.state.data["autostart_s"],
                 "hdmi_audio": self.hdmi.info(),
                 "ir": {"profiles": self.state.data["ir"], "actions": IR_ACTIONS,
@@ -107,6 +110,8 @@ class WebMixin:
                 return 400, {"error": "unknown or unready module"}
             self.state.data["last"] = m
             self.state.save()
+            self.refresh_daisy_ports()     # the module's routing applies now
+            self.announce()
             return 200, {"ok": True}
         if path == "/settings":
             if "autostart_s" in d:
@@ -134,6 +139,12 @@ class WebMixin:
         if path == "/ir/cancel":
             self.ir.learning = None
             return 200, {"ok": True}
+        if path == "/routes":
+            return self.set_routes(d.get("routes"))
+        if path == "/net/never":
+            return self.net_set_never(d.get("name"), d.get("never"))
+        if path in ("/presets/save", "/presets/load", "/presets/delete"):
+            return self.preset(path.rsplit("/", 1)[1], d.get("name"))
         if path == "/samples/send":
             return self.queue_send(d.get("src", "lib"), d.get("path", ""), d.get("track"))
         if path == "/samples/delete":
@@ -196,6 +207,8 @@ class WebMixin:
                 await self.reply(writer, 405, "text/plain", b"GET or POST\n")
             elif path in ("/", "/index.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.selector)
+            elif path == "/midihub":
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.hub)
             elif path in ("/apcbox", "/apcbox-ui.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.page)
             elif path == "/ui":
@@ -218,6 +231,8 @@ class WebMixin:
                 code, out = self.list_samples(params.get("src", "lib"),
                                               urllib.parse.unquote(params.get("path", "")))
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
+            elif path == "/routes":
+                await self.reply(writer, 200, "application/json", json.dumps(self.routes_json(), indent=1).encode() + b"\n")
             elif path == "/state":
                 await self.reply(writer, 200, "application/json", json.dumps(self.state_json(), indent=1).encode() + b"\n")
             elif path == "/health":

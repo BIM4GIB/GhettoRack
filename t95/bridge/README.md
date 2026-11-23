@@ -22,7 +22,8 @@ Python 3 standard library only. Files:
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
 | `99-apcbox.rules` | udev: `/dev/apcbox` link, `dialout` access, ModemManager keeps off it |
@@ -174,6 +175,31 @@ Status in `/health` → `hdmi_audio`. Card names: `--daisy-card`, `--hdmi-card`.
 - Lines longer than 4096 bytes or with non-ASCII bytes are dropped and
   counted (`bad_lines` in `/health`).
 
+## Modules, routing, network MIDI
+
+Every mode in the selector is a module (`MODULES` in `rackbridge/common.py`):
+page, what it needs (ApcBox: the Daisy), remote profile, default routes. One
+is active (the last chosen); its routes are what the router applies.
+
+```
+ USB ports ----+                      +--> USB ports (own FIFO each, never coalesced)
+ RTP sessions -+--> router (by name) -+--> RTP sessions
+                    from, to, ch,     '--> Daisy (ESC M; only ports routed to it
+                    remap, types           are announced; never clock, sysex <= 128)
+```
+
+- ApcBox: default `* -> daisy`, behaviour as before.
+- MIDI hub (`/midihub`): no defaults; matrix on the page (TV remote: arrows
+  walk the grid, ok toggles), presets, network devices with "never".
+- A channel route carries that channel's messages only (no clock or sysex).
+  Clock/start/stop/continue go port to port. A port that disappears sends
+  note offs for whatever it was holding. Two identical USB devices get "2".
+- Network MIDI: udp 5004 control, 5005 data (`--rtp-port`, 0 = off). The
+  Avahi file announces it; `avahi-browse` every 10 s finds the rest and every
+  session found is invited (sync every 10 s, dropped after 60 s silent or BY).
+  Devices that invite the T95 are accepted unless marked never. No recovery
+  journal. Anyone on the LAN can connect: it's a jam box, not a secure one.
+
 ## Endpoints
 
 | Path | What |
@@ -184,7 +210,12 @@ Status in `/health` → `hdmi_audio`. Card names: `--daisy-card`, `--hdmi-card`.
 | `/health` | JSON: `daisy`, `port`, `serial`, `data_age_s`, `lines`, `bad_lines`, `connects`, `clients`, `client_resyncs`, `rejected_clients`, `control`, `serial_out_bytes`, `serial_dropped`, `controllers` (port, name, kind, counters), `ping_ms` |
 | `/caps` | `{"source": "daisy-bridge", "midi": true, "ir": true, "selector": "/", "control": false, "ui": false, "tft": false}` |
 | `/state` | JSON: modules, last, autostart_s, IR profiles, actions, receiver, learning |
-| `POST /select` | `{"module": "apcbox"}`: remember the last module |
+| `POST /select` | `{"module": "apcbox"}`: the active module (its routing applies now) |
+| `/midihub` | The MIDI hub page (`t95/ui/midihub.html`) |
+| `GET /routes` | active module, its defaults and routes, sources, destinations, presets, types, `net` |
+| `POST /routes` | `{"routes": [{"from", "to", "ch"?, "remap"?, "types"?}]}` for the active module (max 64) |
+| `POST /presets/save\|load\|delete` | `{"name"}`, per module |
+| `POST /net/never` | `{"name", "never": true/false}`: don't invite or accept that network device |
 | `POST /settings` | `{"autostart_s": 0-60}` and/or `{"hdmi_audio": true/false}` |
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
@@ -216,11 +247,18 @@ home from the ApcBox page, a button cancels the countdown). Samples:
 listing and path escapes, upload, SD import, sending through a fake Daisy
 that loses 15% of the acks and fakes CRC errors (bytes must match), a
 24-bit stereo file converted, refusals, and a 2 s sample end to end into
-the firmware's transfer code and loader (t95sim). Passing on a desktop says nothing about the real
+the firmware's transfer code and loader (t95sim). Routing: ApcBox to the
+Daisy, the hub unannouncing ports and routing port to port with channel
+remap, type filters, clock, sysex in pieces, bad routes, presets across a
+restart, the hub page in a browser. Network MIDI against a separate fake
+peer: the bridge inviting, a peer inviting, clock sync, MIDI both ways with
+delta times and running status, sysex split over packets, note offs on BY,
+never, BY at shutdown. Passing on a desktop says nothing about the real
 T95 with a real Daisy: latency, CPU load and long runs still need measuring there.
 
 ## Not here yet
 
-Knobs, pads and pitch bend on the keyboards (notes only so far), MIDI clock
-in/out, sending a whole kit or set from the T95 in one go, sets kept on the T95. No real-time priority: add it only if
+Knobs, pads and pitch bend on the keyboards into ApcBox (notes only so far;
+in the hub everything passes), MIDI clock into the Daisy, RTP-MIDI recovery
+journal, chaining modules, sending a whole kit or set from the T95 in one go, sets kept on the T95. No real-time priority: add it only if
 the ping figures on the T95 say so.

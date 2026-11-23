@@ -230,8 +230,8 @@ class DaisyMixin:
         if v >= 1 and self.ctl == 0:
             self.ctl = v
             log.info("Daisy speaks control protocol %d: forwarding controllers", v)
-            for p in self.ports.values():  # (re)announce everything
-                self.announce_port(p)
+            self.daisy_ports.clear()
+            self.refresh_daisy_ports()    # (re)announce what the module routes to it
             return
         # The Daisy dropped a port we still have (its keepalive timed out, it
         # rebooted without a USB reset...): tell it again, at most every 2 s
@@ -241,7 +241,7 @@ class DaisyMixin:
             return
         t = now()
         for p in self.ports.values():
-            if not att & (1 << (p.num - 1)) and t - p.announced > 2.0:
+            if p.num in self.daisy_ports and not att & (1 << (p.num - 1)) and t - p.announced > 2.0:
                 log.info("Daisy doesn't list port %d (%s): announcing it again", p.num, p.name)
                 self.announce_port(p)
 

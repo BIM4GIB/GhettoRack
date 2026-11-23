@@ -122,7 +122,8 @@ function render() {
     b.disabled = !m.ready;
     b.innerHTML = `<span class="name"></span><span class="about"></span>`;
     b.querySelector(".name").textContent = m.name;
-    b.querySelector(".about").textContent = m.about;
+    b.querySelector(".about").textContent = m.about + (m.ready && m.missing && m.missing.length
+      ? " (no " + m.missing.map(n => n === "daisy" ? "Daisy" : n).join(", ") + " yet)" : "");
     b.onclick = () => open(m);
     box.appendChild(b);
   }

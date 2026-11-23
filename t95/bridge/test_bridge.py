@@ -626,6 +626,426 @@ class MidiTest(unittest.TestCase):
 
 
 
+
+class RouterTest(unittest.TestCase):
+    """Modules and the routing matrix: the hub routes ports to ports, ApcBox routes all to the Daisy"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.link = os.path.join(cls.dir, "daisy")
+        cls.daisy = RespondingDaisy(cls.link)
+        cls.apc = FakeController(os.path.join(cls.dir, "apc"))
+        cls.keys = FakeController(os.path.join(cls.dir, "keys"))
+        cls.synth = FakeController(os.path.join(cls.dir, "synth"))
+        cls.http = free_port()
+        cls.state = os.path.join(cls.dir, "state.json")
+        cls.start()
+        cls.speak()
+
+    @classmethod
+    def speak(cls):
+        """The Daisy sends a P line every second; keep sending until the bridge has heard one"""
+        end = time.time() + 10
+        while time.time() < end:
+            cls.daisy.send("V 8\nP 3 00 00 00 -1\n")
+            if cls.health()["control"] == 3:
+                return
+            time.sleep(0.3)
+        raise AssertionError("bridge never took the P line")
+
+    @classmethod
+    def start(cls):
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", cls.link, "--host", "127.0.0.1", "--https-port", "0",
+             "--http-port", str(cls.http), "--ui", UI, "--state", cls.state,
+             "--midi", cls.apc.link + "=APC40", "--midi", cls.keys.link + "=LPK25",
+             "--midi", cls.synth.link + "=Synth"],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+        BridgeTest.http = cls.http
+        cls.wait_health(lambda h: h["daisy"] and len(h["controllers"]) == 3, 10)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.terminate()
+        cls.proc.wait(5)
+
+    wait_health = classmethod(lambda cls, *a: BridgeTest.wait_health.__func__(BridgeTest, *a))
+    health = classmethod(lambda cls: BridgeTest.health.__func__(BridgeTest))
+    def post(self, path, body):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.http, path), data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    wait = MidiTest.wait
+    port_of = MidiTest.port_of
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def routes(self):
+        return json.loads(BridgeTest.get("/routes")[2])
+
+    def drain(self):
+        for c in (self.apc, self.keys, self.synth):
+            c.received(0.05)
+
+    def test_r1_apcbox_routes_everything_to_the_daisy(self):
+        self.assertEqual(self.post("/select", {"module": "apcbox"})[0], 200)
+        r = self.routes()
+        self.assertEqual(r["module"], "apcbox")
+        self.assertEqual(r["defaults"], [{"from": "*", "to": "daisy"}])
+        self.assertIn("daisy", r["destinations"])
+        k = self.port_of("LPK25")
+        self.assertTrue(self.wait(lambda: "N%d LPK25" % k in self.daisy.got("N")))
+        self.drain()
+        self.keys.play([0x90, 0x3C, 0x64])
+        self.assertTrue(self.wait(lambda: "M%d 903c64" % k in self.daisy.got("M")))
+        self.assertEqual(self.synth.received(0.2), b"", "apcbox routed to another port")
+
+    def test_r2_hub_unannounces_and_routes_port_to_port(self):
+        self.daisy.frames.clear()
+        self.assertEqual(self.post("/select", {"module": "midihub"})[0], 200)
+        nums = [self.port_of(n) for n in ("APC40", "LPK25", "Synth")]
+        self.assertTrue(self.wait(lambda: all("N%d -" % n in self.daisy.got("N") for n in nums)))
+        self.assertEqual(self.routes()["routes"], [])
+        self.drain()
+        self.keys.play([0x90, 0x3C, 0x64])          # nothing routed: goes nowhere
+        time.sleep(0.3)
+        self.assertEqual(self.synth.received(0.1), b"")
+        self.assertEqual(self.daisy.got("M"), [])
+        code, _ = self.post("/routes", {"routes": [
+            {"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10},
+            {"from": "APC40", "to": "Synth", "types": ["cc"]},
+            {"from": "LPK25", "to": "APC40", "types": ["clock"]}]})
+        self.assertEqual(code, 200)
+        # channel filter and remap, running status kept whole per message
+        self.keys.play([0x90, 0x3C, 0x64, 0x3E, 0x50, 0x91, 0x40, 0x40])
+        self.assertEqual(self.synth.received(0.4).hex(), "993c64993e50")
+        # type filter: only CCs from the APC
+        self.apc.play([0x90, 0x35, 0x7F, 0xB0, 0x07, 0x40])
+        self.assertEqual(self.synth.received(0.4).hex(), "b00740")
+        # clock and transport go port to port, never to the Daisy
+        self.keys.play([0xFA, 0xF8, 0xF8, 0xFC])
+        self.assertEqual(self.apc.received(0.4).hex(), "faf8f8fc")
+        self.assertEqual(self.daisy.got("M"), [])
+        # sysex arrives whole even when it comes in pieces
+        self.post("/routes", {"routes": [{"from": "*", "to": "Synth"}]})
+        self.apc.play([0xF0, 0x7E, 0x00]); time.sleep(0.05)
+        self.apc.play([0x06, 0x02, 0xF8, 0xF7])
+        self.assertEqual(self.synth.received(0.4).hex(), "f8f07e000602f7")
+
+    def test_r3_bad_routes_refused(self):
+        for bad in ([{"from": "a"}], [{"from": "a", "to": "*"}], [{"from": "a", "to": "b", "ch": 17}],
+                    [{"from": "a", "to": "b", "types": ["noise"]}], "x", [{"from": "a", "to": "b"}] * 65):
+            code, body = self.post("/routes", {"routes": bad})
+            self.assertEqual(code, 400, bad)
+
+    def test_r4_presets_and_restart(self):
+        self.post("/select", {"module": "midihub"})
+        mine = [{"from": "LPK25", "to": "Synth"}]
+        self.post("/routes", {"routes": mine})
+        self.assertEqual(self.post("/presets/save", {"name": "keys to synth"})[0], 200)
+        self.post("/routes", {"routes": []})
+        self.assertEqual(self.post("/presets/load", {"name": "keys to synth"})[0], 200)
+        self.assertEqual(self.routes()["routes"], mine)
+        self.assertEqual(self.routes()["presets"], ["keys to synth"])
+        self.assertEqual(self.post("/presets/load", {"name": "nope"})[0], 400)
+        type(self).tearDownClass()
+        type(self).start()
+        type(self).speak()
+        r = self.routes()
+        self.assertEqual((r["module"], r["routes"], r["presets"]), ("midihub", mine, ["keys to synth"]))
+        self.drain()
+        self.keys.play([0x90, 0x30, 0x30])
+        self.assertEqual(self.synth.received(0.5).hex(), "903030")
+
+    def test_r6_hub_page_in_a_browser(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.post("/select", {"module": "midihub"})
+        self.post("/routes", {"routes": []})
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 390, "height": 800})   # a phone
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            pg.goto("http://127.0.0.1:%d/midihub" % self.http)
+            pg.wait_for_selector(".cell")
+            rows = pg.eval_on_selector_all(".matrix tbody th", "es => es.map(e => e.textContent)")
+            self.assertEqual(rows, ["any device", "APC40", "LPK25", "Synth"])
+            cols = pg.eval_on_selector_all(".matrix thead th span", "es => es.map(e => e.textContent)")
+            self.assertEqual(cols, ["APC40", "LPK25", "Synth", "Daisy"])
+            self.assertTrue(pg.is_disabled('.cell[data-from="LPK25"][data-to="LPK25"]'))
+            # tap: connected; the editor opens; channel 1 to 10, notes only
+            pg.click('.cell[data-from="LPK25"][data-to="Synth"]')
+            pg.wait_for_selector("#edit", state="visible")
+            pg.select_option("#e-ch", "1")
+            pg.select_option("#e-remap", "10")
+            for t in ("cc", "pc", "at", "pb", "sysex", "clock"):
+                pg.uncheck('#e-types input[value="%s"]' % t)
+            pg.click("#e-save")
+            pg.wait_for_timeout(400)
+            self.assertEqual(self.routes()["routes"],
+                             [{"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10, "types": ["note"]}])
+            self.assertEqual(pg.inner_text('.cell[data-from="LPK25"][data-to="Synth"]'), "1>10 note")
+            self.drain()
+            self.keys.play([0x90, 0x3C, 0x64, 0xB0, 0x01, 0x02])
+            self.assertEqual(self.synth.received(0.4).hex(), "993c64")
+            # the remote: arrows walk the grid, ok toggles
+            pg.click("#e-close")
+            pg.focus('.cell[data-from="APC40"][data-to="LPK25"]')
+            pg.keyboard.press("ArrowRight")
+            self.assertEqual(pg.evaluate("document.activeElement.dataset.to"), "Synth")
+            pg.keyboard.press("ArrowDown")
+            self.assertEqual(pg.evaluate("[document.activeElement.dataset.from, document.activeElement.dataset.to]"),
+                             ["LPK25", "Synth"])
+            # a preset, then tap twice to remove the route
+            pg.fill("#p-name", "jam")
+            pg.click("#p-save")
+            pg.wait_for_selector("#presets td:text-is('jam')")
+            pg.click('.cell[data-from="LPK25"][data-to="Synth"]')
+            pg.click('.cell[data-from="LPK25"][data-to="Synth"]')
+            pg.wait_for_timeout(400)
+            self.assertEqual(self.routes()["routes"], [])
+            pg.click("#presets button:text-is('load')")
+            pg.wait_for_timeout(400)
+            self.assertEqual(len(self.routes()["routes"]), 1)
+            pg.screenshot(path=os.path.join(self.dir, "midihub.png"), full_page=True)
+            b.close()
+        self.assertEqual(errors, [])
+        self.post("/presets/delete", {"name": "jam"})
+
+    def test_r5_back_to_apcbox_reannounces(self):
+        self.post("/select", {"module": "midihub"})
+        self.daisy.frames.clear()
+        self.post("/select", {"module": "apcbox"})
+        k = self.port_of("LPK25")
+        self.assertTrue(self.wait(lambda: "N%d LPK25" % k in self.daisy.got("N")))
+        self.keys.play([0x90, 0x44, 0x7F])
+        self.assertTrue(self.wait(lambda: "M%d 90447f" % k in self.daisy.got("M")))
+
+
+class FakePeer:
+    """A network MIDI device (a Mac, an iPad app): control and data UDP sockets.
+    Written from the AppleMIDI / RFC 6295 packet layouts, separately from netmidi.py."""
+
+    def __init__(self, name, invite_back=True):
+        self.name = name
+        self.ctl = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.ctl.bind(("127.0.0.1", 0))
+        self.port = self.ctl.getsockname()[1]
+        self.data = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            self.data.bind(("127.0.0.1", self.port + 1))
+        except OSError:
+            self.ctl.close()
+            raise
+        self.ssrc = 0x1234ABCD
+        self.accept = True
+        self.events = []           # ("IN"/"OK"/"BY"/"CK"/"NO", ...) and ("midi", bytes)
+        self.midi = bytearray()
+        self.alive = True
+        self.seq = 100
+        for sock in (self.ctl, self.data):
+            threading.Thread(target=self._run, args=(sock,), daemon=True).start()
+
+    @staticmethod
+    def make(name):
+        for _ in range(20):
+            try:
+                return FakePeer(name)
+            except OSError:
+                continue
+        raise OSError("no free port pair")
+
+    def am(self, cmd, token):
+        return b"\xff\xff" + cmd + struct.pack(">III", 2, token, self.ssrc) + self.name.encode() + b"\0"
+
+    def _run(self, sock):
+        while self.alive:
+            try:
+                pkt, addr = sock.recvfrom(65536)
+            except OSError:
+                return
+            if pkt[:2] == b"\xff\xff":
+                cmd = pkt[2:4]
+                if cmd == b"IN":
+                    token = struct.unpack(">I", pkt[8:12])[0]
+                    self.events.append(("IN", sock is self.data))
+                    sock.sendto(self.am(b"OK" if self.accept else b"NO", token), addr)
+                elif cmd == b"CK":
+                    count = pkt[8]
+                    ts = list(struct.unpack(">QQQ", pkt[12:36]))
+                    self.events.append(("CK", count))
+                    if count == 0:
+                        ts[1] = 5
+                        sock.sendto(b"\xff\xffCK" + struct.pack(">IB3xQQQ", self.ssrc, 1, *ts), addr)
+                else:
+                    self.events.append((cmd.decode(), sock is self.data))
+            elif sock is self.data and pkt[1] & 0x7F == 0x61:
+                h = pkt[12]
+                n, i = (((h & 15) << 8) | pkt[13], 14) if h & 0x80 else (h & 15, 13)
+                body = pkt[i:i + n]
+                # strip the delta times: this peer only ever gets delta 0 between commands
+                j, out, first = 0, bytearray(), True
+                while j < len(body):
+                    if not first:
+                        j += 1         # delta 0
+                    first = False
+                    b = body[j]
+                    if b == 0xF0:
+                        e = body.index(0xF7, j) + 1
+                    elif b >= 0xF8:
+                        e = j + 1
+                    else:
+                        e = j + (2 if b & 0xF0 in (0xC0, 0xD0) else 3)
+                    out += body[j:e]
+                    j = e
+                self.midi += out
+
+    def invite(self, bridge_port):
+        """We start the session (like clicking Connect on a Mac)"""
+        token = 77
+        self.ctl.sendto(self.am(b"IN", token), ("127.0.0.1", bridge_port))
+        time.sleep(0.1)
+        self.data.sendto(self.am(b"IN", token), ("127.0.0.1", bridge_port + 1))
+        time.sleep(0.1)
+        self.data.sendto(b"\xff\xffCK" + struct.pack(">IB3xQQQ", self.ssrc, 0, 1, 0, 0), ("127.0.0.1", bridge_port + 1))
+
+    def send(self, bridge_port, cmds, z=False):
+        """One RTP-MIDI packet; cmds is the raw command list (delta times included by the caller)"""
+        self.seq += 1
+        n = len(cmds)
+        hdr = bytes([0x80 | 0x20 * z | (n >> 8), n & 0xFF]) if n > 15 else bytes([0x20 * z | n])
+        pkt = struct.pack(">BBHII", 0x80, 0x61, self.seq, 0, self.ssrc) + hdr + bytes(cmds)
+        self.data.sendto(pkt, ("127.0.0.1", bridge_port + 1))
+
+    def bye(self, bridge_port):
+        self.ctl.sendto(self.am(b"BY", 0), ("127.0.0.1", bridge_port))
+
+    def close(self):
+        self.alive = False
+        self.ctl.close()
+        self.data.close()
+
+
+class NetMidiTest(unittest.TestCase):
+    """RTP-MIDI sessions: invited by the bridge and inviting it, both directions, through the router"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.keys = FakeController(os.path.join(cls.dir, "keys"))
+        cls.mac = FakePeer.make("Rene's Mac")        # the bridge finds this one (as if by Bonjour)
+        cls.ipad = FakePeer.make("iPad")             # this one invites the bridge
+        cls.http = free_port()
+        while True:
+            cls.rtp = free_port()
+            try:
+                t = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                t.bind(("127.0.0.1", cls.rtp + 1))
+                t.close()
+                break
+            except OSError:
+                pass
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+             "--https-port", "0", "--http-port", str(cls.http), "--ui", UI,
+             "--state", os.path.join(cls.dir, "state.json"), "--midi", cls.keys.link + "=LPK25",
+             "--rtp-port", str(cls.rtp), "--no-browse", "--net-peer", "127.0.0.1:%d=Rene's Mac" % cls.mac.port],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: "Rene's Mac" in h["net"].get("sessions", []), 10)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.proc.poll() is None:
+            cls.proc.terminate()
+            cls.proc.wait(5)
+        cls.mac.close()
+        cls.ipad.close()
+
+    post = RouterTest.post
+    wait = MidiTest.wait
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def health(self):
+        return BridgeTest.health()
+
+    def test_n1_bridge_invites_and_keeps_the_clock(self):
+        self.assertIn(("IN", False), self.mac.events)   # control port first
+        self.assertIn(("IN", True), self.mac.events)    # then data
+        self.assertTrue(self.wait(lambda: ("CK", 2) in self.mac.events, 5), self.mac.events)
+        h = self.health()
+        s = [c for c in h["controllers"] if c["name"] == "Rene's Mac"][0]
+        self.assertTrue(s["net"]["initiator"])
+        self.assertIsNotNone(s["net"]["latency_ms"])
+
+    def test_n2_peer_invites_the_bridge(self):
+        self.ipad.invite(self.rtp)
+        BridgeTest.wait_health(lambda h: "iPad" in h["net"]["sessions"], 5)
+        self.assertEqual([e for e in self.ipad.events if e[0] == "IN"], [])
+
+    def test_n3_midi_both_ways(self):
+        self.post("/select", {"module": "midihub"})
+        self.assertEqual(self.post("/routes", {"routes": [
+            {"from": "LPK25", "to": "Rene's Mac"}, {"from": "iPad", "to": "LPK25"},
+            {"from": "iPad", "to": "Rene's Mac", "types": ["sysex", "clock"]}]})[0], 200)
+        self.keys.received(0.05)
+        self.mac.midi.clear()
+        # keys to the Mac: running status in, full status bytes out
+        self.keys.play([0x90, 0x3C, 0x64, 0x3E, 0x50])
+        self.assertTrue(self.wait(lambda: len(self.mac.midi) >= 6))
+        self.assertEqual(bytes(self.mac.midi).hex(), "903c64903e50")
+        # iPad to keys: delta times, running status across commands, a realtime byte between
+        self.ipad.send(self.rtp, [0x91, 0x40, 0x7F, 0x00, 0x42, 0x7F, 0x81, 0x10, 0xF8, 0x05, 0xB1, 0x07, 0x20])
+        self.assertEqual(self.keys.received(0.4).hex(), "91407f91427ff8b10720")
+        # Z flag: a delta time before the first command too
+        self.ipad.send(self.rtp, [0x00, 0xC1, 0x05], z=True)
+        self.assertEqual(self.keys.received(0.4).hex(), "c105")
+        # sysex split over two packets (first, last segments) reaches the Mac whole
+        self.mac.midi.clear()
+        self.ipad.send(self.rtp, [0xF0, 0x7E, 0x00, 0x06, 0xF0])
+        self.ipad.send(self.rtp, [0xF7, 0x02, 0x01, 0xF7])
+        self.assertTrue(self.wait(lambda: len(self.mac.midi) >= 7))
+        self.assertEqual(bytes(self.mac.midi).hex(), "f07e00060201f7")
+
+    def test_n4_drop_releases_held_notes(self):
+        self.keys.received(0.2)                 # the sysex from n3 went to the keys too (no type filter)
+        self.ipad.send(self.rtp, [0x92, 0x30, 0x60, 0x00, 0x31, 0x60])
+        self.assertEqual(self.keys.received(0.4).hex(), "923060923160")
+        self.ipad.bye(self.rtp)
+        BridgeTest.wait_health(lambda h: "iPad" not in h["net"]["sessions"], 5)
+        # every note still down from this session: n3's two (channel 2) and these two
+        self.assertEqual(self.keys.received(0.4).hex(), "814000814200823000823100")
+
+    def test_n5_never(self):
+        self.assertEqual(self.post("/net/never", {"name": "iPad", "never": True})[0], 200)
+        self.ipad.events.clear()
+        self.ipad.invite(self.rtp)
+        self.assertTrue(self.wait(lambda: self.health()["net"]["refused"] >= 1))
+        self.assertNotIn("iPad", self.health()["net"]["sessions"])
+        self.assertEqual(self.health()["net"]["never"], ["iPad"])
+        self.post("/net/never", {"name": "iPad", "never": False})
+        self.ipad.invite(self.rtp)
+        BridgeTest.wait_health(lambda h: "iPad" in h["net"]["sessions"], 5)
+
+    def test_n6_bridge_stopping_says_goodbye(self):
+        self.mac.events.clear()
+        self.proc.terminate()
+        self.proc.wait(5)
+        self.assertTrue(self.wait(lambda: ("BY", False) in self.mac.events, 2), self.mac.events)
+
 class FindMidiTest(unittest.TestCase):
     """Controller discovery against a sysfs tree shaped like the T95's"""
 
@@ -1043,7 +1463,7 @@ class IrTest(unittest.TestCase):
             pg.goto("http://127.0.0.1:%d/" % self.http)
             pg.wait_for_timeout(1500)
             names = pg.eval_on_selector_all(".module .name", "es => es.map(e => e.textContent)")
-            self.assertEqual(names, ["ApcBox groovebox", "Numark DJ", "Network clock"])
+            self.assertEqual(names, ["ApcBox groovebox", "MIDI hub", "Numark DJ", "Network clock"])
             self.assertFalse(pg.is_visible("#countdown"))
             pg.click("#tabs button:text-is('apcbox')")    # the apcbox profile tab
             pg.click("#binds tr:nth-child(3) button:has-text('learn') >> nth=0")  # left, tap

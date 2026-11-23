@@ -3,3 +3,4 @@ daisy/mac/build/
 daisy/hostbuild/
 .DS_Store
 *.o
+__pycache__/

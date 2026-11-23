@@ -1,8 +1,8 @@
 #!/bin/sh
 # Install or update the ApcBox telemetry bridge on the T95.
 # Run from a clone of the repo:  sudo t95/bridge/install.sh
-# Copies two files to /opt/apcbox-bridge, installs a udev rule and a systemd
-# service, starts it. Touches no disks or partitions. Undo: --remove
+# Copies the bridge and its pages to /opt/apcbox-bridge, installs a udev rule,
+# a systemd service and an avahi (Bonjour) service for network MIDI, starts it. Touches no disks or partitions. Undo: --remove
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -13,6 +13,7 @@ DEST=/opt/apcbox-bridge
 if [ "${1:-}" = "--remove" ]; then
   systemctl disable --now apcbox-bridge.service 2>/dev/null || true
   rm -f /etc/systemd/system/apcbox-bridge.service /etc/udev/rules.d/99-apcbox.rules
+  rm -f /etc/avahi/services/ghettorack-midi.service
   rm -rf "$DEST"
   systemctl daemon-reload
   udevadm control --reload
@@ -24,6 +25,10 @@ python3 -c 'import asyncio, termios' 2>/dev/null || { echo "needs python3: sudo 
 # ffmpeg converts samples (MP3, FLAC, AIFF, 24-bit...) to what the Daisy plays
 command -v ffmpeg >/dev/null || { apt-get update && apt-get install -y --no-install-recommends ffmpeg; } || \
   echo "note: no ffmpeg; samples other than WAV can't be sent"
+# avahi announces the T95 for network MIDI and finds other devices (Bonjour)
+command -v avahi-browse >/dev/null && [ -d /etc/avahi/services ] || \
+  { apt-get update && apt-get install -y --no-install-recommends avahi-daemon avahi-utils; } || \
+  echo "note: no avahi; network MIDI devices must connect to the T95 themselves"
 
 mkdir -p "$DEST"
 install -m 644 "$HERE/apcbox_bridge.py" "$DEST/apcbox_bridge.py"
@@ -32,8 +37,13 @@ install -d "$DEST/rackbridge"
 install -m 644 "$HERE"/rackbridge/*.py "$DEST/rackbridge/"
 install -m 644 "$REPO/daisy/ui/apcbox-ui.html" "$DEST/apcbox-ui.html"
 install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
+install -m 644 "$REPO/t95/ui/midihub.html" "$DEST/midihub.html"
 install -m 644 "$HERE/99-apcbox.rules" /etc/udev/rules.d/99-apcbox.rules
 install -m 644 "$HERE/apcbox-bridge.service" /etc/systemd/system/apcbox-bridge.service
+if [ -d /etc/avahi/services ]; then
+  install -m 644 "$HERE/ghettorack-midi.service" /etc/avahi/services/ghettorack-midi.service
+  systemctl enable --now avahi-daemon.service 2>/dev/null || true
+fi
 
 udevadm control --reload
 udevadm trigger --action=add --subsystem-match=tty

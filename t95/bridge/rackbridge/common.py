@@ -35,9 +35,13 @@ ESC = b"\x1b"
 MAX_PORTS = 8             # T95 controller ports 1..8
 SERIAL_OUT_MAX = 64 * 1024  # bytes waiting for the Daisy before MIDI is dropped
 SYSEX_MAX = 128           # one ESC M frame (HostCmd::kMaxMidi on the Daisy)
+SYSEX_PORT_MAX = 8192     # port to port (patch dumps); longer ones are dropped
 OUT_SYSEX_MAX = 16        # sysex messages waiting for one controller
 KEEPALIVE_S = 0.5         # the Daisy drops T95 controllers after 2 s without one
 PING_S = 1.0
+ROUTE_TYPES = ("note", "cc", "pc", "at", "pb", "sysex", "clock")
+ROUTES_MAX = 64
+OUT_FIFO_MAX = 512        # routed messages waiting for one port
 PING_KEEP = 300
 
 # IR remote
@@ -58,7 +62,7 @@ IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
               "play", "stop", "next", "prev", "vol_up", "vol_down",
               "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
 IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
-IR_PROFILES = ["all", "selector", "apcbox"]
+IR_PROFILES = ["all", "selector", "apcbox", "midihub"]
 # Remote actions the bridge plays on the Daisy itself, while a browser shows
 # the ApcBox page. Firmware with control protocol 2 (v13.7) takes them as UI
 # actions (ESC U): encoder, transport, track select. Older firmware: only
@@ -68,11 +72,20 @@ DAISY_UI = {"play": "play", "stop": "stop", "left": "turn -1", "right": "turn 1"
             "ok": "push", "back": "back", "0": "track 10",
             **{str(n): "track %d" % n for n in range(1, 10)}}
 APC_BUTTONS = {"play": 0x5B, "stop": 0x5C}
+# Modules: what the selector offers. Each declares its page, what it needs,
+# its remote profile, and its default routes (a module's own routes, set on
+# its page, come on top). One active at a time for now; the active one's
+# routing is what the router applies. See rackbridge/router.py.
 MODULES = [
-    {"id": "apcbox", "name": "ApcBox groovebox", "url": "/apcbox", "ready": True,
-     "about": "Daisy: 16 tracks, samples and 303s, APC40 + keyboards"},
-    {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "about": "later"},
-    {"id": "clock", "name": "Network clock", "url": None, "ready": False, "about": "later"},
+    {"id": "apcbox", "name": "ApcBox groovebox", "url": "/apcbox", "ready": True, "needs": ["daisy"],
+     "profile": "apcbox", "about": "Daisy: 16 tracks, samples and 303s, APC40 + keyboards",
+     "routes": [{"from": "*", "to": "daisy"}]},
+    {"id": "midihub", "name": "MIDI hub", "url": "/midihub", "ready": True, "needs": [],
+     "profile": "midihub", "about": "any MIDI device to any other, network MIDI", "routes": []},
+    {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "needs": [], "profile": None,
+     "about": "later", "routes": []},
+    {"id": "clock", "name": "Network clock", "url": None, "ready": False, "needs": [], "profile": None,
+     "about": "later", "routes": []},
 ]
 POST_MAX = 4096
 

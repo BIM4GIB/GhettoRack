@@ -8,9 +8,11 @@ from .state import *
 from .ir import *
 from .hdmi import *
 from .web import *
+from .router import *
+from .netmidi import *
 
 
-class Bridge(DaisyMixin, PortsMixin, SamplesMixin, WebMixin):
+class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
     """The building blocks together; one per T95"""
 
     def __init__(self, args):
@@ -33,6 +35,7 @@ class Bridge(DaisyMixin, PortsMixin, SamplesMixin, WebMixin):
         self.serial_dropped = 0
         self.ctl = 0                     # Daisy control protocol version (P line)
         self.p_line = None
+        self.daisy_ports = set()         # port numbers announced to the Daisy (routed to it)
         self.ports = {}                  # num -> MidiPort
         self.pings = {}                  # id -> send time
         self.ping_seq = 0
@@ -48,6 +51,12 @@ class Bridge(DaisyMixin, PortsMixin, SamplesMixin, WebMixin):
                 self.selector = f.read()
         except (OSError, TypeError):
             log.warning("no selector page at %s", args.selector)
+        self.hub = b"<!doctype html><title>no hub page</title><a href=/>modules</a>"
+        try:
+            with open(args.hub, "rb") as f:
+                self.hub = f.read()
+        except (OSError, TypeError):
+            log.warning("no MIDI hub page at %s", args.hub)
         self.state = State(args.state)
         self.ir = IrReader(self)
         self.hdmi = HdmiAudio(self)
@@ -60,6 +69,7 @@ class Bridge(DaisyMixin, PortsMixin, SamplesMixin, WebMixin):
         self.xfer_seq = 0
         self.xfer_wake = asyncio.Event()
         self.xfer_replies = asyncio.Queue()
+        self.net_init()
 
     def status(self):
         t = now()
@@ -83,6 +93,7 @@ class Bridge(DaisyMixin, PortsMixin, SamplesMixin, WebMixin):
             "ir": self.ir.info(),
             "samples": self.samples_info(),
             "hdmi_audio": self.hdmi.info(),
+            "net": self.net_info(),
         }
 
 
@@ -99,9 +110,12 @@ async def main_async(args):
             log.info("serving https://%s:%d/ (self-signed: the browser warns once)", args.host, args.https_port)
         except (OSError, ssl.SSLError) as e:
             log.warning("no HTTPS (the page's record button needs it on phones): %s", e)
+    import signal
+    me = asyncio.current_task()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     async with server:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task(), b.hdmi.task())
+                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task())
 
 
 def main(argv=None):
@@ -120,6 +134,8 @@ def main(argv=None):
                     else os.path.join(here, "..", "..", "daisy", "ui", "apcbox-ui.html"))
     ap.add_argument("--selector", default=next((p for p in (os.path.join(here, "selector.html"),
                     os.path.join(here, "..", "ui", "selector.html")) if os.path.exists(p)), None))
+    ap.add_argument("--hub", default=next((p for p in (os.path.join(here, "midihub.html"),
+                    os.path.join(here, "..", "ui", "midihub.html")) if os.path.exists(p)), None))
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
@@ -131,11 +147,16 @@ def main(argv=None):
     ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")
+    ap.add_argument("--rtp-port", type=int, default=5004, help="network MIDI control port (data is +1); 0 = off")
+    ap.add_argument("--net-name", help="the name other devices see (default GhettoRack)")
+    ap.add_argument("--net-peer", action="append", metavar="HOST:PORT=NAME",
+                    help="a network MIDI device to invite without Bonjour (repeatable)")
+    ap.add_argument("--no-browse", action="store_true", help="don't look for network MIDI devices with avahi")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(message)s", stream=sys.stderr)
     try:
         asyncio.run(main_async(args))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass

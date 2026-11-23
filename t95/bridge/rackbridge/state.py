@@ -10,7 +10,7 @@ class State:
     def __init__(self, path):
         self.path = path
         self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False,
-                     "ir": {p: {} for p in IR_PROFILES}}
+                     "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": []}
         try:
             with open(path) as f:
                 d = json.load(f)
@@ -19,6 +19,19 @@ class State:
                 a = d.get("autostart_s", 5)
                 self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
                 self.data["hdmi_audio"] = d.get("hdmi_audio") is True
+                nv = d.get("net_never")
+                if isinstance(nv, list):
+                    self.data["net_never"] = [n for n in nv if isinstance(n, str) and 0 < len(n) <= 64][:64]
+                from .router import valid_route
+                ids = [m["id"] for m in MODULES]
+                for mid, rs in (d.get("routes") or {}).items():
+                    if mid in ids and isinstance(rs, list):
+                        self.data["routes"][mid] = [r for r in map(valid_route, rs[:ROUTES_MAX]) if r]
+                for mid, ps in (d.get("presets") or {}).items():
+                    if mid in ids and isinstance(ps, dict):
+                        self.data["presets"][mid] = {
+                            n: [r for r in map(valid_route, rs[:ROUTES_MAX]) if r]
+                            for n, rs in list(ps.items())[:32] if isinstance(n, str) and isinstance(rs, list)}
                 for prof, binds in (d.get("ir") or {}).items():
                     if prof in IR_PROFILES and isinstance(binds, dict):
                         self.data["ir"][prof] = {k: v for k, v in binds.items() if self.valid(k, v)}

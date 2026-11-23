@@ -3,7 +3,7 @@ Description=ApcBox bridge (Daisy USB serial, T95 MIDI controllers, page on :8040
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ui /opt/apcbox-bridge/apcbox-ui.html --selector /opt/apcbox-bridge/selector.html
+ExecStart=/usr/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ui /opt/apcbox-bridge/apcbox-ui.html --selector /opt/apcbox-bridge/selector.html --hub /opt/apcbox-bridge/midihub.html
 Restart=always
 RestartSec=2
 # Own throwaway user; dialout for the Daisy, audio for the MIDI controllers,

@@ -12,11 +12,13 @@ class MidiParser:
     """Raw MIDI bytes in, complete messages out.
 
     Handles running status, realtime bytes (F8-FF) arriving anywhere, even
-    inside other messages, and sysex split across reads. Realtime and system
-    common messages are dropped and counted: clock and tempo sync belong on
-    the Daisy, later. Sysex longer than one frame is dropped too."""
+    inside other messages, and sysex split across reads. Clock, start, stop
+    and continue come out as one-byte messages (the router never sends them
+    to the Daisy); other realtime and system common bytes are dropped and
+    counted. Sysex longer than max is dropped too."""
 
-    def __init__(self):
+    def __init__(self, max_sysex=SYSEX_MAX):
+        self.max_sysex = max_sysex
         self.status = 0         # running status
         self.data = []
         self.sysex = None       # bytearray while inside F0..F7
@@ -28,18 +30,21 @@ class MidiParser:
         for b in data:
             if b >= 0xF8:
                 self.realtime += 1
+                if b in (0xF8, 0xFA, 0xFB, 0xFC):  # clock, start, continue, stop: routable
+                    out.append(bytes([b]))
                 continue
             if self.sysex is not None:
                 if b == 0xF7:
                     self.sysex.append(b)
-                    if len(self.sysex) <= SYSEX_MAX:
+                    if len(self.sysex) <= self.max_sysex:
                         out.append(bytes(self.sysex))
                     else:
                         self.dropped += 1
                     self.sysex = None
                     continue
                 if b < 0x80:
-                    self.sysex.append(b)
+                    if len(self.sysex) <= self.max_sysex:
+                        self.sysex.append(b)
                     continue
                 self.sysex = None   # unterminated: a new status ends it
                 self.dropped += 1
@@ -97,19 +102,22 @@ class MidiPort:
 
     def __init__(self, num, key, path, name, fd):
         self.num, self.key, self.path, self.name, self.fd = num, key, path, name, fd
-        self.parser = MidiParser()
+        self.net = False
+        self.held = set()       # (status & 0xF, note) held by notes from this port
+        self.parser = MidiParser(SYSEX_PORT_MAX)
         self.out_sysex = collections.deque()
+        self.out_fifo = collections.deque()  # routed messages: strict order, never coalesced
         self.out_led = collections.OrderedDict()
         self.out_buf = b""      # bytes of a message the device took only part of
         self.writing = False
         self.announced = 0.0
         self.in_msgs = self.out_msgs = 0
-        self.dropped_in = self.dropped_out = self.coalesced = 0
+        self.dropped_in = self.dropped_out = self.coalesced = self.unrouted = 0
 
     def info(self, kinds):
         return {"port": self.num, "name": self.name, "path": self.path, "kind": kinds.get(self.num, "not on the Daisy"),
                 "in": self.in_msgs, "out": self.out_msgs, "dropped_in": self.dropped_in,
-                "dropped_out": self.dropped_out, "coalesced": self.coalesced,
+                "dropped_out": self.dropped_out, "coalesced": self.coalesced, "unrouted": self.unrouted,
                 "realtime_dropped": self.parser.realtime, "bad_in": self.parser.dropped}
 
 
@@ -132,14 +140,21 @@ class PortsMixin:
         except OSError as e:
             log.warning("open %s: %s", path, e)
             return
-        p = MidiPort(free[0], key, path, clean_name(name), fd)
+        base = clean_name(name)
+        taken = {q.name for q in self.ports.values()}
+        nm, k = base, 2
+        while nm in taken:              # two of the same controller: routes go by name
+            nm = "%s %d" % (base[:29], k)
+            k += 1
+        p = MidiPort(free[0], key, path, nm, fd)
         self.ports[p.num] = p
         asyncio.get_running_loop().add_reader(fd, self.on_midi_readable, p)
         log.info("controller %s on %s: port %d", p.name, path, p.num)
-        self.announce_port(p)
+        self.refresh_daisy_ports()
         self.announce()
 
     def detach_midi(self, p, why=""):
+        self.release_held(p)
         loop = asyncio.get_running_loop()
         loop.remove_reader(p.fd)
         loop.remove_writer(p.fd)
@@ -149,7 +164,9 @@ class PortsMixin:
             pass
         self.ports.pop(p.num, None)
         log.info("controller %s (port %d) gone%s", p.name, p.num, why)
-        self.ctl_send(b"%sN%d -\n" % (ESC, p.num))
+        if p.num in self.daisy_ports:
+            self.daisy_ports.discard(p.num)
+            self.ctl_send(b"%sN%d -\n" % (ESC, p.num))
         self.announce()
 
     def on_midi_readable(self, p):
@@ -164,8 +181,7 @@ class PortsMixin:
             return
         for msg in p.parser.feed(data):
             p.in_msgs += 1
-            if not self.ctl_send(b"%sM%d %s\n" % (ESC, p.num, msg.hex().encode())):
-                p.dropped_in += 1
+            self.route(p, msg)
 
     def midi_out(self, line):
         """X p hex: from the Daisy to controller p"""
@@ -193,12 +209,16 @@ class PortsMixin:
         self.midi_flush(p)
 
     def midi_flush(self, p):
+        if p.net:
+            return self.net_flush(p)
         loop = asyncio.get_running_loop()
         try:
             while True:
                 if not p.out_buf:
                     if p.out_sysex:
                         p.out_buf = p.out_sysex.popleft()
+                    elif p.out_fifo:
+                        p.out_buf = p.out_fifo.popleft()
                     elif p.out_led:
                         p.out_buf = p.out_led.popitem(last=False)[1]
                     else:
@@ -211,7 +231,7 @@ class PortsMixin:
         except OSError:
             self.detach_midi(p, ": write failed")
             return
-        busy = bool(p.out_buf or p.out_sysex or p.out_led)
+        busy = bool(p.out_buf or p.out_sysex or p.out_fifo or p.out_led)
         if busy and not p.writing:
             loop.add_writer(p.fd, self.midi_flush, p)
         elif not busy and p.writing:
@@ -222,7 +242,7 @@ class PortsMixin:
         if self.args.no_midi:
             return
         while True:
-            have = {p.key: p for p in self.ports.values()}
+            have = {p.key: p for p in self.ports.values() if not p.net}
             cand = self.midi_candidates()
             for key, p in have.items():
                 if key not in cand:

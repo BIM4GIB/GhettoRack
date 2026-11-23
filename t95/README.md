@@ -210,7 +210,18 @@ same port for the standalone APC40 host; role selection needs an explicit design
    actually available on the Daisy. Its 64 MB SDRAM is shared with existing
    slots and staging buffers. Query capacity; measure throughput while audio
    and MIDI run. No guaranteed transfer rate has been established.
-5. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
+5. **Modules: MIDI hub.** Built (bridge only, no flash), desktop-tested, not
+   yet on the rig. Each mode in the selector is a module with its own page,
+   needs and default routes; one active at a time, data model ready for
+   chaining later. A router in the bridge sends any MIDI device to any other
+   (channel filter/remap, message types, presets). ApcBox is the module whose
+   default is "everything to the Daisy"; in the MIDI hub the APC40 is just a
+   MIDI device and the Daisy is optional. Network MIDI (RTP-MIDI/AppleMIDI,
+   udp 5004/5005): announced over Avahi, every session found is invited
+   automatically, per-device "never". Interop checked against pymidi's
+   server (an independent implementation) on the desktop; not yet against a
+   Mac, iPad or a hardware box.
+6. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
    lane, DIN MIDI clock from a Daisy UART, network jam clock leader/follower
    modes, and end-to-end latency tests.
 

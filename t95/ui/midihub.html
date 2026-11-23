@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI hub</title>
+<style>
+/* Same palette as selector.html and daisy/ui/apcbox-ui.html */
+:root {
+  --bg: #0e0f10; --panel: #17191b; --line: #2a2d31; --text: #d9dcdf; --dim: #7d848c;
+  --green: #35d05a; --red: #ff4b3e; --yellow: #ffb833; --off: #26292d;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; }
+body.tv { zoom: 1.5; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #121416; }
+h1 { font-size: 17px; margin: 0; letter-spacing: .08em; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 5px; background: var(--off); color: var(--dim); white-space: nowrap; }
+.chip.ok { background: #183d24; color: #8ff0a8; }
+.chip.warn { background: #4a2a10; color: #ffc27a; }
+.chip.bad { background: #4a1714; color: #ff9d94; }
+main { max-width: 980px; margin: 0 auto; padding: 18px 16px 40px; }
+h2 { margin: 22px 0 10px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+button { background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: #2d3237; }
+button:disabled { opacity: .35; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.hint { color: var(--dim); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.wrap { overflow-x: auto; }
+table.matrix { border-collapse: collapse; }
+.matrix th { font-weight: 500; font-size: 12px; color: var(--dim); padding: 4px 6px; white-space: nowrap; }
+.matrix thead th { vertical-align: bottom; height: 90px; }
+.matrix thead th span { display: inline-block; writing-mode: vertical-rl; transform: rotate(180deg); max-height: 86px; overflow: hidden; text-overflow: ellipsis; }
+.matrix tbody th { text-align: right; color: var(--text); font-size: 13px; }
+.matrix tbody th .act { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--off); margin-left: 6px; }
+.matrix tbody th .act.on { background: var(--green); }
+.matrix td { padding: 2px; }
+.cell { width: 46px; height: 34px; padding: 0; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+.cell.on { background: #1f5130; border-color: #2c7a45; color: #c8f5d3; }
+.cell.def { background: #1d2c3a; border-color: #2f5878; color: #a9d3f5; }
+.cell.sel { outline: 2px solid var(--yellow); outline-offset: 1px; }
+.panel { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+select, input[type=text] { background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 5px 6px; font: inherit; font-size: 13px; }
+label.t { font-size: 13px; margin-right: 8px; white-space: nowrap; }
+table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
+.list td { padding: 6px; border-bottom: 1px solid var(--line); }
+.list td:last-child { text-align: right; white-space: nowrap; }
+.state-on { color: #8ff0a8; } .state-never { color: #ff9d94; } .state-wait { color: #ffc27a; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MIDI HUB</h1>
+  <span id="c-net" class="chip">network: ?</span>
+  <span id="c-daisy" class="chip">Daisy: ?</span>
+  <span style="flex:1"></span>
+  <button id="home">Modules</button>
+</header>
+<main>
+  <h2>Routing</h2>
+  <p class="hint">Rows send, columns receive. Tap a square to connect and open its settings
+    (channel, message types); tap it again to remove it.</p>
+  <div class="wrap"><table class="matrix" id="matrix"></table></div>
+  <div id="none" class="hint" style="display:none">No MIDI devices yet: plug one into the T95, or connect one over the network.</div>
+  <div id="edit" class="panel" style="display:none">
+    <div class="row"><b id="e-title"></b></div>
+    <div class="row" style="margin-top:8px">
+      <span class="hint">Channel</span><select id="e-ch"></select>
+      <span class="hint">to channel</span><select id="e-remap"></select>
+    </div>
+    <div class="row" id="e-types" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="e-save">Save</button><button id="e-del">Remove</button><button id="e-close">Close</button>
+    </div>
+  </div>
+
+  <h2>Network MIDI</h2>
+  <p class="hint" id="net-hint"></p>
+  <table class="list" id="net"></table>
+
+  <h2>Presets</h2>
+  <div class="row">
+    <input id="p-name" type="text" maxlength="32" placeholder="name"> <button id="p-save">Save current</button>
+  </div>
+  <table class="list" id="presets" style="margin-top:8px"></table>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const tv = params.has("tv");
+if (tv) document.body.classList.add("tv");
+const TYPE_NAMES = { note: "notes", cc: "CC", pc: "program", at: "pressure", pb: "pitch bend", sysex: "sysex", clock: "clock" };
+let R = null, H = null, sel = null, lastIn = {};
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+function chip(id, text, cls) { const e = $(id); e.textContent = text; e.className = "chip" + (cls ? " " + cls : ""); }
+
+async function load() {
+  R = await (await fetch("/routes")).json();
+  render();
+}
+function find(list, f, t) { return list.findIndex(r => r.from === f && r.to === t); }
+function short(r) {
+  const p = [];
+  if (r.ch) p.push(r.ch + (r.remap ? ">" + r.remap : ""));
+  else if (r.remap) p.push(">" + r.remap);
+  if (r.types) p.push(r.types.length === 1 ? r.types[0] : r.types.length + "t");
+  return p.join(" ") || "on";
+}
+
+function render() {
+  const srcs = ["*"].concat(R.sources), dsts = R.destinations;
+  const m = $("matrix");
+  m.textContent = "";
+  $("none").style.display = R.sources.length ? "none" : "block";
+  if (!R.sources.length) { renderNet(); renderPresets(); return; }
+  const hr = document.createElement("tr");
+  hr.appendChild(document.createElement("th"));
+  for (const d of dsts) {
+    const th = document.createElement("th");
+    const s = document.createElement("span");
+    s.textContent = d === "daisy" ? "Daisy" : d;
+    th.appendChild(s);
+    hr.appendChild(th);
+  }
+  const thead = document.createElement("thead");
+  thead.appendChild(hr);
+  m.appendChild(thead);
+  const tb = document.createElement("tbody");
+  for (const s of srcs) {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.textContent = s === "*" ? "any device" : s;
+    if (s !== "*") { const a = document.createElement("span"); a.className = "act"; a.dataset.src = s; th.appendChild(a); }
+    tr.appendChild(th);
+    for (const d of dsts) {
+      const td = document.createElement("td");
+      const b = document.createElement("button");
+      b.className = "cell";
+      b.dataset.from = s; b.dataset.to = d;
+      const i = find(R.routes, s, d), di = find(R.defaults, s, d);
+      if (s === d) b.disabled = true;
+      else if (i >= 0) { b.classList.add("on"); b.textContent = short(R.routes[i]); }
+      else if (di >= 0) { b.classList.add("def"); b.textContent = short(R.defaults[di]); }
+      if (sel && sel.from === s && sel.to === d) b.classList.add("sel");
+      b.title = (s === "*" ? "any device" : s) + " to " + d;
+      b.onclick = () => cell(s, d);
+      td.appendChild(b);
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+  m.appendChild(tb);
+  renderNet();
+  renderPresets();
+  activity();
+}
+
+async function cell(f, t) {
+  if (find(R.defaults, f, t) >= 0) return;
+  const i = find(R.routes, f, t);
+  if (i < 0) {
+    const routes = R.routes.concat([{ from: f, to: t }]);
+    const r = await post("/routes", { routes });
+    if (r.error) return alertLine(r.error);
+    sel = { from: f, to: t };
+  } else if (sel && sel.from === f && sel.to === t) {
+    sel = null;
+    const routes = R.routes.filter((_, k) => k !== i);
+    await post("/routes", { routes });
+  } else {
+    sel = { from: f, to: t };
+  }
+  await load();
+  openEdit();
+  const b = document.querySelector(`.cell[data-from="${CSS.escape(f)}"][data-to="${CSS.escape(t)}"]`);
+  if (b) b.focus();
+}
+function alertLine(t) { $("net-hint").textContent = t; }
+
+function openEdit() {
+  const i = sel ? find(R.routes, sel.from, sel.to) : -1;
+  if (i < 0) { $("edit").style.display = "none"; return; }
+  const r = R.routes[i];
+  $("edit").style.display = "block";
+  $("e-title").textContent = (r.from === "*" ? "any device" : r.from) + "  to  " + (r.to === "daisy" ? "Daisy" : r.to);
+  const opt = (s, v, label) => { const o = document.createElement("option"); o.value = v; o.textContent = label; s.appendChild(o); };
+  for (const [id, none] of [["e-ch", "all"], ["e-remap", "same"]]) {
+    const s = $(id); s.textContent = "";
+    opt(s, 0, none);
+    for (let c = 1; c <= 16; c++) opt(s, c, c);
+  }
+  $("e-ch").value = r.ch || 0;
+  $("e-remap").value = r.remap || 0;
+  const tbox = $("e-types");
+  tbox.textContent = "";
+  for (const t of R.types) {
+    const l = document.createElement("label");
+    l.className = "t";
+    const c = document.createElement("input");
+    c.type = "checkbox"; c.value = t; c.checked = !r.types || r.types.includes(t);
+    l.appendChild(c); l.appendChild(document.createTextNode(" " + TYPE_NAMES[t]));
+    tbox.appendChild(l);
+  }
+}
+$("e-save").onclick = async () => {
+  const i = find(R.routes, sel.from, sel.to);
+  if (i < 0) return;
+  const r = { from: sel.from, to: sel.to };
+  const ch = +$("e-ch").value, remap = +$("e-remap").value;
+  if (ch) r.ch = ch;
+  if (remap) r.remap = remap;
+  const types = [...$("e-types").querySelectorAll("input:checked")].map(c => c.value);
+  if (types.length < R.types.length) r.types = types;
+  const routes = R.routes.slice();
+  routes[i] = r;
+  const res = await post("/routes", { routes });
+  if (res.error) return alertLine(res.error);
+  await load(); openEdit();
+};
+$("e-del").onclick = async () => {
+  const routes = R.routes.filter(r => !(r.from === sel.from && r.to === sel.to));
+  sel = null;
+  await post("/routes", { routes });
+  await load(); openEdit();
+};
+$("e-close").onclick = () => { sel = null; render(); openEdit(); };
+
+function renderNet() {
+  const n = R.net;
+  if (!n || !n.on) {
+    chip("c-net", "network MIDI: off", "warn");
+    $("net-hint").textContent = "Network MIDI is off (bridge started with --rtp-port 0, or the port is taken).";
+    $("net").textContent = "";
+    return;
+  }
+  chip("c-net", "network: " + n.name + (n.sessions.length ? " (" + n.sessions.length + ")" : ""), n.sessions.length ? "ok" : "");
+  $("net-hint").textContent = "Other devices see the T95 as \"" + n.name + "\" (port " + n.port + "). Everything found on the network is "
+    + "connected automatically" + (n.avahi === false ? ", but avahi-browse is missing here, so nothing is found: only devices that connect to the T95 appear." : ".");
+  const rows = new Map();
+  for (const s of n.seen) rows.set(s.name, { name: s.name, where: s.host + ":" + s.port, st: "found" });
+  for (const s of n.inviting) { const r = rows.get(s) || { name: s, where: "" }; r.st = "connecting"; rows.set(s, r); }
+  for (const s of n.sessions) { const r = rows.get(s) || { name: s, where: "connected to us" }; r.st = "connected"; rows.set(s, r); }
+  for (const s of n.never) { const r = rows.get(s) || { name: s, where: "" }; r.st = "never"; rows.set(s, r); }
+  const t = $("net");
+  t.textContent = "";
+  if (!rows.size) {
+    const c = t.insertRow().insertCell();
+    c.textContent = "Nothing on the network yet.";
+    c.className = "hint"; c.colSpan = 4; c.style.textAlign = "left";
+    return;
+  }
+  for (const r of rows.values()) {
+    const tr = t.insertRow();
+    tr.insertCell().textContent = r.name;
+    const w = tr.insertCell(); w.textContent = r.where; w.className = "hint";
+    const s = tr.insertCell(); s.textContent = r.st;
+    s.className = r.st === "connected" ? "state-on" : r.st === "never" ? "state-never" : "state-wait";
+    const c = tr.insertCell();
+    const b = document.createElement("button");
+    const never = r.st === "never";
+    b.textContent = never ? "allow" : "never";
+    b.title = never ? "connect to it again" : "don't connect to it, and refuse it";
+    b.onclick = async () => { await post("/net/never", { name: r.name, never: !never }); load(); };
+    c.appendChild(b);
+  }
+}
+
+function renderPresets() {
+  const t = $("presets");
+  t.textContent = "";
+  for (const p of R.presets) {
+    const tr = t.insertRow();
+    tr.insertCell().textContent = p;
+    const c = tr.insertCell();
+    for (const [label, op] of [["load", "load"], ["delete", "delete"]]) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.style.marginLeft = "6px";
+      b.onclick = async () => { const r = await post("/presets/" + op, { name: p }); if (r.error) alertLine(r.error); sel = null; load().then(openEdit); };
+      c.appendChild(b);
+    }
+  }
+}
+$("p-save").onclick = async () => {
+  const name = $("p-name").value.trim();
+  if (!name) return;
+  const r = await post("/presets/save", { name });
+  if (r.error) return alertLine(r.error);
+  $("p-name").value = "";
+  load();
+};
+$("home").onclick = () => { location.href = "/" + (tv ? "?tv=1" : ""); };
+
+/* Activity: a dot per device lights when its message count moved */
+async function activity() {
+  if (!H) return;
+  for (const c of H.controllers || []) {
+    const dot = document.querySelector(`.act[data-src="${CSS.escape(c.name)}"]`);
+    if (dot) dot.classList.toggle("on", lastIn[c.name] !== undefined && c.in !== lastIn[c.name]);
+    lastIn[c.name] = c.in;
+  }
+}
+async function poll() {
+  try { H = await (await fetch("/health")).json(); activity(); } catch (e) {}
+  chip("c-daisy", H && H.daisy ? "Daisy: connected" : "Daisy: not here (optional)", H && H.daisy ? "ok" : "");
+}
+setInterval(poll, 1000);
+setInterval(() => { if (!document.activeElement || !document.activeElement.closest("#edit,#presets,input"))
+  load().then(openEdit).catch(() => {}); }, 4000);
+
+/* Remote and keyboard: arrows move to the nearest control in that direction
+   (works for the grid and the lists alike), ok presses it, back closes the editor */
+function focusables() { return [...document.querySelectorAll("button:not(:disabled), input, select")].filter(e => e.offsetParent); }
+function move(dir) {
+  const f = focusables();
+  const cur = document.activeElement;
+  if (!f.includes(cur)) { const c = document.querySelector(".cell:not(:disabled)") || f[0]; if (c) c.focus(); return; }
+  const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  let best = null, bd = 1e9;
+  for (const e of f) {
+    if (e === cur) continue;
+    const b = e.getBoundingClientRect(), bx = b.left + b.width / 2, by = b.top + b.height / 2;
+    const dx = bx - ax, dy = by - ay;
+    const along = { left: -dx, right: dx, up: -dy, down: dy }[dir];
+    const across = dir === "left" || dir === "right" ? Math.abs(dy) : Math.abs(dx);
+    if (along <= 2) continue;
+    const d = along + across * 3;
+    if (d < bd) { bd = d; best = e; }
+  }
+  if (best) { best.focus(); best.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+}
+function action(a) {
+  if (["up", "down", "left", "right"].includes(a)) move(a);
+  else if (a === "ok") { const e = document.activeElement; if (e && e.click) e.click(); }
+  else if (a === "back") { if (sel) { sel = null; render(); openEdit(); } else location.href = "/" + (tv ? "?tv=1" : ""); }
+  else if (a === "home" || a === "menu") location.href = "/" + (tv ? "?tv=1" : "");
+}
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key];
+  if (k) { action(k); e.preventDefault(); }
+});
+const es = new EventSource("/events?view=midihub");
+es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
+es.addEventListener("bridge", () => { load().then(openEdit).catch(() => {}); });
+
+poll();
+load().then(() => { const c = document.querySelector(".cell:not(:disabled)"); if (c) c.focus(); });
+</script>
+</body>
+</html>
