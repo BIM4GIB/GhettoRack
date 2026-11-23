@@ -2,7 +2,7 @@
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
 <!-- Network MIDI (RTP-MIDI / AppleMIDI) on the T95: Macs, iPads and rtpMIDI
      on Windows list it as "GhettoRack". The bridge listens on udp 5004/5005
-     (apcbox-bridge --rtp-port). Installed to /etc/avahi/services/ by install.sh. -->
+     (the bridge, rtp-port option). Installed to /etc/avahi/services/ by install.sh. -->
 <service-group>
   <name>GhettoRack</name>
   <service>
