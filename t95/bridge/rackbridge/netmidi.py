@@ -194,6 +194,7 @@ class NetPort:
         self.latency_ms = None
         self.lost = 0
         self.rx_seq = None
+        self.lock = threading.Lock()
 
     def info(self, kinds):
         return {"port": self.num, "name": self.name, "path": self.path, "kind": kinds.get(self.num, "network"),
@@ -224,6 +225,7 @@ class NetMixin:
         self.net_ssrc = struct.unpack(">I", os.urandom(4))[0]
         self.net_name = self.args.net_name or "GhettoRack"
         self.net_ctl = self.net_data = None
+        self.net_data_dup = None
         self.net_pending = {}         # (host, cport) -> {"name", "token", "stage", "sent", "tries"}
         self.net_seen = {}            # (host, cport) -> {"name", "seen"}  (discovered)
         self.net_avahi = None         # None: not tried; False: no avahi-browse; True: works
@@ -381,8 +383,23 @@ class NetMixin:
             self.net_rtp_send(p, msgs)
 
     def net_rtp_send(self, p, msgs):
-        p.seq = (p.seq + 1) & 0xFFFF
-        self.net_send(rtp_midi_packet(p.seq, self.net_ssrc, msgs), (p.peer[0], p.peer[1] + 1), True)
+        with p.lock:                  # the clock thread sends too
+            p.seq = (p.seq + 1) & 0xFFFF
+            pkt = rtp_midi_packet(p.seq, self.net_ssrc, msgs)
+        self.net_send(pkt, (p.peer[0], p.peer[1] + 1), True)
+
+    def net_send_threadsafe(self, p, msg):
+        """From the clock thread: asyncio transports aren't thread-safe, a dup of the data socket is"""
+        if self.net_data_dup is None:
+            return False
+        with p.lock:
+            p.seq = (p.seq + 1) & 0xFFFF
+            pkt = rtp_midi_packet(p.seq, self.net_ssrc, [msg])
+        try:
+            self.net_data_dup.sendto(pkt, (p.peer[0], p.peer[1] + 1))
+            return True
+        except OSError:
+            return False
 
     def net_ck(self, p):
         p.last_ck = now()
@@ -469,6 +486,8 @@ class NetMixin:
                 lambda: _Proto(self, False), local_addr=(self.args.host, self.args.rtp_port))
             self.net_data, _ = await loop.create_datagram_endpoint(
                 lambda: _Proto(self, True), local_addr=(self.args.host, self.args.rtp_port + 1))
+            sock = self.net_data.get_extra_info("socket")
+            self.net_data_dup = socket.socket(fileno=os.dup(sock.fileno()))
         except OSError as e:
             log.warning("network MIDI off: ports %d/%d: %s", self.args.rtp_port, self.args.rtp_port + 1, e)
             self.net_ctl = self.net_data = None

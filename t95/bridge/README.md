@@ -22,7 +22,7 @@ Python 3 standard library only. Files:
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
@@ -200,6 +200,28 @@ is active (the last chosen); its routes are what the router applies.
   Devices that invite the T95 are accepted unless marked never. No recovery
   journal. Anyone on the LAN can connect: it's a jam box, not a secure one.
 
+## Clock
+
+The clock module (`/clock`): one tempo for everything.
+
+- Tempo from: this box (buttons, tap, remote up/down), Link (optional
+  `aalink`, installed into `/opt/apcbox-bridge/venv`), or MIDI clock from any
+  port. Cubase can't follow external clock or speak Link, so with Cubase it
+  leads: Studio > Project Synchronization Setup > MIDI Clock Destinations, tick
+  the network session.
+- Following MIDI clock: incoming ticks are fitted to a line over the last 96
+  (tempo changes are spotted and the fit restarts), our ticks go out on that
+  line. Gap of 0.5 s: the last tempo is held. Start, stop, continue and song
+  position are passed on before the next tick.
+- Sends 24 ticks per beat to the ticked ports from one thread: sleep to
+  0.5 ms before the tick, spin the rest; GIL switch interval 1 ms. Lateness
+  of every tick is on the page and in `/health`.
+- Desktop figures (not the T95): internal 120 BPM interval 20.833 ms, sd
+  0.1-0.4 ms; following 125 BPM sent with 2 ms jitter: locked at 124.96,
+  output sd 0.26 ms; Link 97 BPM output sd 0.04 ms.
+- Not yet: the Daisy following (firmware), the Cubase plugin (Cubase sync
+  mode, planned).
+
 ## Endpoints
 
 | Path | What |
@@ -215,6 +237,8 @@ is active (the last chosen); its routes are what the router applies.
 | `GET /routes` | active module, its defaults and routes, sources, destinations, presets, types, `net` |
 | `POST /routes` | `{"routes": [{"from", "to", "ch"?, "remap"?, "types"?}]}` for the active module (max 64) |
 | `POST /presets/save\|load\|delete` | `{"name"}`, per module |
+| `GET /clock?json=1`, `POST /clock` | clock state; set `on`, `source`, `bpm`, `outputs`, `send_stopped`, `link` |
+| `POST /clock/transport` | `{"cmd": "start"\|"stop"\|"continue"\|"toggle"}` (internal and Link sources) |
 | `POST /net/never` | `{"name", "never": true/false}`: don't invite or accept that network device |
 | `POST /settings` | `{"autostart_s": 0-60}` and/or `{"hdmi_audio": true/false}` |
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |

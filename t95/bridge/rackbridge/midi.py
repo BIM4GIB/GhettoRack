@@ -13,7 +13,7 @@ class MidiParser:
 
     Handles running status, realtime bytes (F8-FF) arriving anywhere, even
     inside other messages, and sysex split across reads. Clock, start, stop
-    and continue come out as one-byte messages (the router never sends them
+    and continue come out as one-byte messages, song position as three (the router never sends them
     to the Daisy); other realtime and system common bytes are dropped and
     counted. Sysex longer than max is dropped too."""
 
@@ -51,7 +51,10 @@ class MidiParser:
             if b == 0xF0:
                 self.sysex = bytearray([b])
                 self.status = 0
-            elif b >= 0xF0:         # system common: not forwarded
+            elif b == 0xF2:         # song position pointer: two data bytes, no running status
+                self.status = 0xF2
+                self.data = []
+            elif b >= 0xF0:         # other system common: not forwarded
                 self.status = 0
                 self.data = []
                 self.dropped += 1
@@ -63,6 +66,8 @@ class MidiParser:
                 if len(self.data) == data_len(self.status):
                     out.append(bytes([self.status] + self.data))
                     self.data = []
+                    if self.status == 0xF2:
+                        self.status = 0
             # data byte without a status: ignored
         return out
 
@@ -158,10 +163,12 @@ class PortsMixin:
         loop = asyncio.get_running_loop()
         loop.remove_reader(p.fd)
         loop.remove_writer(p.fd)
-        try:
-            os.close(p.fd)
-        except OSError:
-            pass
+        with self.clock.lock:            # the clock thread must not write to a closed (reused) fd
+            try:
+                os.close(p.fd)
+            except OSError:
+                pass
+            p.fd = None
         self.ports.pop(p.num, None)
         log.info("controller %s (port %d) gone%s", p.name, p.num, why)
         if p.num in self.daisy_ports:

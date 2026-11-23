@@ -19,6 +19,8 @@ import os
 import struct
 import sys
 import termios
+import math
+import threading
 import time
 import urllib.parse
 
@@ -42,6 +44,11 @@ PING_S = 1.0
 ROUTE_TYPES = ("note", "cc", "pc", "at", "pb", "sysex", "clock")
 ROUTES_MAX = 64
 OUT_FIFO_MAX = 512        # routed messages waiting for one port
+CLOCK_PPQ = 24            # MIDI clock ticks per quarter note
+CLOCK_BPM_MIN, CLOCK_BPM_MAX = 20.0, 300.0
+CLOCK_FIT = 96            # incoming ticks the tempo fit uses (4 beats)
+CLOCK_LOST_S = 0.5        # no incoming tick for this long: hold the last tempo
+CLOCK_SPIN_S = 0.0005     # sleep to this close to a tick, then spin
 PING_KEEP = 300
 
 # IR remote
@@ -62,7 +69,7 @@ IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
               "play", "stop", "next", "prev", "vol_up", "vol_down",
               "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
 IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
-IR_PROFILES = ["all", "selector", "apcbox", "midihub"]
+IR_PROFILES = ["all", "selector", "apcbox", "midihub", "clock"]
 # Remote actions the bridge plays on the Daisy itself, while a browser shows
 # the ApcBox page. Firmware with control protocol 2 (v13.7) takes them as UI
 # actions (ESC U): encoder, transport, track select. Older firmware: only
@@ -82,9 +89,11 @@ MODULES = [
      "routes": [{"from": "*", "to": "daisy"}]},
     {"id": "midihub", "name": "MIDI hub", "url": "/midihub", "ready": True, "needs": [],
      "profile": "midihub", "about": "any MIDI device to any other, network MIDI", "routes": []},
+    {"id": "clock", "name": "Clock", "url": "/clock", "ready": True, "needs": [], "profile": "clock",
+     "about": "one tempo for everything: follow Cubase or Link, send MIDI clock", "routes": []},
+    {"id": "dawsync", "name": "Cubase sync", "url": None, "ready": False, "needs": [], "profile": None,
+     "about": "planned: a plugin in Cubase shares its transport (Link)", "routes": []},
     {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "needs": [], "profile": None,
-     "about": "later", "routes": []},
-    {"id": "clock", "name": "Network clock", "url": None, "ready": False, "needs": [], "profile": None,
      "about": "later", "routes": []},
 ]
 POST_MAX = 4096

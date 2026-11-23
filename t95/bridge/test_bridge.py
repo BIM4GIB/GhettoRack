@@ -1046,6 +1046,241 @@ class NetMidiTest(unittest.TestCase):
         self.proc.wait(5)
         self.assertTrue(self.wait(lambda: ("BY", False) in self.mac.events, 2), self.mac.events)
 
+
+class TimedReader:
+    """Reads a fake controller's output in a thread, timestamping every byte"""
+
+    def __init__(self, ctl):
+        self.ctl = ctl
+        self.got = []           # (monotonic, byte)
+        self.alive = True
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        import select
+        while self.alive:
+            r, _, _ = select.select([self.ctl.master], [], [], 0.1)
+            if r:
+                try:
+                    d = os.read(self.ctl.master, 4096)
+                except OSError:
+                    return
+                t = time.monotonic()
+                self.got.extend((t, b) for b in d)
+
+    def clear(self):
+        self.got = []
+
+    def ticks(self):
+        return [t for t, b in list(self.got) if b == 0xF8]
+
+    def bytes_(self):
+        return bytes(b for _, b in list(self.got))
+
+    def stop(self):
+        self.alive = False
+
+
+def intervals_ms(ts):
+    iv = [(b - a) * 1000 for a, b in zip(ts, ts[1:])]
+    if not iv:
+        return 0, 0, 0
+    m = sum(iv) / len(iv)
+    sd = (sum((x - m) ** 2 for x in iv) / len(iv)) ** 0.5
+    return m, sd, max(abs(x - m) for x in iv)
+
+
+class ClockTest(unittest.TestCase):
+    """The clock module: internal tempo, following MIDI clock (Cubase), song position, Link"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.cubase = FakeController(os.path.join(cls.dir, "cubase"))
+        cls.synth = FakeController(os.path.join(cls.dir, "synth"))
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1",
+             "--https-port", "0", "--http-port", str(cls.http), "--ui", UI, "--rtp-port", "0",
+             "--state", os.path.join(cls.dir, "state.json"),
+             "--midi", cls.cubase.link + "=Cubase", "--midi", cls.synth.link + "=Synth"],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: len(h["controllers"]) == 2, 10)
+        cls.rx = TimedReader(cls.synth)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.rx.stop()
+        cls.proc.terminate()
+        cls.proc.wait(5)
+
+    post = RouterTest.post
+    wait = MidiTest.wait
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def clock(self):
+        return json.loads(BridgeTest.get("/clock?json=1")[2])
+
+    def play_clock(self, bpm, secs, jitter_ms=0.0, start=True, stop_event=None):
+        """Cubase: ticks on a perfect grid, each sent a random amount late (Wi-Fi)"""
+        import random
+        rnd = random.Random(7)
+        period = 60.0 / (bpm * 24)
+        if start:
+            self.cubase.play([0xFA])
+        t0 = time.monotonic() + 0.01
+        n = 0
+        while time.monotonic() < t0 + secs and not (stop_event and stop_event.is_set()):
+            due = t0 + n * period + abs(rnd.gauss(0, jitter_ms / 1000.0))
+            d = due - time.monotonic()
+            if d > 0:
+                time.sleep(d)
+            self.cubase.play([0xF8])
+            n += 1
+        return n
+
+    def test_c1_internal_tempo(self):
+        self.assertEqual(self.post("/clock", {"on": True, "source": "internal", "bpm": 120, "outputs": ["Synth"],
+                                              "send_stopped": False})[0], 200)
+        time.sleep(0.3)
+        self.rx.clear()
+        self.assertEqual(self.post("/clock/transport", {"cmd": "start"})[0], 200)
+        time.sleep(2.0)
+        self.post("/clock/transport", {"cmd": "stop"})
+        time.sleep(0.2)
+        got = self.rx.bytes_()
+        self.assertEqual(got[0], 0xFA, got[:4].hex())
+        self.assertEqual(got[-1], 0xFC)
+        m, sd, worst = intervals_ms(self.rx.ticks())
+        c = self.clock()
+        print("\n  internal 120 BPM: %d ticks, interval %.3f ms (ideal 20.833), sd %.3f, worst %.3f; late %s"
+              % (len(self.rx.ticks()), m, sd, worst, c["late_ms"]))
+        self.assertAlmostEqual(m, 20.833, delta=0.25)
+        self.assertTrue(90 <= len(self.rx.ticks()) <= 100)
+        self.assertFalse(c["playing"])
+        # stopped, send_stopped off: no ticks
+        self.rx.clear()
+        time.sleep(0.3)
+        self.assertEqual(self.rx.ticks(), [])
+        self.assertEqual(self.post("/clock", {"bpm": 900})[0], 400)
+
+    def test_c2_follows_cubase_and_smooths(self):
+        self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"], "send_stopped": True})
+        self.rx.clear()
+        n = self.play_clock(125, 4.0, jitter_ms=2.0)
+        c = self.clock()
+        out = self.rx.ticks()
+        # drop the first beat out: the fit is settling
+        m, sd, worst = intervals_ms(out[24:])
+        print("\n  following 125 BPM sent with 2 ms jitter: locked at %.2f, input jitter %s ms; out interval %.3f ms "
+              "(ideal 20.000), sd %.3f, worst %.3f; late %s" % (c["tempo"], c["in_jitter_ms"], m, sd, worst, c["late_ms"]))
+        self.assertTrue(c["locked"])
+        self.assertAlmostEqual(c["tempo"], 125.0, delta=0.4)
+        self.assertEqual(self.rx.bytes_()[0], 0xFA)
+        self.assertAlmostEqual(m, 20.0, delta=0.2)
+        self.assertLess(sd, 1.0)
+        self.assertLess(abs(len(out) - n), 10)
+        self.assertEqual(self.post("/clock/transport", {"cmd": "start"})[0], 400)   # transport is Cubase's
+
+    def test_c3_song_position_and_continue(self):
+        self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"]})
+        self.play_clock(125, 0.6, start=False)
+        self.cubase.play([0xFC])
+        time.sleep(0.1)
+        self.rx.clear()
+        self.cubase.play([0xF2, 0x10, 0x00, 0xFB])   # cursor to bar 2, then continue
+        stop = threading.Event()
+        th = threading.Thread(target=self.play_clock, args=(125, 1.0), kwargs={"start": False, "stop_event": stop})
+        th.start()
+        time.sleep(0.3)
+        c = self.clock()
+        th.join()
+        got = self.rx.bytes_().replace(b"\xf8", b"")
+        self.assertTrue(got.startswith(bytes.fromhex("f21000fb")), got.hex())
+        self.assertTrue(c["position"].startswith("2.1."), c["position"])
+        self.assertTrue(c["playing"])
+
+    def test_c4_source_gone_holds_tempo(self):
+        self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"], "send_stopped": True})
+        self.play_clock(110, 1.5)
+        self.assertTrue(self.clock()["locked"])
+        self.rx.clear()
+        time.sleep(1.5)
+        c = self.clock()
+        self.assertFalse(c["locked"])
+        m, sd, _ = intervals_ms(self.rx.ticks()[30:])
+        self.assertAlmostEqual(m, 60000 / (110 * 24), delta=0.3)   # still ticking at the last tempo
+
+    def test_c5_link(self):
+        try:
+            import aalink
+        except ImportError:
+            self.skipTest("aalink not installed")
+        import asyncio as aio
+
+        async def peer():
+            lk = aalink.Link(97.0)
+            lk.enabled = True
+            # the bridge joins the session: it takes the peer's tempo
+            self.post("/clock", {"on": True, "source": "link", "outputs": ["Synth"]})
+            for _ in range(60):
+                await aio.sleep(0.1)
+                c = self.clock()
+                if c["link_peers"] and abs(c["tempo"] - 97.0) < 0.05:
+                    break
+            self.assertGreaterEqual(c["link_peers"], 1)
+            self.assertAlmostEqual(c["tempo"], 97.0, delta=0.05)
+            self.rx.clear()
+            await aio.sleep(1.5)
+            m, sd, _ = intervals_ms(self.rx.ticks()[6:])
+            print("\n  Link 97 BPM: out interval %.3f ms (ideal %.3f), sd %.3f" % (m, 60000 / (97 * 24), sd))
+            self.assertAlmostEqual(m, 60000 / (97 * 24), delta=0.3)
+            # the bridge leads: internal tempo shared on Link
+            self.post("/clock", {"source": "internal", "bpm": 133, "link": True})
+            for _ in range(60):
+                await aio.sleep(0.1)
+                if abs(lk.tempo - 133) < 0.05:
+                    break
+            self.assertAlmostEqual(lk.tempo, 133, delta=0.05)
+            lk.enabled = False
+        aio.run(peer())
+        self.post("/clock", {"link": False})
+
+    def test_c6_page_in_a_browser(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.post("/clock", {"on": True, "source": "internal", "bpm": 120, "outputs": []})
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page()
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/clock" % self.http)
+            pg.wait_for_timeout(800)
+            self.assertIn("120.0", pg.inner_text("#bpm"))
+            pg.click("#p1")
+            pg.wait_for_timeout(500)
+            self.assertEqual(self.clock()["bpm"], 121)
+            pg.click("#outputs label:has-text('Synth') input")
+            pg.wait_for_timeout(500)
+            self.assertEqual(self.clock()["outputs"], ["Synth"])
+            pg.click("#play")
+            self.assertTrue(self.wait(lambda: self.clock()["playing"], 3), self.clock())
+            pg.wait_for_timeout(700)
+            self.assertEqual(pg.inner_text("#play"), "Stop")
+            pg.click("#sources button:text-is('Cubase')")
+            pg.wait_for_timeout(600)
+            self.assertEqual(self.clock()["source"], "Cubase")
+            self.assertTrue(pg.is_disabled("#play"))
+            pg.screenshot(path=os.path.join(self.dir, "clock.png"), full_page=True)
+            b.close()
+        self.assertEqual(errors, [])
+
 class FindMidiTest(unittest.TestCase):
     """Controller discovery against a sysfs tree shaped like the T95's"""
 
@@ -1463,7 +1698,7 @@ class IrTest(unittest.TestCase):
             pg.goto("http://127.0.0.1:%d/" % self.http)
             pg.wait_for_timeout(1500)
             names = pg.eval_on_selector_all(".module .name", "es => es.map(e => e.textContent)")
-            self.assertEqual(names, ["ApcBox groovebox", "MIDI hub", "Numark DJ", "Network clock"])
+            self.assertEqual(names, ["ApcBox groovebox", "MIDI hub", "Clock", "Cubase sync", "Numark DJ"])
             self.assertFalse(pg.is_visible("#countdown"))
             pg.click("#tabs button:text-is('apcbox')")    # the apcbox profile tab
             pg.click("#binds tr:nth-child(3) button:has-text('learn') >> nth=0")  # left, tap

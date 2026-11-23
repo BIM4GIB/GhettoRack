@@ -17,8 +17,8 @@ def msg_type(msg):
     s = msg[0]
     if s == 0xF0:
         return "sysex"
-    if s >= 0xF8:
-        return "clock"
+    if s >= 0xF8 or s == 0xF2:
+        return "clock"            # clock, start/stop/continue, song position
     return {0x80: "note", 0x90: "note", 0xA0: "at", 0xB0: "cc", 0xC0: "pc", 0xD0: "at", 0xE0: "pb"}.get(s & 0xF0)
 
 
@@ -62,6 +62,8 @@ class RouterMixin:
     def route(self, p, msg):
         """One complete message from port p through the active routes"""
         ty = msg_type(msg)
+        if ty == "clock" and self.clock.source == p.name:
+            self.clock.feed(msg)      # the clock module follows this port
         if ty == "note":
             k = (msg[0] & 15, msg[1])
             if msg[0] & 0xF0 == 0x90 and msg[2]:

@@ -222,7 +222,12 @@ same port for the standalone APC40 host; role selection needs an explicit design
    automatically, per-device "never". Interop checked against pymidi's
    server (an independent implementation) on the desktop; not yet against a
    Mac, iPad or a hardware box.
-6. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
+6. **Clock module.** Built (bridge), desktop-tested, not yet on the rig:
+   internal tempo, Link (aalink), or following MIDI clock (Cubase leads; it
+   can't follow or do Link), MIDI clock out to any ports. **Cubase sync**
+   mode pinned: a VST3 plugin in Cubase reads its transport and shares it on
+   Link (planned). Daisy following the clock: firmware, later.
+7. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
    lane, DIN MIDI clock from a Daisy UART, network jam clock leader/follower
    modes, and end-to-end latency tests.
 

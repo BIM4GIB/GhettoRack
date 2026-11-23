@@ -31,7 +31,7 @@ t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
             remote, router, network MIDI), ui/ (module selector, MIDI hub),
             kiosk/ (Chromium on HDMI)
 protocol/   serial.md: what the Daisy's USB presents and the report lines
-tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed),
+tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
             flash-seed.sh (flash one chosen Seed; macOS and Linux)
 docs/       wiring-guide.html (every connection, diagrams), images/
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
@@ -102,7 +102,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   Re-identify disks before a write; device numbers in docs are observations,
   not portable install targets. Do not include destructive commands in general
   setup scripts without explicit target validation.
-- Never commit Wi-Fi credentials, private keys, raw eMMC dumps or personal
+- **The repo is public.** Run `tools/check-public.sh` before every push (keys,
+  credentials, IP/MAC addresses, device serials, samples, images). Never commit
+  Wi-Fi credentials, private keys, raw eMMC dumps or personal
   samples. Follow the existing release convention for firmware binaries;
   large OS images belong in release assets with checksums and build provenance.
 - For documentation-only changes, check facts, paths and the diff. For protocol

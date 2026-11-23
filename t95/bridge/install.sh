@@ -38,8 +38,18 @@ install -m 644 "$HERE"/rackbridge/*.py "$DEST/rackbridge/"
 install -m 644 "$REPO/daisy/ui/apcbox-ui.html" "$DEST/apcbox-ui.html"
 install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
 install -m 644 "$REPO/t95/ui/midihub.html" "$DEST/midihub.html"
+install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
+# Ableton Link for the clock module (optional): a venv that also sees the system
+# packages, with aalink (a wheel of Ableton's Link library). Without it Link is off.
+if [ ! -x "$DEST/venv/bin/python3" ]; then
+  python3 -m venv --system-site-packages "$DEST/venv" 2>/dev/null || \
+    { apt-get install -y --no-install-recommends python3-venv && python3 -m venv --system-site-packages "$DEST/venv"; } || true
+fi
+"$DEST/venv/bin/pip" install -q --upgrade "aalink==0.2.3" || echo "note: no aalink; the clock works without Link"
 install -m 644 "$HERE/99-apcbox.rules" /etc/udev/rules.d/99-apcbox.rules
 install -m 644 "$HERE/apcbox-bridge.service" /etc/systemd/system/apcbox-bridge.service
+# no venv: run with the system Python (no Link)
+[ -x "$DEST/venv/bin/python3" ] || sed -i 's#/opt/apcbox-bridge/venv/bin/python3#/usr/bin/python3#' /etc/systemd/system/apcbox-bridge.service
 if [ -d /etc/avahi/services ]; then
   install -m 644 "$HERE/ghettorack-midi.service" /etc/avahi/services/ghettorack-midi.service
   systemctl enable --now avahi-daemon.service 2>/dev/null || true

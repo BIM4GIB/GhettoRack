@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock</title>
+<style>
+/* Same palette as selector.html and midihub.html */
+:root {
+  --bg: #0e0f10; --panel: #17191b; --line: #2a2d31; --text: #d9dcdf; --dim: #7d848c;
+  --green: #35d05a; --red: #ff4b3e; --yellow: #ffb833; --off: #26292d;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 -apple-system, system-ui, sans-serif; }
+body.tv { zoom: 1.5; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #121416; }
+h1 { font-size: 17px; margin: 0; letter-spacing: .08em; }
+.chip { font-family: var(--mono); font-size: 12px; padding: 3px 8px; border-radius: 5px; background: var(--off); color: var(--dim); white-space: nowrap; }
+.chip.ok { background: #183d24; color: #8ff0a8; }
+.chip.warn { background: #4a2a10; color: #ffc27a; }
+.chip.bad { background: #4a1714; color: #ff9d94; }
+main { max-width: 760px; margin: 0 auto; padding: 18px 16px 40px; }
+h2 { margin: 22px 0 10px; font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+button { background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+button:hover { background: #2d3237; }
+button:disabled { opacity: .35; cursor: default; }
+button.sel { background: #1f5130; border-color: #2c7a45; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.hint { color: var(--dim); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.big { display: flex; align-items: center; gap: 18px; padding: 18px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.bpm { font-family: var(--mono); font-size: 64px; font-weight: 600; line-height: 1; min-width: 4.2ch; text-align: right; }
+.bpm small { font-size: 16px; color: var(--dim); font-weight: 400; }
+.beats { display: flex; gap: 8px; }
+.beat { width: 22px; height: 22px; border-radius: 50%; background: var(--off); }
+.beat.on { background: var(--green); }
+.beat.one.on { background: var(--yellow); }
+.pos { font-family: var(--mono); font-size: 20px; color: var(--dim); margin-top: 6px; }
+.col { display: flex; flex-direction: column; gap: 8px; }
+.tbtn { font-size: 15px; padding: 10px 16px; }
+#play.on { background: #1f5130; border-color: #2c7a45; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td { padding: 6px; border-bottom: 1px solid var(--line); }
+td.v { font-family: var(--mono); text-align: right; }
+label.t { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; font-size: 14px; }
+@media (max-width: 560px) { .bpm { font-size: 48px; } .big { flex-wrap: wrap; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>CLOCK</h1>
+  <span id="c-state" class="chip">?</span>
+  <span id="c-link" class="chip">Link: ?</span>
+  <span style="flex:1"></span>
+  <button id="home">Modules</button>
+</header>
+<main>
+  <div class="big">
+    <div>
+      <div class="bpm" id="bpm">---</div>
+      <div class="pos" id="pos">1.1.1</div>
+    </div>
+    <div class="col">
+      <div class="beats"><span class="beat one"></span><span class="beat"></span><span class="beat"></span><span class="beat"></span></div>
+      <div class="row">
+        <button class="tbtn" id="play">Start</button>
+        <button class="tbtn" id="cont">Continue</button>
+      </div>
+      <div class="row" id="tempo-ctl">
+        <button id="m1">-1</button><button id="m01">-0.1</button>
+        <button id="p01">+0.1</button><button id="p1">+1</button>
+        <button id="tap">Tap</button>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="margin-top:12px">
+    <label class="t"><input type="checkbox" id="on"> Clock on</label>
+    <label class="t"><input type="checkbox" id="stopped"> Send clock while stopped</label>
+    <label class="t"><input type="checkbox" id="link"> Share tempo on Link</label>
+  </div>
+
+  <h2>Tempo from</h2>
+  <div class="row" id="sources"></div>
+  <p class="hint" id="src-hint"></p>
+
+  <h2>Send clock to</h2>
+  <div class="row" id="outputs"></div>
+  <p class="hint">Start, stop, continue and song position go with it. The Daisy follows this clock after a firmware step (not yet).</p>
+
+  <h2>Timing</h2>
+  <table id="stats"></table>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const tv = new URLSearchParams(location.search).has("tv");
+if (tv) document.body.classList.add("tv");
+let C = null, taps = [];
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (j.error) $("src-hint").textContent = j.error;
+  return j;
+}
+function chip(id, text, cls) { const e = $(id); e.textContent = text; e.className = "chip" + (cls ? " " + cls : ""); }
+async function set(d) { await post("/clock", d); await load(); }
+
+async function load() {
+  C = await (await fetch("/clock?json=1")).json();
+  render();
+}
+function render() {
+  const following = C.following, own = !following;
+  $("bpm").innerHTML = (C.tempo ? C.tempo.toFixed(1) : "---") + " <small>BPM</small>";
+  $("pos").textContent = C.position;
+  $("on").checked = C.on; $("stopped").checked = C.send_stopped; $("link").checked = C.link;
+  $("link").disabled = !C.link_available;
+  $("play").textContent = C.playing ? "Stop" : "Start";
+  $("play").classList.toggle("on", C.playing);
+  for (const id of ["play", "cont"]) $(id).disabled = !own || !C.on;
+  for (const b of $("tempo-ctl").querySelectorAll("button")) b.disabled = C.source !== "internal";
+  if (!C.on) chip("c-state", "clock off", "");
+  else if (following) chip("c-state", C.locked ? "following " + C.source : "waiting for " + C.source, C.locked ? "ok" : "warn");
+  else chip("c-state", (C.source === "link" ? "Link" : "internal") + (C.playing ? ", playing" : ", stopped"), C.playing ? "ok" : "");
+  if (!C.link_available) chip("c-link", "Link: not installed", "");
+  else if (C.link_error) chip("c-link", "Link: " + C.link_error, "bad");
+  else if (C.link && C.on) chip("c-link", "Link: " + (C.link_peers || 0) + " peers", C.link_peers ? "ok" : "");
+  else chip("c-link", "Link: off", "");
+
+  const srcs = $("sources");
+  const want = ["internal"].concat(C.link_available ? ["link"] : []).concat(C.ports);
+  if (C.source !== "internal" && C.source !== "link" && !C.ports.includes(C.source)) want.push(C.source);
+  srcs.textContent = "";
+  for (const s of want) {
+    const b = document.createElement("button");
+    b.textContent = s === "internal" ? "This box" : s === "link" ? "Link" : s;
+    b.className = s === C.source ? "sel" : "";
+    b.onclick = () => set({ source: s, on: true });
+    srcs.appendChild(b);
+  }
+  $("src-hint").textContent = C.source === "internal" ? "Tempo set here: buttons, tap, or up/down on the remote."
+    : C.source === "link" ? "Tempo and beat from the Link session (Live, iPad apps)."
+    : (C.ports.includes(C.source) ? "" : "Not connected now. ") + "Following MIDI clock from " + C.source
+      + ". For Cubase: Studio > Project Synchronization Setup > MIDI Clock Destinations, tick the network session.";
+
+  const outs = $("outputs");
+  outs.textContent = "";
+  for (const p of C.ports) {
+    if (p === C.source) continue;
+    const l = document.createElement("label");
+    l.className = "t";
+    const c = document.createElement("input");
+    c.type = "checkbox"; c.checked = C.outputs.includes(p);
+    c.onchange = () => set({ outputs: c.checked ? C.outputs.concat([p]) : C.outputs.filter(x => x !== p) });
+    l.appendChild(c); l.appendChild(document.createTextNode(p));
+    outs.appendChild(l);
+  }
+  if (!outs.children.length) outs.innerHTML = '<span class="hint">No MIDI devices: plug one in or connect one over the network (MIDI hub).</span>';
+
+  const st = $("stats");
+  st.textContent = "";
+  const row = (k, v) => { const tr = st.insertRow(); tr.insertCell().textContent = k; const c = tr.insertCell(); c.className = "v"; c.textContent = v; };
+  const L = C.late_ms;
+  row("Our ticks late (avg / p99 / max)", L ? L.avg + " / " + L.p99 + " / " + L.max + " ms" : "-");
+  row("Ticks sent / dropped", C.sent + " / " + C.dropped);
+  if (following) {
+    row("Incoming ticks", C.in_ticks);
+    row("Incoming jitter (smoothed out)", C.in_jitter_ms == null ? "-" : C.in_jitter_ms + " ms");
+  }
+}
+
+// Beat lamps: drawn from tempo and position between polls
+let lastPos = null, lastAt = 0;
+function lamps() {
+  if (C && C.playing && C.tempo) {
+    const [bar, beat] = C.position.split(".").map(Number);
+    const el = (performance.now() - lastAt) / 1000 * C.tempo / 60;
+    const b = Math.floor((beat - 1 + el) % 4);
+    document.querySelectorAll(".beat").forEach((e, i) => e.classList.toggle("on", i === b));
+  } else document.querySelectorAll(".beat").forEach(e => e.classList.remove("on"));
+  requestAnimationFrame(lamps);
+}
+async function poll() {
+  try { await load(); lastAt = performance.now(); } catch (e) {}
+}
+setInterval(poll, 500);
+requestAnimationFrame(lamps);
+
+$("play").onclick = () => post("/clock/transport", { cmd: C.playing ? "stop" : "start" }).then(load);
+$("cont").onclick = () => post("/clock/transport", { cmd: "continue" }).then(load);
+for (const [id, d] of [["m1", -1], ["m01", -0.1], ["p01", 0.1], ["p1", 1]])
+  $(id).onclick = () => set({ bpm: Math.round((C.bpm + d) * 10) / 10 });
+$("tap").onclick = () => {
+  const t = performance.now();
+  taps = taps.filter(x => t - x < 2500).concat([t]);
+  if (taps.length >= 3) {
+    const iv = (taps[taps.length - 1] - taps[0]) / (taps.length - 1);
+    set({ bpm: Math.round(600000 / iv) / 10 });
+  }
+};
+$("on").onchange = e => set({ on: e.target.checked });
+$("stopped").onchange = e => set({ send_stopped: e.target.checked });
+$("link").onchange = e => set({ link: e.target.checked });
+$("home").onclick = () => { location.href = "/" + (tv ? "?tv=1" : ""); };
+
+/* Remote: up/down tempo (internal), ok or play starts/stops, back/home to the modules */
+function action(a) {
+  if (!C) return;
+  if ((a === "up" || a === "down") && C.source === "internal") set({ bpm: Math.round((C.bpm + (a === "up" ? 1 : -1)) * 10) / 10 });
+  else if ((a === "right" || a === "left") && C.source === "internal") set({ bpm: Math.round((C.bpm + (a === "right" ? 0.1 : -0.1)) * 10) / 10 });
+  else if (a === "ok" || a === "play") post("/clock/transport", { cmd: "toggle" }).then(load);
+  else if (a === "stop") post("/clock/transport", { cmd: "stop" }).then(load);
+  else if (a === "back" || a === "home" || a === "menu") location.href = "/" + (tv ? "?tv=1" : "");
+}
+const es = new EventSource("/events?view=clock");
+es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
+poll();
+</script>
+</body>
+</html>

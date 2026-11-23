@@ -10,7 +10,7 @@ class State:
     def __init__(self, path):
         self.path = path
         self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False,
-                     "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": []}
+                     "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": [], "clock": {}}
         try:
             with open(path) as f:
                 d = json.load(f)
@@ -19,6 +19,8 @@ class State:
                 a = d.get("autostart_s", 5)
                 self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
                 self.data["hdmi_audio"] = d.get("hdmi_audio") is True
+                if isinstance(d.get("clock"), dict):
+                    self.data["clock"] = d["clock"]      # Clock checks each field
                 nv = d.get("net_never")
                 if isinstance(nv, list):
                     self.data["net_never"] = [n for n in nv if isinstance(n, str) and 0 < len(n) <= 64][:64]

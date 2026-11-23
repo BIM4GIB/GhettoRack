@@ -10,6 +10,7 @@ from .hdmi import *
 from .web import *
 from .router import *
 from .netmidi import *
+from .clock import Clock
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -51,6 +52,14 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
                 self.selector = f.read()
         except (OSError, TypeError):
             log.warning("no selector page at %s", args.selector)
+        self.pages = {}
+        for name, path in (("clock", args.clock_page),):
+            try:
+                with open(path, "rb") as f:
+                    self.pages[name] = f.read()
+            except (OSError, TypeError):
+                log.warning("no %s page at %s", name, path)
+                self.pages[name] = b"<!doctype html><title>missing page</title><a href=/>modules</a>"
         self.hub = b"<!doctype html><title>no hub page</title><a href=/>modules</a>"
         try:
             with open(args.hub, "rb") as f:
@@ -70,6 +79,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.xfer_wake = asyncio.Event()
         self.xfer_replies = asyncio.Queue()
         self.net_init()
+        self.clock = Clock(self, self.state.data.get("clock") or {})
 
     def status(self):
         t = now()
@@ -94,6 +104,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "samples": self.samples_info(),
             "hdmi_audio": self.hdmi.info(),
             "net": self.net_info(),
+            "clock": self.clock.info(),
         }
 
 
@@ -111,6 +122,8 @@ async def main_async(args):
         except (OSError, ssl.SSLError) as e:
             log.warning("no HTTPS (the page's record button needs it on phones): %s", e)
     import signal
+    b.clock.apply_link()
+    b.clock.start_thread()
     me = asyncio.current_task()
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     async with server:
@@ -136,6 +149,8 @@ def main(argv=None):
                     os.path.join(here, "..", "ui", "selector.html")) if os.path.exists(p)), None))
     ap.add_argument("--hub", default=next((p for p in (os.path.join(here, "midihub.html"),
                     os.path.join(here, "..", "ui", "midihub.html")) if os.path.exists(p)), None))
+    ap.add_argument("--clock-page", default=next((p for p in (os.path.join(here, "clock.html"),
+                    os.path.join(here, "..", "ui", "clock.html")) if os.path.exists(p)), None))
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")

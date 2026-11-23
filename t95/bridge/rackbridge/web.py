@@ -141,6 +141,10 @@ class WebMixin:
             return 200, {"ok": True}
         if path == "/routes":
             return self.set_routes(d.get("routes"))
+        if path == "/clock":
+            return self.clock.set(d)
+        if path == "/clock/transport":
+            return self.clock.transport(d.get("cmd"))
         if path == "/net/never":
             return self.net_set_never(d.get("name"), d.get("never"))
         if path in ("/presets/save", "/presets/load", "/presets/delete"):
@@ -207,6 +211,11 @@ class WebMixin:
                 await self.reply(writer, 405, "text/plain", b"GET or POST\n")
             elif path in ("/", "/index.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.selector)
+            elif path == "/clock" and "json" not in params:
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["clock"])
+            elif path == "/clock":
+                body = dict(self.clock.info(), ports=[p.name for p in sorted(self.ports.values(), key=lambda p: p.num)])
+                await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
             elif path == "/midihub":
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.hub)
             elif path in ("/apcbox", "/apcbox-ui.html"):
