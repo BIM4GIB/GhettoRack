@@ -47,6 +47,7 @@ install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
 # The bridge reaches it through the group; networks it joins and its PIN stay on the box.
 getent group ghettorack >/dev/null || groupadd --system ghettorack
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
+install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
 install -m 644 "$REPO/t95/helper/ghettorack-helper.service" /etc/systemd/system/ghettorack-helper.service
 install -m 644 "$REPO/t95/helper/ghettorack-bluetooth.service" /etc/systemd/system/ghettorack-bluetooth.service
 # Ableton Link for the clock module (optional): a venv that also sees the system
