@@ -1703,7 +1703,7 @@ V.system = {
 const TABS = [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
 function buildTabs() {
   const tb = document.getElementById("tabs"); tb.textContent = "";
-  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === curName ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
+  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === (curName === "map" ? "system" : curName) ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
   if (!PHONE && !SHORT) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
 }
 function show(name) {
