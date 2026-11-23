@@ -19,7 +19,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 
 | Frame | Content |
 |---|---|
-| Top bar | stop, play, record, BPM, tap, position, pattern (and queued), set, listen, status LEDs |
+| Top bar | stop, play, record, BPM, tap, position, pattern (and queued), set, LISTEN (the Daisy's sound in this browser), status LEDs |
 | View bar | 8 tabs; number keys 1-8 on the remote |
 | Track header | on per-track views: name, type (sample / 303 / live loop), mute, solo, rec arm |
 

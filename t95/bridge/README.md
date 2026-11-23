@@ -22,7 +22,7 @@ Python 3 standard library only. Files:
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
@@ -159,6 +159,27 @@ comes back, and remembers the setting (`state.json`). It adds about 40 ms
 plus the TV's own delay: for listening while testing, not for playing.
 Status in `/health` → `hdmi_audio`. Card names: `--daisy-card`, `--hdmi-card`.
 
+## Listening on a phone, tablet or Mac
+
+LISTEN in the ApcBox page's top bar plays what the Daisy plays, in that
+browser. `GET /audio.pcm` is raw 16-bit 48 kHz stereo from `arecord` on the
+Daisy's USB audio (192 kB/s per listener, up to 4), started with the first
+listener and stopped with the last. The page keeps about 0.15 s buffered and
+skips ahead if more piles up; the bridge keeps at most 0.5 s per listener
+and small socket buffers, so a bad link drops audio, it doesn't fall behind.
+Expect roughly 0.2 s behind the Daisy: for hearing what you do, not for
+playing in time.
+
+The capture device opens once, and the TV sound uses it too. Both now open
+`plug:daisyshare`, an ALSA dsnoop device defined in
+`/var/lib/apcbox-bridge/asound-share.conf` (written by the bridge, passed
+with `ALSA_CONFIG_PATH`). If alsaloop can't open it, the TV sound goes back
+to `plughw:CARD=ApcBox` by itself, and listening then needs the TV sound
+off (the page says so). **Not yet tried on the T95:** whether dsnoop works
+with the Daisy's audio there, and the real delay over Wi-Fi.
+`curl -s localhost:8040/health` shows `listen` (clients, running, shared,
+dropped_bytes, error).
+
 ## Behaviour
 
 - Finds the Daisy by USB VID `1209` / PID `0001` under `/sys`, not by tty
@@ -228,6 +249,7 @@ The clock module (`/clock`): one tempo for everything.
 |---|---|
 | `/` | The module selector (`t95/ui/selector.html`) |
 | `/apcbox` | The T95's ApcBox page (`t95/ui/apcbox.html`): full-screen views, works with no APC40, needs firmware v13.9 |
+| `/audio.pcm` | The Daisy's audio for the page's LISTEN button: raw s16le 48 kHz stereo, endless |
 | `POST /do` | `{"a": "mute 3 2"}` or a list of up to 32: page actions for the Daisy (`ESC U`), checked against a list before they go on the wire |
 | `/classic` | `daisy/ui/apcbox-ui.html`, the monitor page. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |

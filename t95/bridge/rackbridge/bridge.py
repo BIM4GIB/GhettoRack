@@ -11,6 +11,7 @@ from .web import *
 from .router import *
 from .netmidi import *
 from .clock import Clock
+from .listen import Listen
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -69,6 +70,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.state = State(args.state)
         self.ir = IrReader(self)
         self.hdmi = HdmiAudio(self)
+        self.listen = Listen(self)
         self.library = args.library or os.path.join(os.path.dirname(args.state), "samples")
         self.sdcard = args.sdcard
         self.sout_lo = bytearray()       # sample data: goes only when no MIDI is waiting
@@ -105,6 +107,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "hdmi_audio": self.hdmi.info(),
             "net": self.net_info(),
             "clock": self.clock.info(),
+            "listen": self.listen.info(),
         }
 
 
@@ -160,6 +163,7 @@ def main(argv=None):
     ap.add_argument("--ir-lirc", metavar="PATH", help="IR lirc device instead of finding it under /sys")
     ap.add_argument("--library", help="sample library folder (default: next to the state file)")
     ap.add_argument("--alsaloop", default="/usr/bin/alsaloop", help="for the HDMI audio setting")
+    ap.add_argument("--arecord", default="/usr/bin/arecord", help="for listening in a browser (/audio.pcm)")
     ap.add_argument("--asound", default="/proc/asound", help="where the sound cards are listed by name")
     ap.add_argument("--daisy-card", default="ApcBox", help="the Daisy's USB audio card name")
     ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")

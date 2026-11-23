@@ -201,6 +201,90 @@ function Wave() {
   return { el: w, draw };
 }
 
+/* ---------- listen: the Daisy's sound in this browser ----------
+   /audio.pcm is raw 16-bit 48 kHz stereo from the bridge. It goes into a ring
+   buffer and out through Web Audio (ScriptProcessor: works without HTTPS and
+   on iOS). About 0.15 s is kept buffered; if the network delivers late it
+   refills, if it piles up the oldest is skipped, so it stays close to live. */
+const Listen = {
+  on: false, state: "off", err: "", ctx: null, node: null, abort: null, keep: null,
+  ring: [new Float32Array(48000), new Float32Array(48000)], w: 0, r: 0, filled: false, played: 0, got: 0, under: 0,
+  buffered() { return (this.w - this.r + 48000) % 48000; },
+  async start() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { this.err = "this browser has no Web Audio"; this.state = "error"; return listenBtn(); }
+    this.on = true; this.state = "connecting"; this.err = ""; listenBtn();
+    try {
+      /* iOS: a playing <audio> element makes Web Audio ignore the silent switch */
+      this.keep = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAAA");
+      this.keep.loop = true; this.keep.play().catch(() => { });
+      this.ctx = new AC({ latencyHint: "interactive" });
+      await this.ctx.resume();
+      this.w = this.r = 0; this.filled = false; this.rpos = 0;
+      const ratio = 48000 / this.ctx.sampleRate, target = 48000 * 0.15;
+      this.node = this.ctx.createScriptProcessor(1024, 0, 2);
+      this.node.onaudioprocess = e => {
+        const L = e.outputBuffer.getChannelData(0), R = e.outputBuffer.getChannelData(1), n = L.length;
+        if (!this.filled && this.buffered() >= target) this.filled = true;
+        if (this.filled && this.buffered() < n * ratio + 2) { this.filled = false; this.under++; }
+        if (!this.filled) { L.fill(0); R.fill(0); return; }
+        if (this.buffered() > 48000 * 0.5) this.r = (this.w - Math.round(target) + 48000) % 48000;   /* piled up: jump to near live */
+        let p = this.rpos;
+        for (let i = 0; i < n; i++) {
+          const k = (this.r + Math.floor(p)) % 48000, k2 = (k + 1) % 48000, f = p - Math.floor(p);
+          L[i] = this.ring[0][k] + (this.ring[0][k2] - this.ring[0][k]) * f;
+          R[i] = this.ring[1][k] + (this.ring[1][k2] - this.ring[1][k]) * f;
+          p += ratio;
+        }
+        const adv = Math.floor(p); this.rpos = p - adv; this.r = (this.r + adv) % 48000; this.played += n;
+      };
+      this.node.connect(this.ctx.destination);
+      this.abort = new AbortController();
+      const resp = await fetch("/audio.pcm", { signal: this.abort.signal, cache: "no-store" });
+      if (!resp.ok) throw new Error((await resp.text()).trim() || "no audio from the T95");
+      this.state = "on"; listenBtn();
+      const rd = resp.body.getReader();
+      let carry = new Uint8Array(0);
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) throw new Error("the T95 stopped sending audio");
+        let buf = value;
+        if (carry.length) { buf = new Uint8Array(carry.length + value.length); buf.set(carry); buf.set(value, carry.length); }
+        const frames = buf.length >> 2, dv = new DataView(buf.buffer, buf.byteOffset, frames * 4);
+        for (let i = 0; i < frames; i++) {
+          this.ring[0][this.w] = dv.getInt16(i * 4, true) / 32768; this.ring[1][this.w] = dv.getInt16(i * 4 + 2, true) / 32768;
+          this.w = (this.w + 1) % 48000;
+          if (this.w === this.r) this.r = (this.r + 1) % 48000;
+        }
+        this.got += frames;
+        carry = buf.slice(frames * 4);
+      }
+    } catch (e) {
+      const stopped = !this.on;
+      this.stop(true);
+      if (!stopped) { this.state = "error"; this.err = String(e.message || e); listenBtn(); }
+    }
+  },
+  stop(keepState) {
+    this.on = false;
+    try { if (this.abort) this.abort.abort(); } catch (e) { }
+    try { if (this.node) this.node.disconnect(); if (this.ctx) this.ctx.close(); } catch (e) { }
+    try { if (this.keep) this.keep.pause(); } catch (e) { }
+    this.node = this.ctx = this.abort = this.keep = null;
+    if (!keepState) { this.state = "off"; this.err = ""; listenBtn(); }
+  },
+  toggle() { if (this.on) this.stop(); else this.start(); },
+};
+window.Listen = Listen;
+function listenBtn() {
+  if (!T.listen) return;
+  const s = Listen.state;
+  T.listen.textContent = s === "on" ? "LISTENING" : s === "connecting" ? "…" : s === "error" ? "NO AUDIO" : "LISTEN";
+  T.listen.className = "tb sm listen " + s;
+  T.listen.title = s === "error" ? Listen.err : "hear the Daisy on this device (about 0.2 s behind; not for playing in time)";
+  if (s === "error") { sendErr = "listen: " + Listen.err; topStatus(); }
+}
+
 /* ---------- top bar ---------- */
 const T = {};
 function buildTop() {
@@ -218,16 +302,17 @@ function buildTop() {
   let taps = [];
   T.tap.onclick = () => { const t = performance.now(); taps = taps.filter(x => t - x < 2500).concat([t]); if (taps.length >= 3) bpm(Math.round(600000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1))) - st.bpm); };
   T.metro.onclick = () => act("metro 2");
+  T.listen = el("button", "tb sm listen", "LISTEN"); T.listen.onclick = () => Listen.toggle();
   T.leds = el("span", "leds");
   const stat = (l, e) => { const s = el("div", "stat"); if (l) s.appendChild(el("span", "lbl", l)); s.appendChild(e); return s; };
   if (PHONE) {
     top.append(T.stop, T.play, T.rec, stat("", T.bpm), T.beats);
-    const r2 = el("div", "r2"); r2.append(T.minus, T.plus, T.tap, T.pat, T.leds); top.appendChild(r2);
+    const r2 = el("div", "r2"); r2.append(T.minus, T.plus, T.tap, T.listen, T.pat, T.leds); top.appendChild(r2);
   } else {
     const sp = el("span", "sp");
-    top.append(T.stop, T.play, T.rec, stat("BPM", T.bpm), T.minus, T.plus, T.tap, T.metro, T.beats, stat("Step", T.pos), stat("Pattern", T.pat), stat("Set", T.set), sp, T.leds);
+    top.append(T.stop, T.play, T.rec, stat("BPM", T.bpm), T.minus, T.plus, T.tap, T.metro, T.beats, stat("Step", T.pos), stat("Pattern", T.pat), stat("Set", T.set), sp, T.listen, T.leds);
   }
-  topS(); topStatus();
+  topS(); topStatus(); listenBtn();
 }
 function topS() {
   if (!T.play) return;

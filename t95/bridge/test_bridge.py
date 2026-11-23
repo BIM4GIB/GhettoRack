@@ -2205,6 +2205,205 @@ class HttpsTest(unittest.TestCase):
 
 
 
+
+FAKE_ARECORD = """#!%s
+# arecord for the tests: a 440 Hz tone as raw s16le 48 kHz stereo, in real time
+import math, os, struct, sys, time
+with open(%r, "a") as f:
+    f.write(" ".join(sys.argv[1:]) + " | ALSA_CONFIG_PATH=" + os.environ.get("ALSA_CONFIG_PATH", "") + "\\n")
+if os.path.exists(%r):
+    sys.stderr.write("arecord: main:831: audio open error: Device or resource busy\\n")
+    sys.exit(1)
+out = sys.stdout.buffer
+n = 0
+t0 = time.monotonic()
+while True:
+    chunk = b"".join(struct.pack("<hh", int(12000 * math.sin(2 * math.pi * 440 * (n + i) / 48000)),
+                                 int(6000 * math.sin(2 * math.pi * 440 * (n + i) / 48000))) for i in range(480))
+    n += 480
+    out.write(chunk)
+    out.flush()
+    d = t0 + n / 48000 - time.monotonic()
+    if d > 0:
+        time.sleep(d)
+"""
+
+
+class ListenTest(unittest.TestCase):
+    """The Daisy's audio to browsers: /audio.pcm from a fake arecord, the page's Listen button"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.asound = os.path.join(cls.dir, "asound")
+        os.makedirs(os.path.join(cls.asound, "HDMI"))
+        cls.alog = os.path.join(cls.dir, "arecord.log")
+        cls.busy = os.path.join(cls.dir, "busy")
+        cls.arecord = os.path.join(cls.dir, "arecord")
+        with open(cls.arecord, "w") as f:
+            f.write(FAKE_ARECORD % (sys.executable, cls.alog, cls.busy))
+        os.chmod(cls.arecord, 0o755)
+        # alsaloop that can't open the shared device, like a box where dsnoop doesn't work
+        cls.loop_log = os.path.join(cls.dir, "alsaloop.log")
+        cls.alsaloop = os.path.join(cls.dir, "alsaloop")
+        with open(cls.alsaloop, "w") as f:
+            f.write("#!/bin/sh\necho \"$*\" >> %s\ncase \"$*\" in *daisyshare*) exit 1;; esac\nexec sleep 300\n" % cls.loop_log)
+        os.chmod(cls.alsaloop, 0o755)
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
+             "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
+             "--arecord", cls.arecord, "--alsaloop", cls.alsaloop, "--asound", cls.asound],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: "listen" in h, 10)
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def stream(self):
+        s = socket.create_connection(("127.0.0.1", self.http), timeout=5)
+        s.sendall(b"GET /audio.pcm HTTP/1.1\r\nHost: x\r\n\r\n")
+        return s
+
+    @staticmethod
+    def read_for(s, secs):
+        buf = b""
+        end = time.time() + secs
+        s.settimeout(0.2)
+        while time.time() < end:
+            try:
+                d = s.recv(65536)
+                if not d:
+                    break
+                buf += d
+            except socket.timeout:
+                pass
+        return buf
+
+    def test_l1_no_daisy_audio_says_so(self):
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            BridgeTest.get("/audio.pcm")
+        self.assertEqual(e.exception.code, 503)
+        self.assertIn(b"Daisy's audio isn't on the T95", e.exception.read())
+
+    def test_l2_stream_is_the_daisys_audio_and_stops_with_the_last_listener(self):
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        s = self.stream()
+        raw = self.read_for(s, 1.5)
+        head, _, pcm = raw.partition(b"\r\n\r\n")
+        self.assertIn(b"200 OK", head)
+        self.assertIn(b"X-Audio: s16le 48000 2", head)
+        secs = len(pcm) / 192000
+        print("\n  listen: %.2f s of audio in 1.5 s" % secs)
+        self.assertTrue(1.0 < secs < 1.8, secs)
+        n = len(pcm) // 4
+        left = struct.unpack("<%dh" % (2 * n), pcm[:4 * n])[0::2]
+        self.assertGreater(max(left), 11000)          # the tone, not silence or garbage
+        self.assertLess(max(left), 12100)
+        # rising zero crossings: 440 a second
+        zc = sum(1 for a, b in zip(left, left[1:]) if a < 0 <= b)
+        self.assertAlmostEqual(zc / (n / 48000), 440, delta=8)
+        log = open(self.alog).read()
+        self.assertIn("-D plug:daisyshare -f S16_LE -r 48000 -c 2 -t raw", log)
+        conf = log.strip().rsplit("ALSA_CONFIG_PATH=", 1)[1]
+        self.assertIn('pcm "hw:CARD=ApcBox,DEV=0"', open(conf).read())
+        h = BridgeTest.health()["listen"]
+        self.assertEqual((h["clients"], h["running"]), (1, True))
+        # a second listener shares the one capture
+        s2 = self.stream()
+        self.assertGreater(len(self.read_for(s2, 0.6)), 60000)
+        self.assertEqual(BridgeTest.health()["listen"]["starts"], 1)
+        s.close()
+        s2.close()
+        BridgeTest.wait_health(lambda h: not h["listen"]["running"] and h["listen"]["clients"] == 0, 6)
+
+    def test_l3_a_stalled_listener_loses_old_audio_not_the_bridge(self):
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        slow = socket.socket()
+        slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)     # before connecting, so it takes effect
+        slow.connect(("127.0.0.1", self.http))
+        slow.sendall(b"GET /audio.pcm HTTP/1.1\r\nHost: x\r\n\r\n")
+        fast = self.stream()
+        self.addCleanup(slow.close)
+        self.addCleanup(fast.close)
+        got = self.read_for(fast, 4.0)                 # the slow one reads nothing for 4 s
+        self.assertGreater(len(got), 192000 * 3)       # the fast one is unaffected
+        t = time.time()
+        h = BridgeTest.health()
+        self.assertLess(time.time() - t, 1.0)
+        self.assertGreater(h["listen"]["dropped_bytes"], 0)
+        slow.close()
+        fast.close()
+        BridgeTest.wait_health(lambda h: h["listen"]["clients"] == 0, 6)
+
+    def test_l4_too_many_and_capture_failing(self):
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        ss = [self.stream() for _ in range(4)]
+        for x in ss:
+            self.assertIn(b"200 OK", self.read_for(x, 0.3)[:20])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            BridgeTest.get("/audio.pcm")
+        self.assertEqual(e.exception.code, 503)
+        for x in ss:
+            x.close()
+        BridgeTest.wait_health(lambda h: h["listen"]["clients"] == 0, 6)
+        open(self.busy, "w").close()                   # the device is busy: arecord exits at once
+        try:
+            s = self.stream()
+            raw = self.read_for(s, 1.5)
+            s.close()
+            self.assertLess(len(raw), 500)
+            BridgeTest.wait_health(lambda h: "resource busy" in (h["listen"]["error"] or ""), 5)
+        finally:
+            os.unlink(self.busy)
+
+    def test_l5_listen_button_in_the_page(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
+            pg = b.new_page(viewport={"width": 390, "height": 664})
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox" % self.http)
+            pg.wait_for_selector(".tb.listen")
+            pg.click(".tb.listen")
+            pg.wait_for_function("Listen.state === 'on' && Listen.got > 48000 && Listen.played > 20000", timeout=8000)
+            st = pg.evaluate("({got: Listen.got, played: Listen.played, under: Listen.under, buffered: Listen.buffered(), rate: Listen.ctx.sampleRate})")
+            print("\n  page listening: %s" % st)
+            self.assertLess(st["buffered"], 48000 * 0.5)       # stays near live
+            self.assertEqual(pg.inner_text(".tb.listen"), "LISTENING")
+            pg.click(".tb.listen")
+            pg.wait_for_function("Listen.state === 'off'")
+            b.close()
+        self.assertEqual(errors, [])
+        BridgeTest.wait_health(lambda h: h["listen"]["clients"] == 0 and not h["listen"]["running"], 6)
+
+    def test_l6_tv_sound_falls_back_when_sharing_fails(self):
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        post = lambda body: RouterTest.post(self, "/settings", body)
+        self.assertEqual(post({"hdmi_audio": True})[0], 200)
+        BridgeTest.wait_health(lambda h: h["hdmi_audio"]["running"] and not h["listen"]["shared"], 12)
+        time.sleep(0.5)
+        lines = open(self.loop_log).read().strip().splitlines()
+        self.assertIn("plug:daisyshare", lines[0])
+        self.assertIn("-C plughw:CARD=ApcBox", lines[-1])
+        # the TV sound has the card to itself now: a browser is told why it can't listen
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            BridgeTest.get("/audio.pcm")
+        self.assertIn(b"turn it off to listen here", e.exception.read())
+        post({"hdmi_audio": False})
+        BridgeTest.wait_health(lambda h: not h["hdmi_audio"]["running"], 6)
+        s = self.stream()
+        self.assertIn(b"200 OK", self.read_for(s, 0.5)[:20])
+        self.assertIn("-D plughw:CARD=ApcBox", open(self.alog).read().strip().splitlines()[-1])
+        s.close()
+
 class HdmiAudioTest(unittest.TestCase):
     """The HDMI audio setting starts/stops alsaloop (a fake one here)"""
 
@@ -2242,7 +2441,7 @@ class HdmiAudioTest(unittest.TestCase):
         self.assertEqual(BridgeTest.health()["hdmi_audio"]["daisy_card"], False)
         os.makedirs(os.path.join(asound, "ApcBox"))          # the Daisy plugged in
         BridgeTest.wait_health(lambda h: h["hdmi_audio"]["running"], 6)
-        self.assertIn("-C plughw:CARD=ApcBox -P plughw:CARD=HDMI -t 40000 -S 1", open(log).read())
+        self.assertIn("-C plug:daisyshare -P plughw:CARD=HDMI -t 40000 -S 1", open(log).read())   # shared with listening
         os.rmdir(os.path.join(asound, "ApcBox"))             # unplugged: stops
         BridgeTest.wait_health(lambda h: not h["hdmi_audio"]["running"], 6)
         os.makedirs(os.path.join(asound, "ApcBox"))          # back: starts again

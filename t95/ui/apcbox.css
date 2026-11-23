@@ -224,3 +224,9 @@ button.tab.on{color:#0b0c0d;background:var(--green);border-color:var(--green);bo
 button.tab.on kbd{border-color:#0b0c0d55;color:#0b0c0d}
 body.phone .tabs{gap:3px;padding:0 4px}
 body.phone button.tab{font-size:10px;font-weight:700;height:44px;padding:0 1px;letter-spacing:-.01em}
+
+/* listen button */
+.tb.sm.listen.on{color:#0b0c0d;background:var(--green);border-color:var(--green);box-shadow:0 0 12px #35d05a99}
+.tb.sm.listen.connecting{color:var(--amber);border-color:var(--amber)}
+.tb.sm.listen.error{color:var(--red);border-color:var(--red)}
+body.phone .leds .led:nth-child(n+3){display:none}

@@ -218,6 +218,10 @@ class WebMixin:
             elif path == "/clock":
                 body = dict(self.clock.info(), ports=[p.name for p in sorted(self.ports.values(), key=lambda p: p.num)])
                 await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
+            elif path == "/audio.pcm":
+                code, why = await self.listen.serve(writer)
+                if code:
+                    await self.reply(writer, code, "text/plain", (why or "no audio").encode() + b"\n")
             elif path == "/midihub":
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.hub)
             elif path == "/apcbox" and self.args.apcbox_page:

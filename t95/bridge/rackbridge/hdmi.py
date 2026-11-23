@@ -14,6 +14,8 @@ class HdmiAudio:
         self.proc = None
         self.starts = 0
         self.last_error = None
+        self.started_at = 0.0
+        self.used_shared = False
 
     def cards(self):
         root = self.b.args.asound
@@ -44,11 +46,19 @@ class HdmiAudio:
             if want and daisy and hdmi and not self.running():
                 if self.proc is not None and self.proc.returncode not in (None, 0, -15):
                     self.last_error = "alsaloop exited %s" % self.proc.returncode
-                cmd = [self.b.args.alsaloop, "-C", "plughw:CARD=" + self.b.args.daisy_card,
+                    # The shared capture device (listen.py) died at once with the Daisy still there:
+                    # it doesn't work on this box. Open the card directly, as before.
+                    if self.used_shared and now() - self.started_at < 4 and self.b.listen.shared:
+                        self.b.listen.shared = False
+                        log.warning("HDMI audio: the shared capture device doesn't work here; opening the card directly "
+                                    "(listening in a browser then needs the TV sound off)")
+                cmd = [self.b.args.alsaloop, "-C", self.b.listen.device(),
                        "-P", "plughw:CARD=" + self.b.args.hdmi_card, "-t", "40000", "-S", "1"]
                 try:
+                    self.used_shared = self.b.listen.shared
+                    self.started_at = now()
                     self.proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                                 stderr=subprocess.DEVNULL)
+                                                 stderr=subprocess.DEVNULL, env=self.b.listen.env())
                     self.starts += 1
                     log.info("HDMI audio on (%s)", " ".join(cmd))
                 except OSError as e:
