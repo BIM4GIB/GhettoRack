@@ -229,7 +229,7 @@ same port for the standalone APC40 host; role selection needs an explicit design
    can't follow or do Link), MIDI clock out to any ports. **Cubase sync**
    mode pinned: a VST3 plugin in Cubase reads its transport and shares it on
    Link (planned). Daisy following the clock, and the clock following the Daisy: built
-   in v13.11 (desktop-tested, not flashed yet; the binary to flash is v13.14,
+   in v13.11 (desktop-tested, not flashed yet; the binary to flash is v13.15,
    which adds the looper, one-shot sampling, quantise and roll: `docs/BACKLOG.md`).
 7. **Later extensions.** T95-to-Daisy UAC audio OUT, optional second USB device
    lane, DIN MIDI clock from a Daisy UART, network jam clock leader/follower

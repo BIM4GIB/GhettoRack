@@ -180,6 +180,7 @@ constexpr uint8_t kRingPan    = 3;
 
 constexpr int kMaxLeds = 400;
 LedSlot           leds[kMaxLeds];
+uint8_t           lwant[kMaxLeds]; // by function; apcmap.h moves them to the buttons that do those functions
 int           num_leds = 0;
 
 int led_grid[5][8];
@@ -231,7 +232,7 @@ void BuildLedTable()
 
 inline void Want(int idx, uint8_t v)
 {
-    leds[idx].want = v;
+    lwant[idx] = v;
 }
 
 void InvalidateLeds()
@@ -1347,6 +1348,7 @@ void ReleaseAllHeld()
 #include "xfer.h"
 #include "sets.h"
 #include "kits.h"
+#include "apcmap.h"
 
 /** Knobs of one track back to default; fader, mute and solo stay */
 void ResetTrackKnobs(int t)
@@ -2150,9 +2152,9 @@ void HandleEvent(int type, int ch, int d0, int d1, uint32_t now)
     if(shift && !((type == kMidiNoteOn || type == kMidiNoteOff) && d0 == apc::kShift))
         shift_used = true; // SHIFT + something: not a page tap
     if(type == kMidiNoteOn || type == kMidiNoteOff)
-        OnButton(ch, d0, type == kMidiNoteOn && d1 > 0, now);
+        MapButton(ch, d0, type == kMidiNoteOn && d1 > 0, now); // through the button map (apcmap.h)
     else if(type == kMidiCC)
-        OnCC(ch, d0, d1, now);
+        MapCC(ch, d0, d1, now);
 }
 
 /* ================================================================== */
@@ -2693,7 +2695,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 15; // 14: LP has redo and FX quantise; 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load
+constexpr int kReportVersion = 16; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map)
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2759,6 +2761,7 @@ void ForceFullReport()
     rep_trans    = -1;
     rep_ck[0]    = 0;
     rep_lp[0]    = 0;
+    map_report   = true;
     rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
 
@@ -3130,6 +3133,7 @@ void Report(uint32_t now)
             Out("%s", ck);
         }
     }
+    MapReport();
     {
         /* looper and quantise settings: take length, count-in, quantise of
            takes / pattern switches / mutes, input level, what the running
@@ -3285,6 +3289,8 @@ void FullReset(uint32_t now)
     LoadKit(0, false, 0);
     LoadKit(1, false, 1); // tracks 9-16: 909
     flash_red_until = now + 600;
+    MapDefault(); // and the buttons do what's printed on them again
+    MapChanged();
     Log("full reset");
     Popup("RESET");
 }
@@ -3305,6 +3311,8 @@ void BoxInit(Platform* p, Engine* e)
     }
     BuiltInKitNames();
     BuildLedTable();
+    MapLedMeta();
+    MapDefault();
     DemoPattern();
 }
 
@@ -3319,6 +3327,7 @@ void BoxStorageReady(bool load_project)
         num_folders);
     ReadSetList();
     TouchLoadCal();
+    MapLoad();
     if(load_project && !LoadLastSet())
         LoadProject();
 }
@@ -3508,6 +3517,8 @@ void BoxPoll(uint32_t now)
     KitUndoPoll();
     BrowseStep(now);
     UpdateLeds(now);
+    MapLeds();
+    MapPoll(now);
     static uint32_t last = 0;
     if(now - last >= 33)
     {
@@ -3827,6 +3838,25 @@ bool BoxUiCommand(const char* c, uint32_t now)
         KitRename(n - 1, c + len9);
     else if(sscanf(c, "kit delete %d", &n) == 1 && n >= 1 && n <= num_kits)
         KitDelete(n - 1);
+    /* ---- control protocol 10: the APC40's button map (apcmap.h) ---- */
+    else if(sscanf(c, "map b %d %d %d %d", &n, &a, &b, &d) == 4)
+    {
+        if(!MapSetButton(n, a, b, d))
+            return false;
+        MapChanged();
+    }
+    else if(sscanf(c, "map c %d %d", &n, &a) == 2)
+    {
+        if(!MapSetCc(n, a))
+            return false;
+        MapChanged();
+    }
+    else if(strcmp(c, "map reset") == 0)
+    {
+        MapDefault();
+        MapChanged();
+        Popup("buttons: standard layout");
+    }
     else if(sscanf(c, "audition %d", &n) == 1 && n >= 1 && n <= kTracks)
         eng->Audition(n - 1);
     /* ---- control protocol 5: sets from the T95 pages. Slots count from 1.

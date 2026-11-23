@@ -33,7 +33,7 @@ class TestPlat : public Platform
     {
         if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
             xfer_lines.push_back(l);
-        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3) || !strncmp(l, "CK ", 3) || !strncmp(l, "CL ", 3))
+        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3) || !strncmp(l, "CK ", 3) || !strncmp(l, "CL ", 3) || !strncmp(l, "MB ", 3) || !strncmp(l, "MC ", 3))
             ui_lines.push_back(l);
     }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
@@ -641,7 +641,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 9 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 10 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -714,7 +714,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 9 03 01 02 1") >= 1);
+        CHECK(T95Count("P 10 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -733,7 +733,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 9 ") >= 1);
+        CHECK(T95Count("P 10 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1122,7 +1122,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 9 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 10 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1765,6 +1765,159 @@ int main()
         WaitIdle();
         SelectTrack(0);
         printf("kits: save, settings, 303 state, undo, rename, delete ok\n");
+    }
+
+    /* ---------- the button map: any control can do any other's job, lights follow ---------- */
+    {
+        using namespace apc;
+        auto U   = [](const char* a) {
+            CHECK(BoxUiCommand(a, now_ms));
+            Tick(8);
+        };
+        auto led = [](int status, int d1) {
+            int      n;
+            LedSlot* l = BoxLeds(&n);
+            for(int i = 0; i < n; i++)
+                if(l[i].status == status && l[i].d1 == d1)
+                    return (int)l[i].want;
+            return -1;
+        };
+        e.Stop();
+        WaitIdle();
+        if(track_page)
+            TogglePage(); // strips = tracks 1-8
+        Tick(30);
+        CHECK(MapIsDefault());
+        CHECK(CidOf(kMetronome, 3) == 109 && CidOf(kPlay, 0) == 91 && CidOf(kShift, 0) == kCidShift
+              && CidOf(kClipFirst + 4, 0) == 32 && CidOf(kActivator, 2) == 63 && CidOf(kClipStop, 0) == 77);
+        for(int c = 0; c < kMapBtns; c++)
+        {
+            int n, ch;
+            CidNote(c, &n, &ch);
+            CHECK(CidOf(n, ch) == c);
+        }
+
+        /* METRONOME does PLAY's job; with SHIFT it still does its own SHIFT job (monitor) */
+        U("map b 109 0 91 0");
+        const bool click = e.global.metronome;
+        Tap(kMetronome);
+        CHECK(e.Playing() && e.global.metronome == click);
+        e.Stop();
+        Tick(20);
+        const bool mon = e.input_monitor;
+        Btn(kShift, 0, true);
+        Tap(kMetronome);
+        Btn(kShift, 0, false);
+        CHECK(e.input_monitor != mon && !e.Playing());
+        e.input_monitor = mon;
+
+        /* a pad of the bottom row mutes track 3: its light is the mute light, in a pad's colour */
+        SelectTrack(0);
+        e.track[2].mute = false;
+        U("map b 32 0 63 0");
+        Tick(20);
+        CHECK(led(0x90, kClipFirst + 4) == kGreen); // channel 0, row 5: on = not muted
+        uint32_t trig = e.TriggerCount(0);
+        Tap(kClipFirst + 4, 0);
+        CHECK(e.track[2].mute && e.TriggerCount(0) == trig); // no longer plays track 1
+        Tick(20);
+        CHECK(led(0x90, kClipFirst + 4) == kOff);
+        Tap(kClipFirst + 4, 0);
+        CHECK(!e.track[2].mute);
+
+        /* the other way: a strip button does a pad's job and shows its colour as on / blink */
+        U("map b 61 0 24 0"); // ACTIVATOR 1 = FX pad 1 (hold)
+        Btn(kActivator, 0, true);
+        CHECK(e.PerfFxActive(0) && !e.track[0].mute);
+        Tick(20);
+        CHECK(led(0x90, kActivator) != 0);
+        Btn(kActivator, 0, false);
+        CHECK(!e.PerfFxActive(0));
+
+        /* SHIFT layer on its own: SHIFT + CLIP STOP 1 = the left arrow's undo (no SHIFT in it) */
+        U("map b 77 1 104 0");
+        U("lrec len 1");
+        SelectTrack(3);
+        U("lrec arm 4");
+        int w = 0;
+        while((e.LiveRecState() != 0 || !e.IsLoop(3)) && w++ < 5000)
+            Tick();
+        e.Stop();
+        Tick(60);
+        CHECK(e.IsLoop(3));
+        Btn(kShift, 0, true);
+        Tap(kClipStop, 0);
+        Btn(kShift, 0, false);
+        WaitIdle();
+        CHECK(!e.IsLoop(3)); // undone, and track 1 wasn't cleared
+        U("lrec len 0");
+        SelectTrack(0);
+
+        /* a held button lets go of what it started, whatever SHIFT does meanwhile */
+        U("map b 108 0 27 0"); // MIDI OVERDUB = FX pad 4 (hold)
+        Btn(kOverdub, 0, true);
+        CHECK(e.PerfFxActive(3));
+        Btn(kShift, 0, true);
+        Btn(kOverdub, 0, false);
+        Btn(kShift, 0, false);
+        CHECK(!e.PerfFxActive(3) && e.LiveRecState() == 0);
+
+        /* a function without a button: one-shot sampling on DETAIL VIEW; nothing on REC QUANTIZATION */
+        U("map b 106 0 110 0");
+        U("map b 107 1 255 0");
+        Tap(kDetail);
+        CHECK(e.LiveRecState() == 1 && e.LiveRecMode() == Engine::kRecShot);
+        Tick(20);
+        CHECK(led(0x90, kDetail) == 2); // waiting for sound: blinks
+        Tap(kDetail);
+        CHECK(e.LiveRecState() == 0);
+
+        /* knobs: TRACK CONTROL 1 is fader 3; its ring shows that level */
+        U("map c 0 18");
+        e.track[2].vol = 0.5f;
+        fader_live[2]  = true;
+        BoxMidi(3, 0, kTrkKnobCC, 100, now_ms);
+        Tick(20);
+        CHECK(fabsf(e.track[2].vol - 100.f / 127.f) < 0.001f && fabsf(e.track[0].pan - 0.5f) < 0.001f);
+        CHECK(led(0xB0, kTrkKnobCC) == 100 && led(0xB0, kTrkTypeCC) == kRingVolume);
+        BoxMidi(3, 2, kFaderCC, 100, now_ms); // the fader itself still does its job
+        CHECK(fabsf(e.track[2].vol - 100.f / 127.f) < 0.001f);
+
+        /* what can't be mapped */
+        CHECK(!BoxUiCommand("map b 98 0 91 0", now_ms) && !BoxUiCommand("map b 91 0 98 0", now_ms));
+        CHECK(!BoxUiCommand("map b 110 0 91 0", now_ms) && !BoxUiCommand("map b 5 0 116 0", now_ms));
+        CHECK(!BoxUiCommand("map c 26 3", now_ms) && !BoxUiCommand("map c 3 26", now_ms) && !BoxUiCommand("map c 27 0", now_ms));
+
+        /* the pages hear about it; it goes onto the card and comes back */
+        ui_lines.clear();
+        map_report = true;
+        Tick(60);
+        int mb = 0, mc = 0;
+        for(auto& l : ui_lines)
+            mb += l.rfind("MB ", 0) == 0, mc += l.rfind("MC ", 0) == 0;
+        CHECK(mb == 3 && mc == 1);
+        Tick(1700);
+        CHECK(!map_dirty && Exists("apcbox/apcmap.txt"));
+        uint8_t was[kMapBtns][2], wasc[kMapCcs];
+        memcpy(was, bmap, sizeof(was));
+        memcpy(wasc, cmap, sizeof(wasc));
+        MapDefault();
+        CHECK(MapIsDefault());
+        MapLoad();
+        CHECK(!memcmp(was, bmap, sizeof(was)) && !memcmp(wasc, cmap, sizeof(wasc)));
+        CHECK(bmap[109][0] == 91 && bmap[77][1] == 104 && bmap[107][1] == kMapNone && bmap[106][0] == 110 && cmap[0] == 18);
+
+        /* back to what's printed on the buttons */
+        U("map reset");
+        CHECK(MapIsDefault());
+        Tap(kMetronome);
+        CHECK(e.global.metronome != click && !e.Playing());
+        Tap(kMetronome);
+        Tick(1700);
+        MapLoad();
+        CHECK(MapIsDefault());
+        e.track[2].vol = 0.8f;
+        printf("button map: buttons, SHIFT layer, lights, knobs, card ok\n");
     }
 
     /* A performance FX held from a page lets go when the T95 goes quiet,

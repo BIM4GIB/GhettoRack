@@ -24,7 +24,7 @@ of the wider project; do not narrow the architecture to any one controller.
 ## Layout
 
 ```
-daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box), desktop tests, mac/ (same engine on macOS
+daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: the APC40 button map), desktop tests, mac/ (same engine on macOS
             with the APC40 on the Mac), ui/ (monitor page, Chrome Web Serial),
             release/ApcBox.bin (latest built firmware)
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
@@ -61,6 +61,11 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   network clock leader and follower modes must explicitly translate and track
   tempo/phase on the Daisy. Do not confuse musical sync with the audio sample clock.
 - **Daisy works standalone.** With nothing but the APC40 on its USB host port.
+- **APC40 input and lights go through the button map** (`daisy/apcmap.h`).
+  A new button function goes into `OnButton` under the button that has it in
+  the standard layout, or as a new "virtual" job there; give it a light in
+  `UpdateLeds` / `VirtualLeds`, and a line in `apcMap()` / `MAP_VIRT` in
+  `t95/ui/apcbox.js` so the map page shows it.
 - **Keep the protocol in step.** Change a report line: bump `kReportVersion` in
   `daisy/box.cpp` and `REPORT_VERSION` in `daisy/ui/apcbox-ui.html`, and update
   `protocol/serial.md`, in the same commit.
@@ -79,7 +84,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 15 are separate version numbers.
+  version 16 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
@@ -90,7 +95,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   and `daisy/xfer.h`), from v13.9 the page actions in `ESC U` (control
   protocol 4: mute, solo, knobs, steps...), from v13.10 set actions (protocol 5), from v13.11 `ESC T` (protocol 6: the T95's clock; the Daisy steers
   its sequencer onto it, the audio clock stays the timing source), from v13.12 the looper, quantise and roll actions in `ESC U` (protocol 7). Send control frames only after the Daisy reports a
-  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+, looper/quantise/roll actions at 7+, `lrec redo` and `quant fx` at 8+, `kit save/over/rename/delete` at 9+. v13.2 and older act
+  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+, looper/quantise/roll actions at 7+, `lrec redo` and `quant fx` at 8+, `kit save/over/rename/delete` at 9+, `map` at 10+. v13.2 and older act
   on any bare `R`/`B` byte, so never open the port with echo on (plain
   `cat`/`stty`/`screen` on Linux). Sample data goes only as `ESC F` frames
   (never ESC M), sent at low priority behind MIDI by the bridge.

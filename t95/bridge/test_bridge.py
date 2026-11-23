@@ -1608,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 9)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 10)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -2057,6 +2057,103 @@ class PageControlTest(unittest.TestCase):
         self.assertEqual(errors, [])
         self.do("kit delete %d" % (k + 1), "kit 1 0", "track 1")
         self.assertTrue(self.box.wait_for(lambda c: not os.path.exists(d), 8))
+
+    def test_p69_button_map(self):
+        """v13.15, control protocol 10: the APC40's layout as a table the map page edits"""
+        def bmap():
+            m = {}
+            for l in self.box.lines:
+                if l.startswith("MB "):
+                    _, frm, h = l.split()
+                    for k in range(len(h) // 4):
+                        m[int(frm) + k] = (int(h[k * 4:k * 4 + 2], 16), int(h[k * 4 + 2:k * 4 + 4], 16))
+            return m
+        self.assertTrue(self.box.wait_for(lambda c: len(bmap()) == 110, 5))
+        self.assertTrue(all(v == (k, k | 128) for k, v in bmap().items()))
+        self.assertEqual(self.last("MC "), "MC " + "".join("%02x" % i for i in range(27)))
+        # METRONOME (109) alone = PLAY (91); SHIFT + DETAIL VIEW (106) = nothing; knob 1 = fader 3
+        self.assertEqual(self.do("map b 109 0 91 0", "map b 106 1 255 0", "map c 0 18")[0], 200)
+        self.assertTrue(self.box.wait_for(lambda c: bmap()[109] == (91, 109 | 128) and bmap()[106] == (106, 255)
+                                          and self.last("MC ")[3:5] == "12", 5), (bmap().get(109), self.last("MC ")))
+        self.do("map b 98 0 91 0", "map b 91 0 98 0", "map c 26 0", "map b 200 0 1 0")     # SHIFT, the endless knob, nonsense
+        time.sleep(0.4)
+        self.assertEqual(bmap()[98], (98, 98 | 128))
+        self.assertEqual(bmap()[91], (91, 91 | 128))
+        # it is on the card (so the Daisy has it without the T95)
+        f = os.path.join(self.card, "apcbox", "apcmap.txt")
+        self.assertTrue(self.box.wait_for(lambda c: os.path.exists(f) and "b 109 0 91 0" in open(f).read(), 6))
+        self.assertIn("c 0 18", open(f).read())
+        self.assertIn("b 106 1 255 0", open(f).read())
+        self.do("map reset")
+        self.assertTrue(self.box.wait_for(lambda c: all(v == (k, k | 128) for k, v in bmap().items()), 5))
+        self.assertTrue(self.box.wait_for(lambda c: open(f).read().strip() == "APM1", 6), open(f).read())
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
+                pg = b.new_page(viewport={"width": w_, "height": h_})
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.goto("http://127.0.0.1:%d/apcbox?v=map" % self.http)
+                pg.wait_for_function("document.querySelectorAll('.ac').length === 137 && !!st.bmap && st.bmap.length === 110")
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
+                ctl = lambda cid: pg.evaluate("cur.ctl.findIndex(c => c.cid === %d)" % cid)
+                tap = lambda i: pg.evaluate("cur.els[%d].click()" % i)
+                info = lambda: pg.locator(".apcinfo").inner_text()
+                # METRONOME alone := PLAY (one job: assigned at once)
+                tap(ctl(109))
+                self.assertIn("click", info())
+                pg.locator(".apcrow", has_text="ALONE").locator("button:has-text('CHANGE')").click()
+                self.assertIn("whose job", info())
+                tap(ctl(91))
+                self.assertTrue(self.box.wait_for(lambda c: bmap()[109] == (91, 109 | 128), 5), bmap().get(109))
+                pg.wait_for_function("cur.els[%d].classList.contains('chg') && cur.ctl[%d].b.textContent === 'play'" % (ctl(109), ctl(109)))
+                self.assertIn("printed on PLAY", info())
+                # SHIFT + METRONOME := the left arrow, which has two jobs: asks, take its SHIFT one
+                pg.locator(".apcrow", has_text="SHIFT").locator("button:has-text('CHANGE')").click()
+                tap(ctl(104))
+                self.assertIn("two jobs", info())
+                pg.locator(".apcbtns button:has-text('SHIFT: sample')").click()
+                self.assertTrue(self.box.wait_for(lambda c: bmap()[109] == (91, 104 | 128), 5), bmap().get(109))
+                # a job no button has
+                tap(ctl(107))
+                pg.locator(".apcrow", has_text="ALONE").locator("button:has-text('CHANGE')").click()
+                pg.locator(".apcbtns button:has-text('One-shot sample')").click()
+                self.assertTrue(self.box.wait_for(lambda c: bmap()[107][0] == 110, 5), bmap().get(107))
+                # a whole row: the RECORD ARM row (roll) does the pad row 4 jobs (FX holds)
+                tap(ctl(45))
+                pg.locator(".apcrow", has_text="ALONE").locator("button:has-text('CHANGE')").click()
+                pg.locator(".apcbtns button:has-text('whole row')").click()
+                tap(ctl(24 + 3))
+                pg.locator(".apcbtns button").first.click()                                   # its job alone (the FX hold)
+                self.assertTrue(self.box.wait_for(lambda c: [bmap()[45 + k][0] for k in range(8)] == [24 + k for k in range(8)], 5),
+                                [bmap().get(45 + k) for k in range(8)])
+                # a knob: TRACK CONTROL 2 := the crossfader
+                tap(pg.evaluate("cur.ctl.findIndex(c => c.ccid === 1)"))
+                pg.locator(".apcrow button:has-text('CHANGE')").click()
+                tap(pg.evaluate("cur.ctl.findIndex(c => c.ccid === 25)"))
+                self.assertTrue(self.box.wait_for(lambda c: self.last("MC ")[5:7] == "19", 5), self.last("MC "))
+                # SHIFT can't be changed, and can't be a target
+                tap(ctl(98))
+                self.assertEqual(pg.locator(".apcrow button:has-text('CHANGE')").count(), 0)
+                # one button back, then everything (asks)
+                tap(ctl(107))
+                pg.locator(".apcrow button:has-text('↺')").click()
+                self.assertTrue(self.box.wait_for(lambda c: bmap()[107] == (107, 107 | 128), 5))
+                pg.locator("button:has-text('RESET ALL')").click()
+                pg.wait_for_function("[...document.querySelectorAll('button')].some(b => b.textContent === 'SURE?')")
+                time.sleep(0.3)
+                self.assertEqual(bmap()[109][0], 91)
+                pg.locator("button:has-text('SURE?')").click()
+                self.assertTrue(self.box.wait_for(lambda c: all(v == (k, k | 128) for k, v in bmap().items())
+                                                  and self.last("MC ") == "MC " + "".join("%02x" % i for i in range(27)), 5))
+                pg.wait_for_function("document.querySelectorAll('.ac.chg').length === 0")
+                pg.close()
+            b.close()
+        self.assertEqual(errors, [])
 
     def test_p7_sets_from_the_page(self):
         try:

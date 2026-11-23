@@ -370,6 +370,13 @@ body.short .kslots{gap:6px}body.short .kslot{padding:4px;gap:2px}body.short .ksl
 .apcfn{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap}.apcfn b{font-size:16px}.apcfn em{font-style:normal;color:var(--amber);font-size:14px}
 body.phone .apcinfo{padding:8px 10px;gap:4px;height:150px}body.phone .apcinfo h3{font-size:15px}body.phone .apcinfo p{font-size:11.5px;line-height:1.3}
 body.short .apcinfo{padding:8px 10px;gap:4px}body.short .apcinfo h3{font-size:13px}body.short .apcinfo p{font-size:10.5px;line-height:1.3}body.short .apcfn b{font-size:12px}body.short .apcfn em{font-size:11px}
+
+.ac.chg{border-style:dashed;border-color:#9aa1aa}.ac.src{border-color:var(--amber);box-shadow:0 0 0 2px #ff9a1f88}
+.apcrow{display:flex;align-items:center;gap:10px;min-height:34px}.apcrow b{font-size:16px}.apcrow em{font-style:normal;color:var(--amber);font-size:16px}
+.apcrow .b,.apcbtns .b{height:32px;padding:0 12px;justify-content:center}.apcrow .lbl{width:52px}
+.apcbtns{display:flex;flex-wrap:wrap;gap:8px}.apcbtns .b.am{color:var(--amber);border-color:#8a6a20}
+body.phone .apcinfo{height:190px}body.phone .apcrow{min-height:28px;gap:6px}body.phone .apcrow b,body.phone .apcrow em{font-size:13px}body.phone .apcrow .b,body.phone .apcbtns .b{height:28px;padding:0 8px;font-size:11px}body.phone .apcbtns{gap:5px}
+body.short .apcrow{min-height:24px;gap:5px}body.short .apcrow b,body.short .apcrow em{font-size:11px}body.short .apcrow .b,body.short .apcbtns .b{height:22px;padding:0 6px;font-size:10px}body.short .apcbtns{gap:4px}body.short .apcrow .lbl{width:34px}
 </style>
 </head>
 <body>
@@ -1575,48 +1582,56 @@ V.samples = {
 };
 
 
-/* ---- APC40 map: every control, what it does, and with SHIFT. Read-only for now.
-   The texts follow daisy/box.cpp (OnButton, GridButton, TrackButton, OnCC); when
-   the mapping becomes editable the firmware will own this table. ---- */
+/* ---- APC40 map: every control, what it does alone and with SHIFT, and (firmware v13.15+)
+   changing that. cid / ccid are the firmware's numbers (daisy/apcmap.h). fn / sh: the
+   standard jobs, short; fnL / shL: the same with the track or pad number, for when a job
+   sits on another control. ---- */
+const MAP_VIRT = [[110, "sample", "One-shot sample", "Records a one-shot sample from the audio input into the selected track: starts with the sound, press again to stop."],
+  [111, "save kit", "Save as a kit", "Saves the 8 tracks on the strips as a new kit on the card: kit 01, kit 02 ..."],
+  [112, "take len", "Take length", "Steps the looper's take length: until stopped, 1, 2, 4, 8 bars."],
+  [113, "count-in", "Count-in", "Looper count-in on / off."],
+  [114, "pat quant", "Pattern quantise", "Pattern switches land on the bar, the beat or the next step."],
+  [115, "FX quant", "FX quantise", "Held FX start and end at once, on the step or on the beat."]];
 function apcMap() {
-  const C = [], add = (o) => { C.push(o); return o; };
+  const C = [], add = (o) => { o.fnL = o.fnL || o.fn; o.shL = o.shL || o.sh; C.push(o); return o; };
   const gx = c => 30 + c * 62, gy = r => 44 + r * 48;
   const rows = [
-    { k: "step", fn: c => "step " + (c + 1), sh: "accent", t: "Steps 1-8 of the selected track", d: "Tap: step on / off. SHIFT + tap: accent. On a 303 track: hold a step and turn DEVICE knob 1 for its note, SHIFT + tap for slide." },
-    { k: "step", fn: c => "step " + (c + 9), sh: "accent", t: "Steps 9-16 of the selected track", d: "Tap: step on / off. SHIFT + tap: accent. On a 303 track: hold a step and turn DEVICE knob 1 for its note, SHIFT + tap for slide." },
+    { k: "step", fn: c => "step " + (c + 1), sh: "accent", shL: c => "accent " + (c + 1), t: "Steps 1-8 of the selected track", d: "Tap: step on / off. SHIFT + tap: accent. On a 303 track: hold a step and turn DEVICE knob 1 for its note, SHIFT + tap for slide." },
+    { k: "step", fn: c => "step " + (c + 9), sh: "accent", shL: c => "accent " + (c + 9), t: "Steps 9-16 of the selected track", d: "Tap: step on / off. SHIFT + tap: accent. On a 303 track: hold a step and turn DEVICE knob 1 for its note, SHIFT + tap for slide." },
     { k: "pat", fn: c => "pattern " + (c + 1), sh: c => "bank " + "ABCDEFGH"[c], t: "Patterns 1-8 of the bank", d: "Tap: switch to that pattern (on the bar, beat or step: System > quantise). SHIFT + tap: pick bank A-H. While CLIP/TRACK is held: tap a source, then a target to copy; double tap clears. With the sets screen open: picks a set slot." },
-    { k: "fx", fn: c => FXN[c], sh: "latch", t: "Performance FX", d: "Hold: the effect runs while held (start and end snap to the step or beat: System > quantise). SHIFT + tap: latch on / off. With the sets screen open, pads 1-5: load, save here, save new, delete, transition." },
+    { k: "fx", fn: c => FXN[c], sh: "latch", shL: c => "latch " + FXN[c], t: "Performance FX", d: "Hold: the effect runs while held (start and end snap to the step or beat: System > quantise). SHIFT + tap: latch on / off. With the sets screen open, pads 1-5: load, save here, save new, delete, transition." },
     { k: "trig", fn: c => "play " + (c + 1), sh: "", t: "Play the tracks by hand", d: "Tap: plays that strip's track (and records it into the pattern while record is on). With a 303 track selected: a one-octave keyboard." },
   ];
-  rows.forEach((R, r) => { for (let c = 0; c < 8; c++) add({ x: gx(c), y: gy(r), w: 54, h: 40, cls: "pad " + R.k, hw: "CLIP LAUNCH row " + (r + 1) + ", pad " + (c + 1), fn: R.fn(c), sh: typeof R.sh === "function" ? R.sh(c) : R.sh, t: R.t, d: R.d }); });
-  for (let r = 0; r < 5; r++) add({ x: gx(8) + 6, y: gy(r), w: 54, h: 40, cls: "pad kit", hw: "SCENE LAUNCH " + (r + 1), fn: "kit " + (r + 1), sh: "", t: "Load a kit", d: "Loads kit " + (r + 1) + " of the current kit page into the 8 tracks on the strips. BANK SELECT up / down turns the kit page (5 kits each). A track holding a recording, and a 303 track, keep what they have. Undo: the ← under the device knobs." });
-  const strip = (y, h, hw, fn, sh, t, d, cls) => { for (let c = 0; c < 8; c++) add({ x: gx(c), y, w: 54, h, cls: "btn " + (cls || ""), hw: hw + " " + (c + 1), fn: fn, sh, t, d }); };
-  strip(290, 30, "CLIP STOP", "hear", "clear", "Hear the track", "Tap: plays the track's sound once. SHIFT + tap: clears that track in the current pattern (undo: SHIFT + CLIP/TRACK).");
-  add({ x: gx(8) + 6, y: 290, w: 54, h: 30, cls: "btn warn", hw: "STOP ALL CLIPS", fn: "panic", sh: "reset 1 s", t: "All FX off, all sound off", d: "Tap: every held or latched FX off and all sound stops. SHIFT + hold for 1 second: full reset (patterns, kits, settings)." });
-  strip(340, 34, "TRACK SELECTION", "select", "", "Select the track", "Tap: selects the track for the steps, the device knobs and the keyboard. While CLIP/TRACK is held: picks pattern bank A-H.");
-  add({ x: gx(8) + 6, y: 340, w: 54, h: 34, cls: "btn", hw: "MASTER", fn: "record", sh: "", t: "Record on / off", d: "Tap: record mode. While it is on, what you play on the bottom pad row goes into the pattern." });
-  strip(392, 24, "ACTIVATOR", "mute", "", "Mute", "Tap: mute on / off (at once, or on the beat or bar: System > quantise).", "g");
-  strip(422, 24, "SOLO / CUE", "solo", "A / B", "Solo", "Tap: solo on / off. SHIFT + tap: which side of the crossfader the track is on: both, A (left), B (right).");
-  strip(452, 24, "RECORD ARM", "roll", "", "Roll", "Hold: the track repeats (roll) for as long as it is held.");
-  for (let c = 0; c < 8; c++) add({ x: gx(c) + 14, y: 492, w: 26, h: 236, cls: "fader", hw: "Fader " + (c + 1), fn: "level", sh: "", t: "Track level", d: "The track's level. After switching between tracks 1-8 and 9-16 a fader has to pass the stored level before it takes over (the screen says go up / go down)." });
-  add({ x: gx(8) + 20, y: 492, w: 26, h: 236, cls: "fader", hw: "MASTER fader", fn: "master", sh: "", t: "Master level", d: "The level of everything." });
-  add({ x: gx(8) + 8, y: 392, w: 50, h: 50, cls: "knob", hw: "CUE LEVEL", fn: "filter", sh: "", t: "Master filter", d: "Endless knob: low-pass to the left, high-pass to the right, off in the middle (it stops there on the way through)." });
+  const f = (x, c) => typeof x === "function" ? x(c) : x;
+  rows.forEach((R, r) => { for (let c = 0; c < 8; c++) add({ cid: r * 8 + c, grp: "g" + r, col: c, x: gx(c), y: gy(r), w: 54, h: 40, cls: "pad " + R.k, hw: "CLIP LAUNCH row " + (r + 1) + ", pad " + (c + 1), fn: R.fn(c), sh: f(R.sh, c), shL: R.shL ? R.shL(c) : f(R.sh, c), t: R.t, d: R.d }); });
+  for (let r = 0; r < 5; r++) add({ cid: 40 + r, x: gx(8) + 6, y: gy(r), w: 54, h: 40, cls: "pad kit", hw: "SCENE LAUNCH " + (r + 1), fn: "kit " + (r + 1), sh: "", t: "Load a kit", d: "Loads kit " + (r + 1) + " of the current kit page into the 8 tracks on the strips. BANK SELECT up / down turns the kit page (5 kits each). A track holding a recording, and a 303 track, keep what they have. Undo: the ← under the device knobs." });
+  const strip = (k, y, h, hw, fn, sh, t, d, cls) => { for (let c = 0; c < 8; c++) add({ cid: 45 + k * 8 + c, grp: "s" + k, col: c, x: gx(c), y, w: 54, h, cls: "btn " + (cls || ""), hw: hw + " " + (c + 1), fn, fnL: fn + " " + (c + 1), sh, shL: sh ? sh + " " + (c + 1) : "", t, d }); };
+  strip(4, 290, 30, "CLIP STOP", "hear", "clear", "Hear the track", "Tap: plays the track's sound once. SHIFT + tap: clears that track in the current pattern (undo: SHIFT + CLIP/TRACK).");
+  add({ cid: 86, x: gx(8) + 6, y: 290, w: 54, h: 30, cls: "btn warn", hw: "STOP ALL CLIPS", fn: "panic", sh: "reset 1 s", t: "All FX off, all sound off", d: "Tap: every held or latched FX off and all sound stops. SHIFT + hold for 1 second: full reset (patterns, kits, settings, and this button map)." });
+  strip(3, 340, 34, "TRACK SELECTION", "select", "", "Select the track", "Tap: selects the track for the steps, the device knobs and the keyboard. While CLIP/TRACK is held: picks pattern bank A-H.");
+  add({ cid: 85, x: gx(8) + 6, y: 340, w: 54, h: 34, cls: "btn", hw: "MASTER", fn: "record", sh: "", t: "Record on / off", d: "Tap: record mode. While it is on, what you play on the bottom pad row goes into the pattern." });
+  strip(2, 392, 24, "ACTIVATOR", "mute", "", "Mute", "Tap: mute on / off (at once, or on the beat or bar: System > quantise).", "g");
+  strip(1, 422, 24, "SOLO / CUE", "solo", "A / B", "Solo", "Tap: solo on / off. SHIFT + tap: which side of the crossfader the track is on: both, A (left), B (right).");
+  strip(0, 452, 24, "RECORD ARM", "roll", "", "Roll", "Hold: the track repeats (roll) for as long as it is held.");
+  for (let c = 0; c < 8; c++) add({ ccid: 16 + c, x: gx(c) + 14, y: 492, w: 26, h: 236, cls: "fader", hw: "Fader " + (c + 1), fn: "level", fnL: "level " + (c + 1), sh: "", t: "Track level", d: "The track's level. After switching between tracks 1-8 and 9-16 a fader has to pass the stored level before it takes over (the screen says go up / go down)." });
+  add({ ccid: 24, x: gx(8) + 20, y: 492, w: 26, h: 236, cls: "fader", hw: "MASTER fader", fn: "master", sh: "", t: "Master level", d: "The level of everything." });
+  add({ ccid: 26, x: gx(8) + 8, y: 392, w: 50, h: 50, cls: "knob", hw: "CUE LEVEL", fn: "filter", sh: "", fixed: "This knob is endless (it sends steps, not positions), so it can't swap jobs with the others.", t: "Master filter", d: "Endless knob: low-pass to the left, high-pass to the right, off in the middle (it stops there on the way through)." });
   const kx = i => 650 + (i % 4) * 84, pages = "PAN: pan of tracks 1-8 · SEND A: reverb send · SEND B: delay send · SEND C: global (1 tempo, 2 swing, 3 reverb size, 4 reverb tone, 5 delay time, 6 delay feedback, 7 drive, 8 FX return)";
   const glob = ["tempo", "swing", "rev size", "rev tone", "dly time", "dly fb", "drive", "fx ret"];
-  for (let i = 0; i < 8; i++) add({ x: kx(i), y: 44 + (i >> 2) * 66, w: 52, h: 52, cls: "knob", hw: "TRACK CONTROL knob " + (i + 1), fn: "pan/send", sh: glob[i], shl: "SEND C", t: "Per-track pan and sends, or the global knobs", d: "What the 8 knobs do depends on the button below them. " + pages + "." });
-  [["PAN", "pan"], ["SEND A", "reverb"], ["SEND B", "delay"], ["SEND C", "global"]].forEach(([hw, fn], i) => add({ x: kx(i) - 8, y: 180, w: 68, h: 26, cls: "btn g", hw, fn, sh: "", t: "What the TRACK CONTROL knobs do", d: pages + "." }));
-  add({ x: 640, y: 246, w: 62, h: 30, cls: "btn warn", hw: "SHIFT", fn: "SHIFT", sh: "tap: 1-8 / 9-16", shl: "", t: "Modifier", d: "Hold with another control for its second function (the amber text on this map). Tap it alone: the strips switch between tracks 1-8 and 9-16." });
-  const bk = (hw, x, y, fn, sh, d) => add({ x, y, w: 40, h: 26, cls: "btn", hw: "BANK SELECT " + hw, fn, sh, t: "Kit page / sample folder", d });
-  bk("up", 762, 226, "kit pg −", "", "Previous page of kits for the SCENE LAUNCH buttons. With a 303 track selected: keyboard octave up.");
-  bk("down", 762, 284, "kit pg +", "", "Next page of kits for the SCENE LAUNCH buttons. With a 303 track selected: keyboard octave down.");
-  bk("left", 718, 255, "folder −", "", "Previous sample folder on the card; its first sample goes into the selected track. Undo with the ← under the device knobs.");
-  bk("right", 806, 255, "folder +", "", "Next sample folder on the card; its first sample goes into the selected track. Undo with the ← under the device knobs.");
-  add({ x: 884, y: 226, w: 62, h: 34, cls: "btn", hw: "TAP TEMPO", fn: "tap", sh: "", t: "Tap tempo", d: "Tap in time: the tempo follows the last taps." });
-  add({ x: 862, y: 276, w: 50, h: 24, cls: "btn", hw: "NUDGE −", fn: "−1 bpm", sh: "−5", t: "Tempo down", d: "Tap: 1 BPM slower. SHIFT + tap: 5 BPM slower." });
-  add({ x: 918, y: 276, w: 50, h: 24, cls: "btn", hw: "NUDGE +", fn: "+1 bpm", sh: "+5", t: "Tempo up", d: "Tap: 1 BPM faster. SHIFT + tap: 5 BPM faster." });
+  for (let i = 0; i < 8; i++) add({ ccid: i, x: kx(i), y: 44 + (i >> 2) * 66, w: 52, h: 52, cls: "knob", hw: "TRACK CONTROL knob " + (i + 1), fn: "pan/send", fnL: "pan/send " + (i + 1), sh: glob[i], shl: "SEND C", t: "Per-track pan and sends, or the global knobs", d: "What the 8 knobs do depends on the button below them. " + pages + "." });
+  [["PAN", "pan"], ["SEND A", "reverb"], ["SEND B", "delay"], ["SEND C", "global"]].forEach(([hw, fn], i) => add({ cid: 87 + i, x: kx(i) - 8, y: 180, w: 68, h: 26, cls: "btn g", hw, fn, fnL: "knobs: " + fn, sh: "", t: "What the TRACK CONTROL knobs do", d: pages + "." }));
+  add({ cid: 98, x: 640, y: 246, w: 62, h: 30, cls: "btn warn", hw: "SHIFT", fn: "SHIFT", sh: "tap: 1-8 / 9-16", shl: "", fixed: "SHIFT stays SHIFT: every second function hangs on it.", t: "Modifier", d: "Hold with another control for its second function (the amber text on this map). Tap it alone: the strips switch between tracks 1-8 and 9-16." });
+  const bk = (cid, hw, x, y, fn, d) => add({ cid, x, y, w: 40, h: 26, cls: "btn", hw: "BANK SELECT " + hw, fn, sh: "", t: "Kit page / sample folder", d });
+  bk(94, "up", 762, 226, "kit pg −", "Previous page of kits for the SCENE LAUNCH buttons. With a 303 track selected: keyboard octave up.");
+  bk(95, "down", 762, 284, "kit pg +", "Next page of kits for the SCENE LAUNCH buttons. With a 303 track selected: keyboard octave down.");
+  bk(97, "left", 718, 255, "folder −", "Previous sample folder on the card; its first sample goes into the selected track. Undo with the ← under the device knobs.");
+  bk(96, "right", 806, 255, "folder +", "Next sample folder on the card; its first sample goes into the selected track. Undo with the ← under the device knobs.");
+  add({ cid: 99, x: 884, y: 226, w: 62, h: 34, cls: "btn", hw: "TAP TEMPO", fn: "tap", fnL: "tap tempo", sh: "", t: "Tap tempo", d: "Tap in time: the tempo follows the last taps." });
+  add({ cid: 101, x: 862, y: 276, w: 50, h: 24, cls: "btn", hw: "NUDGE −", fn: "−1 bpm", sh: "−5", shL: "−5 bpm", t: "Tempo down", d: "Tap: 1 BPM slower. SHIFT + tap: 5 BPM slower." });
+  add({ cid: 100, x: 918, y: 276, w: 50, h: 24, cls: "btn", hw: "NUDGE +", fn: "+1 bpm", sh: "+5", shL: "+5 bpm", t: "Tempo up", d: "Tap: 1 BPM faster. SHIFT + tap: 5 BPM faster." });
   const dv = ["pitch", "decay", "filter", "reso", "start", "reverse", "drive", "chance"], ac = ["cutoff", "reso", "env mod", "decay", "accent", "tune", "slide", "wave"];
-  for (let i = 0; i < 8; i++) add({ x: kx(i), y: 330 + (i >> 2) * 66, w: 52, h: 52, cls: "knob", hw: "DEVICE CONTROL knob " + (i + 1), fn: dv[i], sh: ac[i], shl: "303", t: "The selected track's sound", d: "Sample track: " + dv.map((n, k) => (k + 1) + " " + n).join(", ") + " (chance = how often a step plays). 303 track: " + ac.map((n, k) => (k + 1) + " " + n).join(", ") + "; knob 1 while a step is held sets that step's note." });
-  const db = (i, hw, fn, sh, t, d, cls) => add({ x: kx(i % 4) - 8, y: 466 + (i >> 2) * 40, w: 68, h: 30, cls: "btn " + (cls || ""), hw, fn, sh, t, d });
+  for (let i = 0; i < 8; i++) add({ ccid: 8 + i, x: kx(i), y: 330 + (i >> 2) * 66, w: 52, h: 52, cls: "knob", hw: "DEVICE CONTROL knob " + (i + 1), fn: dv[i], sh: ac[i], shl: "303", t: "The selected track's sound", d: "Sample track: " + dv.map((n, k) => (k + 1) + " " + n).join(", ") + " (chance = how often a step plays). 303 track: " + ac.map((n, k) => (k + 1) + " " + n).join(", ") + "; knob 1 while a step is held sets that step's note." });
+  const db = (i, hw, fn, sh, t, d, cls) => add({ cid: 102 + i, x: kx(i % 4) - 8, y: 466 + (i >> 2) * 40, w: 68, h: 30, cls: "btn " + (cls || ""), hw, fn, sh, t, d });
   db(0, "CLIP/TRACK", "copy (hold)", "undo edit", "Copy patterns", "Hold, then on pad row 3: tap the source pattern, then the target. Double tap a pattern: clear it (with SHIFT: only the selected track). Hold + TRACK SELECTION: bank A-H. SHIFT + tap: undo the last pattern edit.");
   db(1, "DEVICE ON/OFF", "track type", "reset knobs", "Sample or 303", "Tap: the selected track goes card sample → kit sound → 303 → kit sound. SHIFT + tap: the track's knobs back to their defaults.");
   db(2, "◄", "undo", "sample −", "Undo", "Tap: undo the last looper take, a sample changed by accident, or a kit loaded by accident. SHIFT + tap: previous sample in the folder, into the selected track.", "am");
@@ -1625,44 +1640,137 @@ function apcMap() {
   db(5, "REC QUANTIZATION", "", "reload", "Reload the project", "SHIFT + tap: loads the project saved on the card again. Alone: nothing yet.");
   db(6, "MIDI OVERDUB", "overdub", "", "Overdub the loop", "Tap: record on top of the selected track's loop, in time, only at the loop's own tempo. Tap again: stop.", "warn");
   db(7, "METRONOME", "click", "monitor", "Metronome", "Tap: click on / off. SHIFT + tap: hear the audio input all the time.");
-  add({ x: 690, y: 566, w: 64, h: 44, cls: "pad g", hw: "PLAY", fn: "play", sh: "", t: "Play", d: "Starts the sequencer from the top of the bar." });
-  add({ x: 780, y: 566, w: 64, h: 44, cls: "pad", hw: "STOP", fn: "stop", sh: "", t: "Stop", d: "Stops the sequencer." });
-  add({ x: 870, y: 566, w: 64, h: 44, cls: "pad warn", hw: "REC", fn: "rec loop", sh: "drop loop", t: "Record a live loop", d: "Tap: records the audio input into the selected track as a loop, from the next bar (or beat); tap again: ends with the bar. Take length, count-in and start are set on Samples > looper. SHIFT + tap: drops the track's loop, back to its kit sound." });
-  add({ x: 700, y: 672, w: 230, h: 30, cls: "fader h", hw: "Crossfader", fn: "A ◄ crossfader ► B", sh: "", t: "Crossfader", d: "Fades between the tracks on side A and side B (SHIFT + SOLO sets a track's side). The middle is both at full." });
+  add({ cid: 91, x: 690, y: 566, w: 64, h: 44, cls: "pad g", hw: "PLAY", fn: "play", sh: "", t: "Play", d: "Starts the sequencer from the top of the bar." });
+  add({ cid: 92, x: 780, y: 566, w: 64, h: 44, cls: "pad", hw: "STOP", fn: "stop", sh: "", t: "Stop", d: "Stops the sequencer." });
+  add({ cid: 93, x: 870, y: 566, w: 64, h: 44, cls: "pad warn", hw: "REC", fn: "rec loop", sh: "drop loop", t: "Record a live loop", d: "Tap: records the audio input into the selected track as a loop, from the next bar (or beat); tap again: ends with the bar. Take length, count-in and start are set on Samples > looper. SHIFT + tap: drops the track's loop, back to its kit sound." });
+  add({ ccid: 25, x: 700, y: 672, w: 230, h: 30, cls: "fader h", hw: "Crossfader", fn: "A ◄ crossfader ► B", fnL: "crossfader", sh: "", t: "Crossfader", d: "Fades between the tracks on side A and side B (SHIFT + SOLO sets a track's side). The middle is both at full." });
   return C;
 }
-let mapSel = -1;
+let mapSel = -1, mapPick = null, mapSure = false;   /* mapPick: { i, layer, row, opt } while choosing a new job */
 V.map = {
   build() {
     view.className = "v"; view.style.gridTemplateRows = PHONE ? "auto 1fr auto" : "auto 1fr";
-    if (!PHONE) view.style.gridTemplateColumns = SHORT ? "1fr 230px" : "1fr 420px";
+    if (!PHONE) view.style.gridTemplateColumns = SHORT ? "1fr 250px" : "1fr 440px";
     const hdr = el("div", "hdr"); if (!PHONE) hdr.style.gridColumn = "span 2";
-    const back = el("button", "b", "‹ System"); back.style.cssText = "padding:0 12px;height:" + sz(32, 30, 24) + "px"; back.onclick = () => show("system");
-    const key = el("span", "lbl"); key.innerHTML = 'APC40 map · white: alone · <b style="color:var(--amber)">amber: with SHIFT</b> · <b style="color:#6fb3ff">blue: on SEND C / on a 303 track</b> · tap a control';
-    hdr.append(back, key);
+    const back = el("button", "b", "‹ System"); back.style.cssText = "padding:0 12px;height:" + sz(32, 30, 24) + "px"; back.onclick = () => { mapPick = null; show("system"); };
+    const key = el("span", "lbl"); key.innerHTML = (PHONE ? "" : "APC40 map · ") + 'white: alone · <b style="color:var(--amber)">amber: SHIFT</b>' + (PHONE ? "" : ' · <b style="color:#6fb3ff">blue: on SEND C / a 303 track</b> · dashed: changed');
+    this.reset = el("button", "b", "RESET ALL"); this.reset.style.cssText = "padding:0 12px;height:" + sz(32, 30, 24) + "px";
+    this.reset.onclick = () => { if (!mapSure) { mapSure = true; this.M(); return; } mapSure = false; mapPick = null; act("map reset"); this.M(); };
+    hdr.append(back, key, el("span", "sp"), this.reset);
     const wrap = el("div", "apcwrap"), board = el("div", "apc"); wrap.appendChild(board);
     this.info = el("div", "apcinfo");
-    this.ctl = apcMap(); this.els = [];
+    this.ctl = apcMap(); this.els = []; this.byCid = {}; this.byCc = {};
     this.ctl.forEach((c, i) => {
+      if (c.cid != null) this.byCid[c.cid] = c; else this.byCc[c.ccid] = c;
       const d = el("div", "ac " + c.cls); d.style.cssText = `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px`;
-      if (c.cls.startsWith("knob")) { d.append(el("i")); const t = el("span", "akn"); t.append(el("b", "", c.fn)); if (c.sh) t.append(el("em", c.shl ? "alt" : "", c.sh)); d.append(t); }
-      else { if (c.fn) d.append(el("b", "", c.fn)); if (c.sh) d.append(el("em", "", c.sh)); }
-      d.onclick = () => { mapSel = i; this.sel(); };
+      const b = el("b"), e = el("em"); c.b = b; c.e = e;
+      if (c.cls.startsWith("knob")) { d.append(el("i")); const t = el("span", "akn"); t.append(b, e); d.append(t); } else d.append(b, e);
+      d.onclick = () => this.tap(i);
       board.appendChild(d); this.els.push(d);
     });
     [["CLIP LAUNCH", 30, 24], ["SCENE", 536, 24], ["TRACK CONTROL", 650, 24], ["DEVICE CONTROL", 650, 310], ["CLIP STOP", 30, 278], ["TRACK SELECTION", 30, 328]].forEach(([t, x, y]) => { const l = el("span", "al", t); l.style.cssText = `left:${x}px;top:${y}px`; board.appendChild(l); });
     view.append(hdr, wrap, this.info);
     const fitB = () => { const w = wrap.clientWidth, h = wrap.clientHeight, k = Math.min(w / 1000, h / 750); board.style.transform = `scale(${k})`; board.style.left = Math.max(0, (w - 1000 * k) / 2) + "px"; };
-    requestAnimationFrame(fitB); this.F = fitB;
-    this.sel();
+    requestAnimationFrame(fitB);
+    this.M();
   },
-  sel() {
-    this.els.forEach((e, i) => e.classList.toggle("sel", i === mapSel));
-    const c = this.ctl[mapSel]; this.info.textContent = "";
-    if (!c) { this.info.append(el("h3", "", "Tap a control"), el("p", "", "Every button, knob and fader of the APC40 as ApcBox uses it today. Changing what they do comes next.")); return; }
-    this.info.append(el("span", "lbl", c.hw), el("h3", "", c.t));
-    const r = el("div", "apcfn"); r.append(el("b", "", c.fn || "nothing")); if (c.sh) { const e = el("em", c.shl ? "alt" : "", (c.shl != null ? c.shl : "SHIFT") + (c.shl === "" ? "" : ": ") + c.sh); r.append(e); }
-    this.info.append(r, el("p", "", c.d));
+  /* the job behind a map entry, as words: [short, long] */
+  job(e) {
+    if (e === 255) return ["", "nothing", ""];
+    const l = e & 127, sh = e >> 7, v = MAP_VIRT.find(x => x[0] === l);
+    if (v) return [v[1], v[2], v[1]];
+    const c = this.byCid[l]; if (!c) return ["?", "?", "?"];
+    return sh ? [c.sh, c.shL || "nothing", c.shL] : [c.fn, c.fnL || "nothing", c.fnL];
+  },
+  /* what control c does now: { a, s } entries for a button, { k } for a knob; std = unchanged */
+  now(c) {
+    if (c.cid != null) { const m = st.bmap && st.bmap[c.cid]; return m ? { a: m[0], s: m[1], std: m[0] === c.cid && m[1] === (c.cid | 128) } : { a: c.cid, s: c.cid | 128, std: true }; }
+    const k = st.cmap ? st.cmap[c.ccid] : c.ccid; return { k, std: k === c.ccid };
+  },
+  M() {
+    if (!this.els) return;
+    this.ctl.forEach((c, i) => {
+      const n = this.now(c), d = this.els[i];
+      if (c.cid != null) {
+        if (c.cid === 98) { c.b.textContent = c.fn; c.e.textContent = c.sh; }
+        else { c.b.textContent = n.std ? c.fn : this.job(n.a)[n.a === c.cid ? 0 : 2] || ""; c.e.textContent = n.std ? c.sh : this.job(n.s)[n.s === (c.cid | 128) ? 0 : 2] || ""; c.e.className = ""; }
+      } else {
+        const t = n.k === 255 ? null : this.byCc[n.k];
+        c.b.textContent = n.std ? c.fn : t ? t.fnL : ""; c.e.textContent = n.std ? c.sh : t ? (t.shl ? t.sh : "") : ""; c.e.className = (n.std ? c.shl : t && t.shl) ? "alt" : "";
+      }
+      d.classList.toggle("chg", !n.std); d.classList.toggle("sel", i === mapSel);
+      d.classList.toggle("src", !!mapPick && mapPick.i === i);
+    });
+    this.reset.textContent = mapSure ? "SURE?" : "RESET ALL"; this.reset.classList.toggle("warn", mapSure);
+    this.reset.disabled = !st.bmap;
+    this.panel();
+  },
+  tap(i) {
+    const c = this.ctl[i]; mapSure = false;
+    if (!mapPick) { mapSel = i; return this.M(); }
+    const P = this.ctl[mapPick.i];
+    if (c.fixed) return this.M();
+    if (P.cid != null) {
+      if (c.cid == null) return this.M();                   /* a button can't do a knob's job */
+      if (c.sh && c.cid !== P.cid && !mapPick.opt) { mapPick.opt = i; return this.M(); }   /* it has two jobs: ask which */
+      this.assign(c.cid, P.cid === c.cid ? mapPick.layer : 0);
+    } else {
+      if (c.ccid == null) return this.M();
+      act(`map c ${P.ccid} ${c.ccid}`); mapPick = null; this.M();
+    }
+  },
+  /* give the picked control (and maybe its whole row) job l, t = its SHIFT job */
+  assign(l, t) {
+    const P = this.ctl[mapPick.i], T = this.byCid[l], s = mapPick.layer;
+    if (mapPick.row && P.grp && T && T.grp) {
+      for (let k = 0; k < 8; k++) act(`map b ${P.cid - P.col + k} ${s} ${l - T.col + k} ${t}`);
+    } else if (mapPick.row && P.grp) { for (let k = 0; k < 8; k++) act(`map b ${P.cid - P.col + k} ${s} ${l} ${t}`); }
+    else act(`map b ${P.cid} ${s} ${l} ${t}`);
+    mapPick = null; this.M();
+  },
+  panel() {
+    const I = this.info, c = this.ctl[mapSel]; I.textContent = "";
+    const btn = (t, f, cls) => { const b = el("button", "b " + (cls || ""), t); b.onclick = f; return b; };
+    if (mapPick) {
+      const P = this.ctl[mapPick.i];
+      I.append(el("span", "lbl", P.hw + (P.cid != null ? (mapPick.layer ? " with SHIFT" : " alone") : "")));
+      if (mapPick.opt != null) {
+        const T = this.ctl[mapPick.opt]; I.append(el("h3", "", T.hw + " has two jobs. Which one?"));
+        const r = el("div", "apcbtns"); r.append(btn(T.fnL || "nothing", () => this.assign(T.cid, 0), "act"), btn("SHIFT: " + T.shL, () => this.assign(T.cid, 1), "am"), btn("cancel", () => { mapPick = null; this.M(); }));
+        I.append(r); return;
+      }
+      I.append(el("h3", "", P.cid != null ? "Tap the control whose job it should do" : "Tap the knob or fader whose job it should do"));
+      const r = el("div", "apcbtns");
+      if (P.cid != null) {
+        if (P.grp) { const w = btn("whole row", () => { mapPick.row = !mapPick.row; this.M(); }, mapPick.row ? "on" : ""); r.append(w); }
+        r.append(btn("nothing", () => { const s = mapPick.layer; if (mapPick.row && P.grp) for (let k = 0; k < 8; k++) act(`map b ${P.cid - P.col + k} ${s} 255 0`); else act(`map b ${P.cid} ${s} 255 0`); mapPick = null; this.M(); }));
+        r.append(btn("as printed", () => this.assign(P.cid, mapPick.layer)));
+        for (const v of MAP_VIRT) r.append(btn(v[2], () => { mapPick.row = false; this.assign(v[0], 0); }, "act"));
+      } else r.append(btn("as printed", () => { act(`map c ${P.ccid} ${P.ccid}`); mapPick = null; this.M(); }));
+      r.append(btn("cancel", () => { mapPick = null; this.M(); }));
+      I.append(r);
+      if (P.cid != null) I.append(el("p", "", "Or one of the jobs above that no button has. With \"whole row\" on, the 8 buttons of the row get the 8 jobs of the row you tap."));
+      return;
+    }
+    if (!c) { I.append(el("h3", "", "Tap a control"), el("p", "", st.bmap ? "Every button, knob and fader of the APC40. Tap one to see what it does and to give it another job; its light follows. The layout is saved on the Daisy's SD card." : "Every button, knob and fader of the APC40 as ApcBox uses it. Changing them needs firmware v13.15 or newer on the Daisy.")); return; }
+    const n = this.now(c);
+    I.append(el("span", "lbl", c.hw));
+    if (c.cid != null) {
+      const row = (label, e, layer, std) => { const r = el("div", "apcrow"), j = this.job(e); r.append(el("span", "lbl", label), el(layer ? "em" : "b", "", j[1] || "nothing"));
+        if (st.bmap && !c.fixed) { r.append(el("span", "sp"), btn("CHANGE", () => { mapPick = { i: mapSel, layer, row: false, opt: null }; this.M(); }, "act")); if (!std) r.append(btn("↺", () => act(`map b ${c.cid} ${layer} ${c.cid} ${layer}`))); }
+        return r; };
+      if (c.cid === 98) I.append(el("h3", "", c.t)); else I.append(row("alone", n.a, 0, n.a === c.cid), row("SHIFT", n.s, 1, n.s === (c.cid | 128)));
+      if (c.fixed) I.append(el("p", "", c.fixed));
+      /* the description belongs to the job, so show the one of the control whose job this does alone */
+      const src = n.a === 255 ? null : (MAP_VIRT.find(x => x[0] === (n.a & 127)) || this.byCid[n.a & 127]);
+      if (n.std) I.append(el("p", "", c.d));
+      else if (Array.isArray(src)) I.append(el("p", "", src[3]));
+      else if (src) I.append(el("p", "", "Does the job printed on " + src.hw + ". " + src.d));
+    } else {
+      const t = n.k === 255 ? null : this.byCc[n.k], r = el("div", "apcrow"); r.append(el("span", "lbl", "does"), el("b", "", n.std ? c.t : t ? t.hw + ": " + t.t : "nothing"));
+      if (st.cmap && !c.fixed) { r.append(el("span", "sp"), btn("CHANGE", () => { mapPick = { i: mapSel, layer: 0, row: false, opt: null }; this.M(); }, "act")); if (!n.std) r.append(btn("↺", () => act(`map c ${c.ccid} ${c.ccid}`))); }
+      I.append(r); if (c.fixed) I.append(el("p", "", c.fixed)); I.append(el("p", "", (t || c).d));
+    }
   },
   S() { },
 };
@@ -1746,6 +1854,9 @@ function line(l) {
     case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
     case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; st.kitNb = f.length > 3 ? f[3] : null; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
     case "CK": st.ext = rest[0] === "1"; topStatus(); break;
+    case "MB": { const i = rest.indexOf(" "), from = +rest.slice(0, i), h = rest.slice(i + 1); if (!st.bmap) st.bmap = [];
+      for (let k = 0; k * 4 + 3 < h.length; k++) st.bmap[from + k] = [parseInt(h.substr(k * 4, 2), 16), parseInt(h.substr(k * 4 + 2, 2), 16)]; call("M"); break; }
+    case "MC": st.cmap = (rest.match(/../g) || []).map(x => parseInt(x, 16)); call("M"); break;
     case "LP": { const f = rest.split(" ").map(Number); if (f.length < 8) break;
       const o = { len: f[0], count: f[1], qrec: f[2], qpat: f[3], qmute: f[4], gain: f[5], mode: f[6], undo: f[7], redo: f[8] || 0, qfx: f.length > 9 ? f[9] : 0 };
       for (const k in o) if (!isBusy("lp." + k)) st.lp[k] = o[k]; call("P"); call("S"); break; }
@@ -1753,7 +1864,7 @@ function line(l) {
     case "V": st.ver = +rest; topStatus(); call("B"); break;
   }
 }
-const REPORT_VERSION = 15;
+const REPORT_VERSION = 16;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");
