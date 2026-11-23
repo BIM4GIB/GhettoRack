@@ -1673,6 +1673,7 @@ class PageControlTest(unittest.TestCase):
                 pg = b.new_page(viewport=vp)
                 pg.on("pageerror", lambda e: errors.append(str(e)))
                 pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+                self.do("pat 1", "step 1 2 3 2")                                          # an accent on pattern 1
                 for v in ("perform", "steps", "mixer", "sound", "samples", "samples&sm=rec", "samples&sm=kits", "samples&sm=loop", "map", "patterns",
                           "patterns&pt=sets", "fx", "system"):
                     pg.goto(url + "?v=" + v + ("&tv=1" if name == "tv" else ""))
@@ -1687,6 +1688,14 @@ class PageControlTest(unittest.TestCase):
                             if (r.width && (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1)) bad.push(e.className); }
                         return [document.querySelectorAll('.tab').length, bad]; }""")
                     self.assertEqual(out, [8, []], "%s %s: something is off the screen" % (name, v))
+                    if v == "steps":
+                        # an accented step stays in its row (its class once collided with the APC40 map's)
+                        g = pg.evaluate("""() => { const c = [...document.querySelectorAll('.grid .sc')]; let bad = 0;
+                            for (let r = 0; r < c.length / 16; r++) if (new Set(c.slice(r * 16, r * 16 + 16).map(e => Math.round(e.getBoundingClientRect().top))).size > 1) bad++;
+                            return [c.length, bad, document.querySelectorAll('.grid .sc.ac').length,
+                                    c.filter(e => getComputedStyle(e).position !== 'static').length]; }""")
+                        self.assertEqual((g[0], g[1], g[3]), (256, 0, 0), "%s: step cells out of their rows" % name)
+                        self.assertGreater(g[2], 0, "no accented step to check with")
                     mode = pg.evaluate("document.body.className")
                     self.assertEqual("short" in mode, "sideways" in name, "%s got layout '%s'" % (name, mode))
                     self.assertEqual("phone" in mode, name in ("phone", "phone-big", "ipad-upright"), "%s got layout '%s'" % (name, mode))
