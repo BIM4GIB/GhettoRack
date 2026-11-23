@@ -57,7 +57,7 @@ Sound and Steps show the editor that fits the selected track's type.
 | Selector | pick a mode | built (`selector.html`) |
 | MIDI hub | routing grid, network devices, presets | built (`midihub.html`), same look |
 | Clock | tempo, source, outputs, timing | built (`clock.html`), same look |
-| Settings | remote buttons, start-up, TV sound, network name | in the selector today; own view planned |
+| Settings | `/settings` (`t95/ui/settings.html`): Network, Hotspot, Bluetooth, System (start-up delay, PIN, power), Devices (TV sound), Remote (the remote's buttons per profile). The start screen holds only the modules and the way here | built; hotspot not working on the rig yet |
 | Cubase sync | plugin status, Cubase's transport | later |
 | Numark DJ | decks with scrolling waveforms, mixer, library | later |
 

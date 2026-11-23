@@ -377,8 +377,9 @@ class HelperTest(unittest.TestCase):
                 time.sleep(0.05)
             self.assertTrue(f())
         name = socket.gethostname()
-        self.assertEqual(hot(), {"set": False, "auto": True, "tool": True, "on": False, "by": "", "clients": 0, "ssid": name, "addr": "10.42.0.1"})
+        self.assertEqual(hot(), {"set": False, "auto": False, "tool": True, "on": False, "by": "", "clients": 0, "ssid": name, "addr": "10.42.0.1"})
         # no password: no hotspot, by hand or by itself (never an open one)
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, auto=True), {"ok": True})
         self.assertIn("PIN", self.ask(cmd="hotspot", on=True)["error"])
         self.assertIn("password first", self.ask(cmd="hotspot", pin=P, on=True)["error"])
         w.air = []

@@ -93,10 +93,12 @@ them one on the map (REC still arms a loop).
   join as a trial that goes back by itself (seconds on a wrong password), forget, box name; Bluetooth
   on/off (needs `sudo t95/helper/get-bt-tool.sh` once); restart bridge,
   reboot, shut down, start-up delay; a PIN for everything that changes the
-  box; devices (Daisy, controllers). The box's own hotspot when no known
-  Wi-Fi is around is built (2026-11-23), not yet run on the T95. Still to build: Bluetooth pairing and
-  Bluetooth MIDI, sound cards and SD cards under Devices, the remote's
-  buttons moved over from the start screen, TV remote navigation on the page.
+  box; devices (Daisy, controllers). The box's own hotspot is built (2026-11-23)
+  but parked: on the rig the phone joined it and the page at its address
+  didn't load (not looked into; "by itself" is off by default until it
+  works). The remote's buttons and TV sound moved from the start screen
+  to Settings (Remote, Devices); the TV remote walks the Settings page. Still to build: Bluetooth pairing and
+  Bluetooth MIDI, sound cards and SD cards under Devices, typing a PIN with the TV remote.
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),
   but the error and info banners are ugly and stay too long. UI pass later.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and

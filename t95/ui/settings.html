@@ -48,6 +48,14 @@ h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)
 .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-family:var(--mono);font-size:14px}
 .kv span:nth-child(odd){color:var(--dim)}
 p{margin:0;color:#b9bec5}
+.ir{flex:1;min-height:0;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));grid-auto-rows:min-content;gap:4px 14px;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.irr{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:6px}
+.irr .a{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.irr button{height:30px;padding:0 8px;font:12px var(--mono);width:78px;color:var(--dim)}
+.irr button.set{color:var(--green);border-color:#2f6a3f}.irr button.wait{color:var(--amber);border-color:var(--amber)}
+.irr .x{width:26px;padding:0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}.tabs button{height:30px;padding:0 10px;font-size:13px}.tabs button.sel{color:var(--amber);border-color:var(--amber)}
+body.rc :focus{outline:2px solid var(--amber);outline-offset:1px}
 code{font-family:var(--mono);background:#0f1113;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
 header a{white-space:nowrap}
 @media (min-width:1500px){html{zoom:1.5}}
@@ -58,6 +66,7 @@ header a{white-space:nowrap}
   header{padding:8px 10px;gap:8px}header h1{display:none}
   .kv{grid-template-columns:110px 1fr;font-size:13px}
   section{padding:10px}
+  #r-hint{display:none}
 }
 @media (max-height:480px){
   header{padding:5px 10px}main{padding:6px 10px;gap:8px;grid-template-columns:120px 1fr}
@@ -110,9 +119,17 @@ header a{white-space:nowrap}
         <input id="y-new" type="password" inputmode="numeric" maxlength="8" placeholder="new PIN" autocomplete="off" style="width:120px"><button id="y-pin">SET PIN</button>
         <span class="dim" id="y-pin-hint"></span></div>
     </section>
+    <section id="s-ir">
+      <div class="row"><span class="big" id="r-now">?</span><span class="dim mono" id="r-last"></span></div>
+      <div class="row"><span class="dim">profile</span><span id="r-tabs" class="tabs"></span><span class="dim">tap | hold</span></div>
+      <div id="r-banner" class="banner"></div>
+      <div id="r-list" class="ir"></div>
+      <p class="dim" id="r-hint">Tap a button here, then press the one on the remote. "all" works everywhere; a view's own profile wins where both set a button. Hold = half a second.</p>
+    </section>
     <section id="s-dev">
       <div class="kv" id="d-kv"></div>
-      <p class="dim">The remote control's buttons are still set on the start screen. Sound cards and SD cards will be listed here.</p>
+      <div class="row"><button id="d-hdmi">TV SOUND: ?</button><span class="dim" id="d-hdmi-text"></span></div>
+      <p class="dim">TV sound passes the Daisy's output on to the TV (HDMI). It adds about 40 ms plus the TV's own delay: fine for listening while testing; play from the Daisy's own output. Sound cards and SD cards will be listed here.</p>
     </section>
   </div>
 </main>
@@ -121,7 +138,9 @@ header a{white-space:nowrap}
 const $ = id => document.getElementById(id), el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const Q = new URLSearchParams(location.search), tv = Q.has("tv");
 if (tv) $("back").href = "/?tv=1";
-const TABS = [["net", "Network"], ["hot", "Hotspot"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"]];
+const TABS = [["net", "Network"], ["hot", "Hotspot"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"], ["ir", "Remote"]];
+const SHORT = { net: "Wi-Fi", hot: "Hotspot", bt: "BT", sys: "System", dev: "Devices", ir: "Remote" };
+let bst = null, prof = "all";      // the bridge's own state (/state): remote buttons, TV sound
 let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null, trial = null, sure = "", pinOk = false;
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
 
@@ -152,7 +171,7 @@ function needPin(id) {
 
 function nav() {
   const n = $("nav"); n.textContent = "";
-  for (const [k, name] of TABS) { const b = el("button", k === tab ? "on" : "", name); b.onclick = () => { tab = k; sure = ""; nav(); draw(); }; n.appendChild(b); }
+  for (const [k, name] of TABS) { const b = el("button", k === tab ? "on" : "", innerWidth < 700 ? SHORT[k] : name); b.onclick = () => { tab = k; sure = ""; nav(); draw(); poll(); }; n.appendChild(b); }
   for (const [k] of TABS) $("s-" + k).classList.toggle("on", k === tab);
 }
 
@@ -265,7 +284,38 @@ function draw() {
     ["Bluetooth", b.tool ? (b.on ? "on" : "off") : "not set up"]]);
   if (tab === "net") drawNets();
 }
+/* Remote buttons and TV sound: the bridge's own, no helper and no PIN */
+function drawBridge() {
+  if (!bst) return;
+  const ir = bst.ir || {}, hd = bst.hdmi_audio || {};
+  $("r-now").textContent = ir.device ? "receiver: " + (ir.name || "found") : "no receiver found";
+  const tabs = $("r-tabs"); tabs.textContent = "";
+  for (const p of ir.profile_names || []) { const b = el("button", p === prof ? "sel" : "", p); b.onclick = () => { prof = p; drawBridge(); }; tabs.appendChild(b); }
+  const L = ir.learning, binds = (ir.profiles || {})[prof] || {}, list = $("r-list"), top = list.scrollTop;
+  banner("r-banner", L ? "Press the remote button for " + L.action.replace("_", " ") + " (" + L.press + ") in profile \"" + L.profile + "\"... (tap its button here again to cancel)" : "");
+  list.textContent = "";
+  for (const a of ir.actions || []) {
+    const r = el("div", "irr"); r.appendChild(el("span", "a", a.replace("_", " ")));
+    for (const press of ["tap", "hold"]) {
+      const code = binds[a + "/" + press], wait = L && L.profile === prof && L.action === a && L.press === press, g = el("span", "acts");
+      const b = el("button", wait ? "wait" : code !== undefined ? "set" : "", wait ? "press it" : code !== undefined ? code.toString(16) : "learn");
+      b.title = a + " " + press;
+      b.onclick = async () => { await bpost(wait ? "/ir/cancel" : "/ir/learn", wait ? {} : { profile: prof, action: a, press }); pollBridge(); };
+      g.appendChild(b);
+      const x = el("button", "x", "×"); x.title = "clear"; x.style.visibility = code !== undefined ? "" : "hidden";
+      x.onclick = async () => { await bpost("/ir/forget", { profile: prof, action: a, press }); pollBridge(); };
+      g.appendChild(x); r.appendChild(g);
+    }
+    list.appendChild(r);
+  }
+  list.scrollTop = top;
+  $("d-hdmi").textContent = "TV SOUND: " + (hd.on ? "ON" : "OFF"); $("d-hdmi").className = hd.on ? "act" : "";
+  $("d-hdmi-text").textContent = !hd.on ? "" : hd.running ? "playing on the TV" : !hd.hdmi_card ? "no HDMI sound card" : !hd.daisy_card ? "waiting for the Daisy" : hd.error ? hd.error : "starting...";
+}
+async function bpost(path, body) { try { return await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: tmo(6000) })).json(); } catch (e) { return {}; } }
+async function pollBridge() { const s = await get("/state"); if (s) { bst = s; drawBridge(); } }
 async function poll() {
+  if (tab === "ir" || tab === "dev" || !bst) pollBridge();
   const s = await get("/sys/state"); st = s; draw(); await trialTick();
 }
 async function checkPin() {
@@ -284,6 +334,24 @@ $("n-show").onclick = () => { const p = $("n-psk"); p.type = p.type === "passwor
 $("n-prev").onclick = () => { npage--; drawNets(); }; $("n-next").onclick = () => { npage++; drawNets(); };
 $("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const o = await sys("hostname", { name: $("n-host").value.trim() }, true);
   banner("n-banner", o.error || "The box is now called " + $("n-host").value.trim() + ". Other devices pick the new name up within a minute.", o.error ? "bad" : "good"); poll(); };
+$("d-hdmi").onclick = async () => { await bpost("/settings", { hdmi_audio: !(bst && bst.hdmi_audio && bst.hdmi_audio.on) }); await pollBridge(); setTimeout(pollBridge, 2500); };
+/* The TV remote (and arrow keys) walk the buttons; ok presses one; back / home leave to the modules.
+   Typing (PIN, passwords) needs a keyboard or a phone. */
+function focusables() { return [...document.querySelectorAll("header a, header input, nav button, section.on button:not(:disabled), section.on input")].filter(e => e.offsetParent && e.style.visibility !== "hidden"); }
+function move(d) { const f = focusables(); let i = f.indexOf(document.activeElement); i = i < 0 ? 0 : Math.max(0, Math.min(f.length - 1, i + d));
+  document.body.classList.add("rc"); f[i].focus(); f[i].scrollIntoView({ block: "nearest" }); }
+function act(a) {
+  if (a === "up" || a === "left") move(-1); else if (a === "down" || a === "right") move(1);
+  else if (a === "ok") { if (document.activeElement && document.activeElement.click) document.activeElement.click(); }
+  else if (a === "back" || a === "home") location.href = $("back").href;
+}
+document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return;
+  const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key]; if (k) { act(k); e.preventDefault(); } });
+document.addEventListener("pointerdown", () => document.body.classList.remove("rc"));
+try { const es = new EventSource("/events?view=settings");
+  es.addEventListener("ir", e => { try { act(JSON.parse(e.data).action); } catch (err) {} });
+  es.addEventListener("irraw", e => { try { $("r-last").textContent = "last button: " + JSON.parse(e.data).scan; } catch (err) {} });
+  es.addEventListener("irlearned", () => pollBridge()); } catch (e) {}
 $("h-show").onclick = () => { const p = $("h-psk"); p.type = p.type === "password" ? "text" : "password"; $("h-show").textContent = p.type === "password" ? "show" : "hide"; };
 $("h-save").onclick = async () => { if (!needPin("h-banner")) return; const psk = $("h-psk").value;
   if (psk.length < 8 || psk.length > 63) return banner("h-banner", "A hotspot password is 8 to 63 characters.", "bad");

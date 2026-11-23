@@ -370,9 +370,9 @@ class Helper:
     def hot_cfg(self):
         try:
             c = json.load(open(self.hot_file))
-            return {"psk": c.get("psk", ""), "auto": bool(c.get("auto", True))}
+            return {"psk": c.get("psk", ""), "auto": bool(c.get("auto", False))}
         except (OSError, ValueError, AttributeError):
-            return {"psk": "", "auto": True}
+            return {"psk": "", "auto": False}        # off until the hotspot is seen working on the rig
 
     def cmd_hotspot_set(self, d):
         c = self.hot_cfg()

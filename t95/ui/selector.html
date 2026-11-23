@@ -95,33 +95,6 @@ td.code.set{color:var(--green)}
   <h2>Modules</h2>
   <div id="modules" class="modules"></div>
   <div id="countdown" class="banner"></div>
-
-  <h2>Remote</h2>
-  <div class="row">
-    <span class="hint">Profile</span>
-    <span id="tabs" class="row tabs"></span>
-    <span class="hint" id="lastcode"></span>
-  </div>
-  <p class="hint">"all" works everywhere; a view's own profile wins where both set a button.
-    Tap = short press, hold = half a second. Arrows repeat while held unless they also have a hold action.</p>
-  <div id="learn" class="banner learn"></div>
-  <table>
-    <thead><tr><th>Action</th><th>Tap</th><th></th><th>Hold</th><th></th></tr></thead>
-    <tbody id="binds"></tbody>
-  </table>
-
-  <h2>Start-up</h2>
-  <div class="row">
-    <span class="hint">On boot, start the last module after</span>
-    <input id="autostart" type="number" min="0" max="60"> <span class="hint">seconds (0 = stay here)</span>
-    <button id="saveauto">Save</button>
-  </div>
-  <div class="row" style="margin-top:12px">
-    <label><input id="hdmi" type="checkbox"> Sound on the TV (HDMI)</label>
-    <span id="hdmi-status" class="hint"></span>
-  </div>
-  <p class="hint">Passes the Daisy's output on to the TV. It adds about 40 ms plus the TV's own delay:
-    fine for listening while testing; play from the Daisy's own output.</p>
 </main>
 <script>
 "use strict";
@@ -130,7 +103,7 @@ const params = new URLSearchParams(location.search);
 const tv = params.has("tv"), boot = params.has("boot");
 if (tv) $("settings").href = "/settings?tv=1";
 if (tv) document.body.classList.add("tv");
-let st = null, profile = "all", countdown = null;
+let st = null, countdown = null;
 
 async function post(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -163,86 +136,10 @@ function render() {
     b.onclick = () => open(m);
     box.appendChild(b);
   }
-  const tabs = $("tabs");
-  tabs.textContent = "";
-  for (const p of st.ir.profile_names) {
-    const b = document.createElement("button");
-    b.textContent = p;
-    b.className = p === profile ? "sel" : "";
-    b.onclick = () => { profile = p; render(); };
-    tabs.appendChild(b);
-  }
-  const binds = st.ir.profiles[profile] || {};
-  const tb = $("binds");
-  tb.textContent = "";
-  for (const a of st.ir.actions) {
-    const tr = document.createElement("tr");
-    const td = t => { const e = document.createElement("td"); e.textContent = t; tr.appendChild(e); return e; };
-    td(a.replace("_", " "));
-    for (const press of ["tap", "hold"]) {
-      const code = binds[a + "/" + press];
-      const c = td(code === undefined ? "-" : code.toString(16));
-      c.className = "code" + (code === undefined ? "" : " set");
-      const cell = td("");
-      cell.className = "acts";
-      const lb = document.createElement("button");
-      lb.textContent = "learn";
-      lb.onclick = () => learn(a, press);
-      cell.appendChild(lb);
-      if (code !== undefined) {
-        const fb = document.createElement("button");
-        fb.textContent = "clear";
-        fb.style.marginLeft = "4px";
-        fb.onclick = async () => { await post("/ir/forget", { profile, action: a, press }); load(); };
-        cell.appendChild(fb);
-      }
-    }
-    tb.appendChild(tr);
-  }
-  $("autostart").value = st.autostart_s;
-  showHdmi(st.hdmi_audio);
   chip("c-ir", st.ir.device ? "remote: " + (st.ir.name || "found") : "remote: no receiver", st.ir.device ? "ok" : "warn");
-  showLearning(st.ir.learning);
 }
 
 function chip(id, text, cls) { const c = $(id); c.textContent = text; c.className = "chip " + (cls || ""); }
-
-async function learn(action, press) {
-  await post("/ir/learn", { profile, action, press });
-  showLearning({ profile, action, press });
-}
-function showLearning(l) {
-  const b = $("learn");
-  b.classList.toggle("on", !!l);
-  if (!l) return;
-  b.innerHTML = "";
-  b.append(`Press the remote button for ${l.action.replace("_", " ")} (${l.press}) in profile "${l.profile}"... `);
-  const c = document.createElement("button");
-  c.textContent = "cancel";
-  c.onclick = async () => { await post("/ir/cancel", {}); b.classList.remove("on"); };
-  b.appendChild(c);
-}
-
-function showHdmi(h) {
-  if (!h) return;
-  $("hdmi").checked = h.on;
-  $("hdmi-status").textContent = !h.on ? "" : h.running ? "playing on the TV"
-    : !h.hdmi_card ? "no HDMI sound card" : !h.daisy_card ? "waiting for the Daisy" : h.error ? h.error : "starting…";
-}
-$("hdmi").onchange = async () => {
-  await post("/settings", { hdmi_audio: $("hdmi").checked });
-  setTimeout(async () => showHdmi((await (await fetch("/state")).json()).hdmi_audio), 2500);
-  showHdmi(Object.assign({}, st.hdmi_audio, { on: $("hdmi").checked, running: false }));
-};
-setInterval(async () => {
-  try { showHdmi((await (await fetch("/state")).json()).hdmi_audio); } catch (err) {}
-}, 5000);
-
-$("saveauto").onclick = async () => {
-  const v = Math.max(0, Math.min(60, parseInt($("autostart").value, 10) || 0));
-  await post("/settings", { autostart_s: v });
-  load();
-};
 
 /* Boot: start the last module unless someone presses something */
 function startCountdown() {
@@ -264,8 +161,9 @@ function stopCountdown() {
 }
 
 /* Moving around with the remote or the keyboard: up/down/left/right walk the
-   buttons on the page, ok presses one, back leaves setup focus */
-function focusables() { return [...document.querySelectorAll("button:not(:disabled), input")]; }
+   modules and Settings, ok opens one. The remote's buttons, start-up delay and TV
+   sound are set in Settings. */
+function focusables() { return [...document.querySelectorAll("button:not(:disabled), a[href]")]; }
 function move(d) {
   const f = focusables();
   let i = f.indexOf(document.activeElement);
@@ -300,11 +198,7 @@ es.addEventListener("bridge", e => {
   } catch (err) {}
 });
 es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
-es.addEventListener("irraw", e => {
-  stopCountdown();
-  try { $("lastcode").textContent = "last button: " + JSON.parse(e.data).scan; } catch (err) {}
-});
-es.addEventListener("irlearned", e => { $("learn").classList.remove("on"); load(); });
+es.addEventListener("irraw", () => stopCountdown());
 
 load().then(() => {
   startCountdown();

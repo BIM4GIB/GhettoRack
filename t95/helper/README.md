@@ -34,8 +34,10 @@ Not seen there yet: that page fix, a join with the right password, confirm
 and forget.
 The hotspot: only this much is seen on the T95 (by hand, 2026-11-23): wlan0 goes
 into AP mode in the running wpa_supplicant, a phone sees the network and
-passes the WPA2 handshake. Not seen there: the helper doing it, the address
+passes the WPA2 handshake. With the helper (same day): the phone joined but
+the page at the box's address didn't load; not looked into yet, so "by
+itself" is off by default. Not seen there: the helper doing it, the address
 staying on wlan0 next to systemd-networkd, dnsmasq handing out addresses, the
 pages over it, starting by itself, scanning as an access point, the way back.
 Not built yet: pairing, sound cards and SD cards under
-Devices, the remote's buttons (still on the start screen).
+Devices.

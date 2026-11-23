@@ -2456,20 +2456,20 @@ class IrTest(unittest.TestCase):
             errors = []
             pg.on("pageerror", lambda e: errors.append(str(e)))
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            # A phone opening the selector: no countdown, modules listed, learn from the table
+            # A phone opening the selector: no countdown, modules listed
             pg.goto("http://127.0.0.1:%d/" % self.http)
             pg.wait_for_timeout(1500)
             names = pg.eval_on_selector_all(".module .name", "es => es.map(e => e.textContent)")
             self.assertEqual(names, ["ApcBox groovebox", "MIDI hub", "Clock", "Cubase sync", "Numark DJ"])
             self.assertFalse(pg.is_visible("#countdown"))
-            pg.click("#tabs button:text-is('apcbox')")    # the apcbox profile tab
-            pg.click("#binds tr:nth-child(3) button:has-text('learn') >> nth=0")  # left, tap
-            pg.wait_for_timeout(300)
-            self.assertTrue(pg.is_visible("#learn"))
+            # The remote's buttons are learned in Settings > Remote (no helper needed for that)
+            pg.goto("http://127.0.0.1:%d/settings?s=ir" % self.http)
+            pg.click("#r-tabs button:text-is('apcbox')")
+            pg.click("#r-list button[title='left tap']")
+            pg.wait_for_function("document.getElementById('r-banner').textContent.includes('left (tap)')")
             self.press(0x2FE0D)
-            pg.wait_for_timeout(800)
-            cell = pg.inner_text("#binds tr:nth-child(3) td:nth-child(2)")
-            self.assertEqual(cell, "2fe0d")
+            pg.wait_for_function("document.querySelector(\"#r-list button[title='left tap']\").textContent === '2fe0d'", timeout=5000)
+            self.assertIn("last button", pg.inner_text("#r-last"))
             # Remote on a freshly opened selector: the first module has focus, ok opens it
             pg.goto("http://127.0.0.1:%d/" % self.http)
             pg.wait_for_timeout(1000)
@@ -2903,14 +2903,14 @@ class SettingsTest(unittest.TestCase):
             for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
                 pg = b.new_page(viewport={"width": w_, "height": h_})
                 pg.on("pageerror", lambda e: errors.append(str(e)))
-                for s_ in ("net", "hot", "bt", "sys", "dev"):
+                for s_ in ("net", "hot", "bt", "sys", "dev", "ir"):
                     pg.goto(url + "?s=" + s_)
                     pg.wait_for_function("document.getElementById('c-helper').textContent === 'helper: running'")
                     self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"),
                                      [False, False], (w_, h_, s_))
                     out = pg.evaluate("""() => [...document.querySelectorAll('section.on button, section.on input, nav button')].filter(e => {
-                        const r = e.getBoundingClientRect(); return r.width && (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1); }).map(e => e.id || e.textContent)""")
-                    self.assertEqual(out, [], (w_, h_, s_))
+                        const r = e.getBoundingClientRect(); return r.width && !e.closest('.ir') && (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1); }).map(e => e.id || e.textContent)""")
+                    self.assertEqual(out, [], (w_, h_, s_))                 # (.ir, the remote's button list, scrolls inside its box)
                 pg.goto(url)
                 pg.wait_for_function("document.getElementById('n-now').textContent === 'Home Net'")
                 pg.click("#n-scan")
@@ -2986,8 +2986,41 @@ class SettingsTest(unittest.TestCase):
                 pg.click("#h-toggle")
                 pg.wait_for_function("document.getElementById('h-now').textContent === 'off'", timeout=8000)
                 self.assertIsNone(self.wpa.ap())
+                # Remote: its buttons are learned here now (not on the start screen); TV sound is under Devices
+                pg.click("nav button:has-text('Remote')")
+                pg.wait_for_selector("#r-list .irr")
+                self.assertEqual(pg.locator("#r-list .irr").count(), 24)
+                pg.click("#r-tabs button:has-text('apcbox')")
+                pg.locator("#r-list button[title='ok hold']").click()
+                pg.wait_for_function("document.getElementById('r-banner').textContent.includes('ok (hold) in profile \"apcbox\"')")
+                self.assertEqual(json.loads(BridgeTest.get("/state")[2])["ir"]["learning"], {"profile": "apcbox", "action": "ok", "press": "hold"})
+                if (w_, h_) in ((1920, 1080), (390, 664)):
+                    pg.screenshot(path=os.path.join(self.dir, "settings-remote-%d.png" % w_))
+                pg.locator("#r-list button[title='ok hold']").click()
+                pg.wait_for_function("!document.getElementById('r-banner').classList.contains('on')")
+                self.assertIsNone(json.loads(BridgeTest.get("/state")[2])["ir"]["learning"])
+                pg.click("nav button:has-text('Devices')")
+                pg.wait_for_function("document.getElementById('d-hdmi').textContent === 'TV SOUND: OFF'")
+                # arrow keys (and the TV remote, the same way) walk the buttons; back leaves to the modules
+                pg.keyboard.press("ArrowDown")
+                pg.keyboard.press("ArrowDown")
+                self.assertTrue(pg.evaluate("document.body.classList.contains('rc') && !!document.activeElement && document.activeElement !== document.body"))
+                # the start screen: modules and the way to Settings, nothing else
+                pg.goto("http://127.0.0.1:%d/" % self.http)
+                pg.wait_for_selector(".module")
+                self.assertEqual(pg.evaluate("[!!document.getElementById('binds'), !!document.getElementById('autostart'), !!document.getElementById('hdmi'), [...document.querySelectorAll('h2')].map(e => e.textContent)]"),
+                                 [False, False, False, ["Modules"]])
+                for _ in range(12):
+                    pg.keyboard.press("ArrowUp")
+                self.assertEqual(pg.evaluate("document.activeElement.id"), "settings")
+                if (w_, h_) == (1920, 1080):
+                    pg.screenshot(path=os.path.join(self.dir, "start.png"))
+                    print("dir:", self.dir)
+                pg.goto(url)
+                pg.fill("#pin", "2468")
+                pg.wait_for_function("document.getElementById('c-pin').textContent === 'unlocked'")
                 # Bluetooth: not set up, said how; System: reboot asks twice
-                pg.click("nav button:has-text('Bluetooth')")
+                pg.locator("nav button", has_text=re.compile("Bluetooth|BT")).click()
                 pg.wait_for_function("document.getElementById('b-text').textContent.includes('get-bt-tool.sh')")
                 self.assertTrue(pg.locator("#b-toggle").is_disabled())
                 pg.click("nav button:has-text('System')")
