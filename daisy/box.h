@@ -115,6 +115,9 @@ void BoxUiBack(uint32_t now);
 bool BoxUiCommand(const char* action, uint32_t now);
 /** The T95 went quiet: let go of what its pages were holding (FX) */
 void BoxUiGone();
+/** ESC T from the T95's clock module: "bpm100 ticks playing latency_us".
+ *  The Daisy follows it: see Engine::ExtSync */
+void BoxClockFrame(const char* frame, uint32_t now);
 /** A sample transfer frame from the T95 (text after ESC F, see xfer.h) */
 void BoxFileFrame(const char* frame, uint32_t now);
 /** Touch: raw XPT2046 readings (Daisy), a tap in screen pixels (Mac build),

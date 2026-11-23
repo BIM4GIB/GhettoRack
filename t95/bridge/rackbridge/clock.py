@@ -11,6 +11,12 @@ line (least squares over the last 96), and our ticks go out on that line, so
 Wi-Fi jitter on the way in isn't passed on. If the source stops ticking, the
 last tempo is held.
 
+The Daisy, both ways (firmware v13.11): tick "daisy" under "send clock to"
+and every sixteenth it gets an ESC T frame (tempo, position, playing, how
+long frames take); its sequencer stays on its audio clock and steers itself
+onto ours. Or pick the Daisy as the source: it reports each step with how
+long ago it fired (CL lines), and our ticks go out on its grid.
+
 The ticks come from one thread that sleeps to just before each deadline and
 spins the rest, with the GIL switch interval lowered so the web server can't
 hold it for long. Lateness of every tick is measured and shown. The Daisy's
@@ -65,6 +71,15 @@ class Clock:
         self.in_jitter_ms = None
         self.model = None                      # (a, b) while locked
         self.off_line = 0
+        # the Daisy: following it (CL lines) and what it says about following us (CK)
+        self.d_tick = 0
+        self.d_sent_playing = False
+        self.d_bars = 0
+        self.d_step = -1
+        self.d_playing = False
+        self.d_bpm = None
+        self.daisy_follow = None               # (following us, error ms) from its CK line
+        self.loop = None
         # Link
         self.link = None
         self.link_err = None
@@ -85,14 +100,17 @@ class Clock:
             st["late_ms"] = {"avg": round(sum(late) / len(late), 3), "p99": round(late[int(len(late) * 0.99)], 3),
                              "max": round(late[-1], 3), "count": len(late)}
         locked = self.source not in ("internal", "link") and self.model is not None and self.in_last is not None \
-            and time.monotonic() - self.in_last < CLOCK_LOST_S
+            and time.monotonic() - self.in_last < self.lost_s()
         sixteenths = self.pos // 6
         return dict(self.settings(), playing=self.playing, tempo=round(self.tempo(), 2),
                     position="%d.%d.%d" % (sixteenths // 16 + 1, sixteenths // 4 % 4 + 1, sixteenths % 4 + 1),
                     following=self.source not in ("internal", "link"), locked=locked,
                     in_ticks=self.in_n, in_jitter_ms=self.in_jitter_ms, sent=self.sent, dropped=self.dropped,
                     link_available=aalink is not None, link_error=self.link_err,
-                    link_peers=self.link.num_peers if self.link is not None else None, **st)
+                    link_peers=self.link.num_peers if self.link is not None else None,
+                    daisy_ok=self.b.fd is not None and self.b.ctl >= 6,
+                    daisy_following=bool(self.daisy_follow and self.daisy_follow[0]),
+                    daisy_err_ms=self.daisy_follow[1] if self.daisy_follow and self.daisy_follow[0] else None, **st)
 
     def tempo(self):
         if self.source == "link" and self.link is not None:
@@ -116,8 +134,11 @@ class Clock:
                 return 400, {"error": "source: internal, link or a port name"}
             if s == "link" and aalink is None:
                 return 400, {"error": "Link needs the aalink package (install.sh tries to add it)"}
+            if s == "daisy" and self.b.ctl < 6 and self.b.fd is not None:
+                return 400, {"error": "following the Daisy needs firmware v13.11"}
             if s != self.source:
                 self.source = s
+                self.d_playing = False          # the Daisy's next step report starts us if it's playing
                 self.in_ticks.clear()
                 self.model = None
                 self.in_bpm = None
@@ -193,6 +214,70 @@ class Clock:
             self.cmds.append(bytes(msg))        # passed on in order, before the next tick
             self.wake.set()
 
+    def lost_s(self):
+        return 2.0 if self.source == "daisy" else CLOCK_LOST_S     # the Daisy reports every other sixteenth
+
+    def feed_daisy(self, line):
+        """A CL line: 'CL playing step bpm100 age_us n'. Even steps only (swing moves the odd ones)."""
+        t = time.monotonic()
+        try:
+            _, playing, step, bpm100, age, _n = line.split()
+            playing, step, bpm, age = playing == "1", int(step), int(bpm100) / 100.0, int(age) / 1e6
+        except ValueError:
+            return
+        if self.source != "daisy":
+            self.d_playing = playing
+            return
+        lat = (self.b.ping_stats().get("avg") or 0.0) / 2000.0
+        if playing != self.d_playing:
+            self.d_playing = playing
+            if playing:
+                self.in_ticks.clear()
+                self.d_bars, self.d_step = 0, -1
+                sixteenth = step if age < 0.2 else 0
+                self.cmds.append(b"\xfa" if sixteenth == 0 else bytes([0xF2, sixteenth & 0x7F, 0]) )
+                if sixteenth:
+                    self.cmds.append(b"\xfb")
+            else:
+                self.cmds.append(b"\xfc")
+            self.wake.set()
+        if not playing or not CLOCK_BPM_MIN <= bpm <= CLOCK_BPM_MAX:
+            return
+        if step < self.d_step:
+            self.d_bars += 1
+        self.d_step = step
+        if self.d_bpm != bpm:                    # tempo changed: start the fit again
+            self.d_bpm = bpm
+            self.in_ticks.clear()
+        if step & 1:
+            return
+        idx = (self.d_bars * 16 + step) * 6
+        self.in_n += 1
+        self.in_last = t
+        self.in_ticks.append((idx, t - age - lat))
+        pts = list(self.in_ticks)[-32:]
+        b = 60.0 / (bpm * CLOCK_PPQ)            # the Daisy says its tempo: only the phase is fitted
+        a = sum(tt - b * i for i, tt in pts) / len(pts)
+        self.model = (a, b)
+        self.in_bpm = bpm
+        if len(pts) > 2:
+            self.in_jitter_ms = round((sum((tt - (a + b * i)) ** 2 for i, tt in pts) / len(pts)) ** 0.5 * 1000, 3)
+
+    def daisy_ck(self, line):
+        try:
+            _, follow, err = line.split()
+            self.daisy_follow = (follow == "1", int(err) / 10.0)
+        except ValueError:
+            pass
+
+    def to_daisy(self, pos, playing):
+        """In the asyncio thread: one ESC T frame (the clock thread asked for it)"""
+        b = self.b
+        if b.fd is None or b.ctl < 6:
+            return
+        lat_us = int((b.ping_stats().get("avg") or 0.0) * 500)
+        b.ctl_send(b"%sT %d %d %d %d\n" % (ESC, int(round(self.tempo() * 100)), pos, 1 if playing else 0, lat_us))
+
     def apply_link(self):
         if aalink is None or not (self.link_on and self.on):
             if self.link is not None:
@@ -211,6 +296,7 @@ class Clock:
             log.warning("Link: %s", e)
 
     def start_thread(self):
+        self.loop = asyncio.get_running_loop()
         sys.setswitchinterval(0.001)           # the web server can't hold the GIL for 5 ms
         self.thread = threading.Thread(target=self.run, name="clock", daemon=True)
         self.thread.start()
@@ -250,7 +336,7 @@ class Clock:
                 due += period
             return due
         if src not in ("internal", "link") and self.model is not None and self.in_last is not None \
-                and now - self.in_last < CLOCK_LOST_S:
+                and now - self.in_last < self.lost_s():
             a, b = self.model
             j = math.floor((now - a) / b) + 1    # the next tick on the fitted line
             while last and a + j * b < last + 0.5 * b:   # the line moved a little: never the same tick twice
@@ -305,6 +391,12 @@ class Clock:
                 sent_at = time.monotonic()
                 if self.playing or self.send_stopped:
                     self.send(b"\xf8", ports)
+                # the Daisy: a frame every sixteenth (and at once when play/stop changes), from the asyncio thread
+                if "daisy" in self.outputs and self.source != "daisy":
+                    self.d_tick = (self.d_tick + 1) % 6 if not self.playing else self.pos % 6
+                    if self.d_tick == 0 or self.playing != self.d_sent_playing:
+                        self.d_sent_playing = self.playing
+                        self.loop.call_soon_threadsafe(self.to_daisy, self.pos, self.playing)
                 if self.playing:
                     self.pos += 1
             self.late.append((sent_at - due) * 1000.0)

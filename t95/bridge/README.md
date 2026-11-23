@@ -240,8 +240,15 @@ The clock module (`/clock`): one tempo for everything.
 - Desktop figures (not the T95): internal 120 BPM interval 20.833 ms, sd
   0.1-0.4 ms; following 125 BPM sent with 2 ms jitter: locked at 124.96,
   output sd 0.26 ms; Link 97 BPM output sd 0.04 ms.
-- Not yet: the Daisy following (firmware), the Cubase plugin (Cubase sync
-  mode, planned).
+- The Daisy (v13.11), both ways. Tick "Daisy" under "send clock to": an
+  `ESC T` frame every sixteenth (tempo, position, playing, half the ping time);
+  the firmware steers its sequencer onto it and stays on its audio clock.
+  Or pick the Daisy as the source: it reports each step with its age (`CL`),
+  our ticks go out on its grid (even steps only, so swing doesn't pull it).
+  Desktop, against the firmware's control code: Daisy following at 137 BPM
+  off by 0.8 ms; T95 following the Daisy at 130 BPM with swing, tick sd 0.4 ms.
+  Not flashed or measured on the rig yet.
+- Not yet: the Cubase plugin (Cubase sync mode, planned).
 
 ## Endpoints
 

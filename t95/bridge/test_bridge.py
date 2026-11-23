@@ -1608,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 5)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 6)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -1841,6 +1841,103 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
         self.do("tempo 1200", "mute 6 0", "set trans 1")
+
+
+@unittest.skipUnless(os.path.exists(SIM), "build daisy/hostbuild/t95sim first (see daisy/t95sim.cpp)")
+class ClockDaisyTest(unittest.TestCase):
+    """v13.11: the firmware's sequencer follows the T95's clock (ESC T), and the T95's clock follows the Daisy (CL)"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        link = os.path.join(cls.dir, "daisy")
+        cls.sim = subprocess.Popen([SIM, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.addClassCleanup(cls.sim.kill)
+        end = time.time() + 5
+        while not os.path.exists(link) and time.time() < end:
+            time.sleep(0.05)
+        cls.synth = FakeController(os.path.join(cls.dir, "synth"))
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+             "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
+             "--midi", cls.synth.link + "=Synth"],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["control"] >= 6, 10)
+        cls.box = SseClient(cls.http, path="/events?view=apcbox")
+        assert cls.box.wait_for(lambda c: any(l.startswith("S ") for l in c.lines))
+        cls.rx = TimedReader(cls.synth)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.rx.stop()
+        cls.box.close()
+        cls.proc.terminate()
+        cls.sim.terminate()
+        cls.proc.wait(5)
+        cls.sim.wait(5)
+
+    post = RouterTest.post
+    wait = MidiTest.wait
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def s(self, i):
+        return int([l for l in list(self.box.lines) if l.startswith("S ")][-1].split()[1 + i])
+
+    def clock(self):
+        return json.loads(BridgeTest.get("/clock?json=1")[2])
+
+    def test_k1_daisy_follows_the_t95(self):
+        self.assertTrue(self.clock()["daisy_ok"])
+        self.assertEqual(self.post("/clock", {"on": True, "source": "internal", "bpm": 137, "outputs": ["daisy", "Synth"]})[0], 200)
+        # tempo arrives while stopped; then start: the firmware's sequencer starts with us
+        self.assertTrue(self.box.wait_for(lambda c: self.s(5) == 1370 and self.s(0) == 0, 5))
+        self.post("/clock/transport", {"cmd": "start"})
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 1, 3))
+        time.sleep(5)
+        c = self.clock()
+        print("\n  Daisy following the T95 at 137 BPM: off by %s ms (smoothed), T95 ticks late %s" % (c["daisy_err_ms"], c["late_ms"]))
+        self.assertTrue(c["daisy_following"])
+        self.assertLess(abs(c["daisy_err_ms"]), 4.0)
+        # same sixteenth on both: the T95's position and the firmware's step
+        pos16 = (int(c["position"].split(".")[1]) - 1) * 4 + int(c["position"].split(".")[2]) - 1
+        self.assertIn((self.s(1) - pos16) % 16, (0, 1, 15))
+        # a tempo change follows; stop stops it
+        self.post("/clock", {"bpm": 96})
+        self.assertTrue(self.box.wait_for(lambda c: self.s(5) == 960, 3))
+        self.post("/clock/transport", {"cmd": "stop"})
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0, 3))
+        # no longer sent to the Daisy: it says it's on its own again
+        self.post("/clock", {"outputs": ["Synth"]})
+        self.assertTrue(self.wait(lambda: not self.clock()["daisy_following"], 5))
+
+    def test_k2_t95_follows_the_daisy(self):
+        do = lambda *a: self.post("/do", {"a": list(a)})
+        do("stop", "tempo 1300", "glob 8 60")              # with swing: only the even steps are used
+        self.post("/clock", {"on": True, "source": "daisy", "outputs": ["Synth"], "send_stopped": False})
+        time.sleep(0.5)
+        self.rx.clear()
+        do("play")
+        time.sleep(5)
+        c = self.clock()
+        ticks = self.rx.ticks()
+        m, sd, worst = intervals_ms(ticks[48:])
+        print("\n  T95 following the Daisy at 130 BPM with swing: locked %s at %.2f, out interval %.3f ms (ideal %.3f), sd %.3f; "
+              "step reports jitter %s ms" % (c["locked"], c["tempo"], m, 60000 / (130 * 24), sd, c["in_jitter_ms"]))
+        self.assertTrue(c["locked"] and c["playing"])
+        self.assertAlmostEqual(c["tempo"], 130.0, delta=0.01)
+        self.assertEqual(self.rx.bytes_()[0], 0xFA)          # it started with the Daisy
+        self.assertAlmostEqual(m, 60000 / (130 * 24), delta=0.15)
+        self.assertLess(sd, 1.5)
+        do("stop")
+        self.assertTrue(self.wait(lambda: self.rx.bytes_()[-1:] == b"\xfc", 3))
+        self.assertFalse(self.clock()["playing"])
+        do("glob 8 0", "tempo 1200")
+        self.post("/clock", {"on": False, "source": "internal", "outputs": []})
 
 
 class IrTest(unittest.TestCase):

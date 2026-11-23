@@ -42,6 +42,7 @@ class HostCmd
         kPing,
         kUi,
         kFile,
+        kClock, // ESC T: tempo and position from the T95's clock
     };
 
     static constexpr int     kMaxMidi = 128; // bytes per M frame
@@ -77,7 +78,8 @@ class HostCmd
                     case 'P':
                     case 'U':
                     case 'F':
-                        cmd_  = b == 'P' ? kPing : b == 'U' ? kUi : kFile;
+                    case 'T':
+                        cmd_  = b == 'P' ? kPing : b == 'U' ? kUi : b == 'T' ? kClock : kFile;
                         st_   = kText;
                         tlen_ = 0;
                         return kNone;

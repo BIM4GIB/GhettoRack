@@ -32,7 +32,7 @@ class TestPlat : public Platform
     {
         if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
             xfer_lines.push_back(l);
-        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3))
+        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3) || !strncmp(l, "CK ", 3) || !strncmp(l, "CL ", 3))
             ui_lines.push_back(l);
     }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
@@ -629,7 +629,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 5 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 6 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -702,7 +702,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 5 03 01 02 1") >= 1);
+        CHECK(T95Count("P 6 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -721,7 +721,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 5 ") >= 1);
+        CHECK(T95Count("P 6 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1007,6 +1007,89 @@ int main()
                 CHECK(loaded_kit_pg[1] == 1);
                 printf("t95 sets and kits ok (%d kits)\n", num_kits);
             }
+            /* Control protocol 6: following the T95's clock (ESC T), and reporting our own steps (CL) */
+            {
+                auto frame = [](int bpm100, long ticks, int playing, int lat_us = 0) {
+                    char f[48];
+                    snprintf(f, sizeof(f), "\x1bT %d %ld %d %d\n", bpm100, ticks, playing, lat_us);
+                    T95Frame(f);
+                };
+                e.Stop();
+                T95Tick(50);
+                e.global.swing = 0.f;
+                // 125 bpm: a sixteenth is exactly 120 ms. The outside clock starts; we start with it.
+                long ticks = 0;
+                frame(12500, ticks, 1);
+                T95Tick(1);
+                CHECK(ext_follow && e.Playing() && fabsf(e.global.bpm - 125.f) < 0.01f);
+                // 6 bars of frames on the outside clock's grid (one per sixteenth), each arriving 0-4 ms
+                // late, with the Daisy starting 9 ms behind
+                T95Tick(9);
+                uint32_t t0 = now_ms - 9 - 1;   // when the outside clock was at 0
+                unsigned seed = 5;
+                float worst_late = 0;
+                for(int k = 1; k <= 96; k++)
+                {
+                    seed       = seed * 1103515245u + 12345u;
+                    int jitter = (seed >> 16) % 5;
+                    uint32_t arrive = t0 + 120u * k + jitter;
+                    T95Tick((int)(arrive - now_ms));
+                    ticks += 6;
+                    frame(12500, ticks, 1, 2000); // the bridge says frames take 2 ms (the average of 0-4)
+                    T95Tick(0);
+                    if(k > 64)
+                        worst_late = std::max(worst_late, fabsf(e.ExtErrMs()));
+                }
+                printf("clock follow: smoothed error after 4 bars %.2f ms (frames 0-4 ms late)\n", worst_late);
+                CHECK(worst_late < 2.0f);
+                CHECK(e.Playing() && ext_follow);
+                // the steps still come from the audio clock: 125 bpm, not the frames' arrival times
+                CHECK(fabsf(e.global.bpm - 125.f) < 0.01f);
+                // a jump of half a bar on the outside clock (locate): we jump too
+                int before = e.ClockStep();
+                ticks += 48;
+                frame(12500, ticks, 1);
+                T95Tick(2);
+                CHECK(((e.ClockStep() - before + 16) % 16) >= 7 && ((e.ClockStep() - before + 16) % 16) <= 9);
+                // our own steps are reported with their age, for the T95 to follow us
+                {
+                    int n = 0;
+                    unsigned long worst_age = 0;
+                    for(auto& l : ui_lines)
+                        if(!l.compare(0, 5, "CL 1 "))
+                        {
+                            int           st, bpm;
+                            unsigned long age, cnt;
+                            if(sscanf(l.c_str(), "CL 1 %d %d %lu %lu", &st, &bpm, &age, &cnt) == 4)
+                            {
+                                n++;
+                                worst_age = std::max(worst_age, age);
+                                CHECK(bpm == 12500 && st >= 0 && st < 16);
+                            }
+                        }
+                    printf("step reports: %d, oldest %lu us\n", n, worst_age);
+                    CHECK(n > 80 && worst_age < 40000);
+                }
+                // too fast for the Daisy: it stops following, keeps its tempo
+                frame(25000, ticks, 1);
+                T95Tick(2);
+                CHECK(!ext_follow && fabsf(e.global.bpm - 125.f) < 0.01f);
+                frame(12500, ticks, 1);
+                T95Tick(2);
+                CHECK(ext_follow);
+                // the outside clock stops: so do we. Then it goes away: we're on our own
+                frame(12500, ticks, 0);
+                T95Tick(5);
+                CHECK(!e.Playing());
+                T95Tick(2300);
+                CHECK(!ext_follow);
+                bool said = false;
+                for(auto& l : ui_lines)
+                    said |= l == "CK 0 0";
+                CHECK(said);
+                U("tempo 1200");
+                printf("t95 clock follow ok\n");
+            }
             SelectTrack(0);
             printf("t95 page controls ok\n");
         }
@@ -1027,7 +1110,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 5 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 6 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */

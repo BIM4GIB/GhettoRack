@@ -1615,10 +1615,64 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
     }
     AcidLiveEvents();
 
+    /* ---- following an outside clock: compare, then nudge or jump ---- */
+    if(ext_req_)
+    {
+        ext_req_ = false;
+        if(playing_)
+        {
+            const float b   = BaseStepLength();
+            const float bar = b * kSteps;
+            // where we are in the bar, in samples (real time since the bar line, swing included)
+            float here = (float)(clock_step_ / 2) * 2.f * b + ((clock_step_ & 1) ? StepLength(clock_step_ - 1) : 0.f)
+                         + (cur_step_len_ - to_next_step_);
+            float there = ext_pos_ * b;
+            float err   = there - here; // + = we are behind
+            while(err > bar * 0.5f)
+                err -= bar;
+            while(err < -bar * 0.5f)
+                err += bar;
+            if(fabsf(err) > b * 0.5f)
+            {
+                // far off (start, locate, a tempo jump): go there
+                while(there >= bar)
+                    there -= bar;
+                while(there < 0.f)
+                    there += bar;
+                float acc = 0.f;
+                int   s   = 0;
+                for(; s < kSteps - 1; s++)
+                {
+                    float l = StepLength(s);
+                    if(there < acc + l)
+                        break;
+                    acc += l;
+                }
+                clock_step_   = s;
+                cur_step_len_ = StepLength(s);
+                to_next_step_ = acc + cur_step_len_ - there;
+                since_step_   = (uint32_t)(there - acc);
+                ext_err_      = 0.f;
+                ext_slew_     = 0.f;
+            }
+            else
+            {
+                ext_err_ += 0.25f * (err - ext_err_);
+                // take a tenth of the error out per sixteenth: gone in a second or two, tempo moves < 1 %
+                float slew = ext_err_ * 0.1f / b;
+                if(slew > 0.01f)
+                    slew = 0.01f;
+                if(slew < -0.01f)
+                    slew = -0.01f;
+                ext_slew_ = slew;
+            }
+        }
+    }
+
     for(size_t i = 0; i < size; i++)
     {
         /* ---- clock ---- */
-        to_next_step_ -= 1.f;
+        to_next_step_ -= 1.f + ext_slew_;
         since_step_++;
         if(to_next_step_ <= 0.f)
         {

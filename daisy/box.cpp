@@ -1873,7 +1873,7 @@ void UpdateLeds(uint32_t now)
     const int  pat     = eng->CurrentPattern();
     const int  queued  = eng->QueuedPattern();
     const bool playing = eng->Playing();
-    const int  step    = eng->CurrentStep();
+    const int  step    = eng->ClockStep();
 
     for(int t = 0; t < kTracks; t++)
     {
@@ -2399,7 +2399,8 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
+constexpr int kReportVersion = 12; // 12: CK (following a clock), CL (step timing, for the T95 to follow the Daisy)
+constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
 constexpr int kWavePoints = 96;
@@ -2409,6 +2410,15 @@ uint64_t rep_patmask = 0;
 bool     rep_patmask_force = true;
 uint32_t rep_wave[kTracks] = {};
 char     rep_sets[8][64];
+bool     ext_follow  = false; // following the T95's clock (ESC T)
+bool     ext_playing = false;
+uint32_t ext_last    = 0;
+uint32_t ext_frames  = 0;
+char     rep_ck[40] = "";
+uint32_t rep_ck_at = 0;
+bool     rep_cl_play = false;
+int      rep_cl_step = -1;
+uint32_t rep_cl_n = 0;
 int      rep_trans = -1;
 int      rep_kitpg[3] = {-9, -9, -9};
 bool     rep_kits_force = true;
@@ -2446,6 +2456,7 @@ void ForceFullReport()
     for(int i = 0; i < 8; i++)
         rep_sets[i][0] = 0;
     rep_trans    = -1;
+    rep_ck[0]    = 0;
     rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
 
@@ -2788,6 +2799,41 @@ void Report(uint32_t now)
                 Out("Z %d %lu %d %s", t, (unsigned long)(len ? (uint32_t)(len / (s.rate > 0.f ? s.rate : 1.f)) : 0),
                     (int)eng->SampleRate(), len ? z : "-");
             }
+        }
+    }
+
+    /* Clock, both ways. CK: are we following the T95's clock, and how far
+       off we were (0.1 ms, smoothed; + = behind). CL: for the T95 to follow
+       us: each step as it plays, with how long ago it fired (us, counted in
+       audio samples), so the report's own delay drops out. */
+    if(ext_follow && (int32_t)(g_now - ext_last) > 2000)
+    {
+        ext_follow = false;
+        eng->ExtRelease();
+        Log("clock: the T95's clock stopped coming, on our own tempo");
+    }
+    {
+        int  err = (int)(eng->ExtErrMs() * 10.f + (eng->ExtErrMs() >= 0 ? 0.5f : -0.5f));
+        char ck[40];
+        snprintf(ck, sizeof(ck), "CK %d %d", ext_follow ? 1 : 0, ext_follow ? err : 0);
+        if(strcmp(ck, rep_ck) && (ext_follow != (rep_ck[3] == '1') || (int32_t)(g_now - rep_ck_at) > 250))
+        {
+            strcpy(rep_ck, ck);
+            rep_ck_at = g_now;
+            Out("%s", ck);
+        }
+    }
+    {
+        int  step    = eng->ClockStep();
+        bool playing = eng->Playing();
+        if(playing != rep_cl_play || (playing && step != rep_cl_step))
+        {
+            rep_cl_play = playing;
+            rep_cl_step = step;
+            rep_cl_n++;
+            uint32_t age = (uint32_t)((uint64_t)eng->SinceStep() * 1000000u / (uint32_t)eng->SampleRate());
+            Out("CL %d %d %d %lu %lu", playing ? 1 : 0, step, (int)(eng->global.bpm * 100.f + 0.5f), (unsigned long)age,
+                (unsigned long)rep_cl_n);
         }
     }
 
@@ -3421,6 +3467,49 @@ bool BoxUiCommand(const char* c, uint32_t now)
     else
         return false;
     return true;
+}
+
+/* Following the T95's clock (ESC T). Frames come every sixteenth while the
+   clock module sends to the Daisy; 2 s without one and we're on our own
+   tempo again (and keep playing). */
+void BoxClockFrame(const char* c, uint32_t now)
+{
+    g_now = now;
+    int  bpm100 = 0, playing = 0, lat_us = 0;
+    long ticks  = 0;
+    if(sscanf(c, "%d %ld %d %d", &bpm100, &ticks, &playing, &lat_us) < 3 || ticks < 0)
+        return;
+    if(bpm100 < 6000 || bpm100 > 20000)
+    {
+        if(ext_follow)
+            Log("clock: %d.%02d bpm is outside 60-200, not following", bpm100 / 100, bpm100 % 100);
+        ext_follow = false;
+        eng->ExtRelease();
+        return;
+    }
+    if(lat_us < 0 || lat_us > 20000)
+        lat_us = 0;
+    if(!ext_follow)
+    {
+        Log("clock: following the T95");
+        Popup("ext clock");
+        ext_playing = eng->Playing();
+    }
+    ext_follow = true;
+    ext_last   = now;
+    ext_frames++;
+    eng->global.bpm = bpm100 / 100.f;
+    if(playing && !ext_playing)
+        eng->Play();
+    else if(!playing && ext_playing)
+        eng->Stop();
+    ext_playing = playing != 0;
+    if(playing)
+    {
+        // where the outside clock is now: its position plus the time the frame took to get here
+        float pos16 = (float)(ticks % 96) / 6.f + (lat_us * 1e-6f) * (bpm100 / 100.f) / 15.f;
+        eng->ExtSync(pos16);
+    }
 }
 
 void BoxFileFrame(const char* frame, uint32_t now) { XferFrame(frame, now); }

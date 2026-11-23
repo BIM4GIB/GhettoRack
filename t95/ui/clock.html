@@ -117,7 +117,7 @@ td.v{color:var(--text)}
 
   <h2>Send clock to</h2>
   <div class="row" id="outputs"></div>
-  <p class="hint">Start, stop, continue and song position go with it. The Daisy follows this clock after a firmware step (not yet).</p>
+  <p class="hint">Start, stop, continue and song position go with it. The Daisy (firmware v13.11) keeps its own audio clock and steers its sequencer onto this one.</p>
 
   <h2>Timing</h2>
   <table id="stats"></table>
@@ -161,31 +161,32 @@ function render() {
   else chip("c-link", "Link: off", "");
 
   const srcs = $("sources");
-  const want = ["internal"].concat(C.link_available ? ["link"] : []).concat(C.ports);
-  if (C.source !== "internal" && C.source !== "link" && !C.ports.includes(C.source)) want.push(C.source);
+  const want = ["internal"].concat(C.link_available ? ["link"] : []).concat(C.daisy_ok ? ["daisy"] : []).concat(C.ports);
+  if (!want.includes(C.source)) want.push(C.source);
   srcs.textContent = "";
   for (const s of want) {
     const b = document.createElement("button");
-    b.textContent = s === "internal" ? "This box" : s === "link" ? "Link" : s;
+    b.textContent = s === "internal" ? "This box" : s === "link" ? "Link" : s === "daisy" ? "Daisy (ApcBox)" : s;
     b.className = s === C.source ? "sel" : "";
     b.onclick = () => set({ source: s, on: true });
     srcs.appendChild(b);
   }
   $("src-hint").textContent = C.source === "internal" ? "Tempo set here: buttons, tap, or up/down on the remote."
     : C.source === "link" ? "Tempo and beat from the Link session (Live, iPad apps)."
+    : C.source === "daisy" ? "Following the Daisy: ApcBox's tempo, play and stop drive everything ticked below."
     : (C.ports.includes(C.source) ? "" : "Not connected now. ") + "Following MIDI clock from " + C.source
       + ". For Cubase: Studio > Project Synchronization Setup > MIDI Clock Destinations, tick the network session.";
 
   const outs = $("outputs");
   outs.textContent = "";
-  for (const p of C.ports) {
+  for (const p of (C.daisy_ok && C.source !== "daisy" ? ["daisy"] : []).concat(C.ports)) {
     if (p === C.source) continue;
     const l = document.createElement("label");
     l.className = "t";
     const c = document.createElement("input");
     c.type = "checkbox"; c.checked = C.outputs.includes(p);
     c.onchange = () => set({ outputs: c.checked ? C.outputs.concat([p]) : C.outputs.filter(x => x !== p) });
-    l.appendChild(c); l.appendChild(document.createTextNode(p));
+    l.appendChild(c); l.appendChild(document.createTextNode(p === "daisy" ? "Daisy (ApcBox)" : p));
     outs.appendChild(l);
   }
   if (!outs.children.length) outs.innerHTML = '<span class="hint">No MIDI devices: plug one in or connect one over the network (MIDI hub).</span>';
@@ -196,6 +197,7 @@ function render() {
   const L = C.late_ms;
   row("Our ticks late (avg / p99 / max)", L ? L.avg + " / " + L.p99 + " / " + L.max + " ms" : "-");
   row("Ticks sent / dropped", C.sent + " / " + C.dropped);
+  if (C.outputs.includes("daisy") && C.source !== "daisy") row("Daisy", C.daisy_following ? "following, off by " + C.daisy_err_ms + " ms" : "not following");
   if (following) {
     row("Incoming ticks", C.in_ticks);
     row("Incoming jitter (smoothed out)", C.in_jitter_ms == null ? "-" : C.in_jitter_ms + " ms");

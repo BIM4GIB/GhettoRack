@@ -114,7 +114,7 @@ int main()
                     snprintf(h, 3, "%02x", p.Midi()[i]);
                     g.data += h;
                 }
-            else if(c == HostCmd::kName || c == HostCmd::kPing || c == HostCmd::kUi || c == HostCmd::kFile)
+            else if(c == HostCmd::kName || c == HostCmd::kPing || c == HostCmd::kUi || c == HostCmd::kFile || c == HostCmd::kClock)
                 g.data = p.Text();
             v.push_back(g);
         }
@@ -150,6 +150,11 @@ int main()
         Check(v.size() == 3 && v[0].cmd == HostCmd::kUi && v[0].data == "turn -2" && v[1].data == "play"
                   && v[2].data == "track 12",
               "U frames (empty one dropped)");
+    }
+    {
+        auto v = frames("\x1bT 12500 480 1 1300\n\x1bT\n\x1bT 9000 0 0\n");
+        Check(v.size() == 2 && v[0].cmd == HostCmd::kClock && v[0].data == "12500 480 1 1300" && v[1].data == "9000 0 0",
+              "T frames (the T95's clock)");
     }
     {
         std::string body(780, 'A');

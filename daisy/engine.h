@@ -319,6 +319,26 @@ class Engine
     /** Hear the input all the time (it's always heard while recording) */
     volatile bool input_monitor = false;
     /** Input level 0..1, peak with a slow fall */
+    /** Following an outside clock (the T95's clock module). Call once per
+     *  sixteenth or so with where the outside clock is in the bar right now,
+     *  in sixteenths (0..16, straight, already corrected for the time the
+     *  message took). The sequencer stays on the audio clock: this only
+     *  nudges it. A small error is slewed out over a second or two (so
+     *  jitter in the messages doesn't shake the tempo); more than half a
+     *  step off, it jumps there. Set the tempo with global.bpm as usual. */
+    void ExtSync(float bar_pos16)
+    {
+        ext_pos_ = bar_pos16;
+        ext_req_ = true;
+    }
+    /** How far the sequencer was from the outside clock at the last ExtSync,
+     *  smoothed, in ms (+ = we were behind) */
+    float ExtErrMs() const { return ext_err_ * 1000.f / sr_; }
+    void  ExtRelease() { ext_slew_ = 0.f; ext_err_ = 0.f; }
+    /** Samples since the last step fired, and that step */
+    uint32_t SinceStep() const { return since_step_; }
+    int      ClockStep() const { return clock_step_; }
+
     float InputPeak() const { return in_peak_; }
     /** Level meters for the UI: the highest post-fader sample of a track
      *  (0..15) or of the master output (16 left, 17 right) since the last
@@ -502,6 +522,10 @@ class Engine
     float             cur_step_len_   = 1.f;
     int               clock_step_     = 0;   // free-running clock when stopped
     uint32_t          since_step_     = 0;   // samples since last step boundary
+    volatile float    ext_pos_        = 0.f;
+    volatile bool     ext_req_        = false;
+    float             ext_err_        = 0.f; // smoothed error, samples
+    float             ext_slew_       = 0.f; // extra samples taken off to_next_step_ per sample
     volatile uint8_t  live_req_[kTracks] = {}; // 1 live hit, 2 audition
     volatile bool     roll_[kTracks]     = {};
     int               skip_once_[kTracks];

@@ -337,8 +337,9 @@ function topStatus() {
   const br = st.bridge, parts = [
     ["Daisy", st.daisy ? (st.ctl >= 4 ? "ok" : "warn") : "bad", st.daisy ? (st.ctl >= 4 ? "" : "firmware too old for this page: flash v13.9") : "not connected"],
     ["APC40", st.apc ? "ok" : "off", ""],
+  ].concat(st.ext ? [["ext clock", "warn", ""]] : []).concat([
     ["cpu " + Math.round(st.cpu / 10) + "%", "ok", ""],
-  ];
+  ]);
   if (sendErr) parts.unshift([sendErr, "bad", ""]);
   if (st.ver && st.ver !== REPORT_VERSION) parts.unshift(["page and firmware don't match: reload", "bad", ""]);
   const key = JSON.stringify(parts);
@@ -1057,11 +1058,12 @@ function line(l) {
     case "JT": { const i = rest.indexOf(" "); st.trans = +rest.slice(0, i); st.transName = rest.slice(i + 1); call("J"); break; }
     case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
     case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
+    case "CK": st.ext = rest[0] === "1"; topStatus(); break;
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); break;
   }
 }
-const REPORT_VERSION = 11;
+const REPORT_VERSION = 12;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

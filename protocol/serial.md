@@ -1,4 +1,4 @@
-# ApcBox serial protocol (report version 11)
+# ApcBox serial protocol (report version 12)
 
 The Daisy's USB-C is a composite USB device, full speed (12 Mbit/s):
 
@@ -23,7 +23,7 @@ From firmware v13.3, every command starts with ESC (0x1B):
 
 From v13.5, the T95 control protocol: version 1 (v13.5, v13.6) has K, M, N
 and P; version 2 (v13.7) adds U; version 3 (v13.8) adds F; version 4 (v13.9) adds the U actions
-for the T95 pages; version 5 (v13.10) adds the set actions. Send these only after the Daisy has sent a
+for the T95 pages; version 5 (v13.10) adds the set actions; version 6 (v13.11) adds T. Send these only after the Daisy has sent a
 `P` line, and U only when its version is 2 or more: older firmware would act
 on the `R`/`B` letters inside them.
 
@@ -36,6 +36,7 @@ on the `R`/`B` letters inside them.
 | `ESC U` *action* `\n` | UI action, control protocol 2 (v13.7): `turn N` (-16..16, the encoder), `push`, `back`, `play`, `stop`, `track N` (1-16). Unknown actions are logged and ignored |
 | `ESC U` *action* `\n` | Control protocol 4 (v13.9), for the T95 pages; none of it needs an APC40. Tracks, steps, patterns and FX count from 1; values are 0-127 like the `T`/`A`/`M` lines; *v* flags are 0 off, 1 on, 2 toggle. `mute t v`, `solo t v`, `knob t i val` (*i* 0-11 as in `T`; 12 = crossfader side 0-2), `acid t i val` (*i* 0-7 as in `A`), `glob i val` (*i* 0-9 as in `M`), `tempo x10` (600-2000), `step p t s val` (0 off, 1 on, 2 accent), `note p t s note slide`, `pat p` (queue), `pcopy from to`, `pclear p t` (*t* 0 = whole pattern), `undo`, `fx n 0\|1` (hold; released if the T95 goes quiet for 2 s), `rec v`, `metro v`, `mon v`, `type t 303\|sample`, `lrec arm t`, `lrec stop`, `lrec cancel`, `kit k page`, `audition t`. At most 31 characters |
 | `ESC U set ...` `\n` | Control protocol 5 (v13.10): sets on the Daisy's card, slots 1-8. `set load n` (switches on the bar), `set save n [name]` (no name: keeps the slot's, or the open set's), `set new [name]` (first free slot), `set name n name`, `set delete n`, `set trans k` (0 cut, 1 filter, 2 tape stop, 3 echo out). Names: up to 16 of `a-z A-Z 0-9 space - _ # +`, anything else becomes `_`. Ignored while a set is saving or loading (except `trans`) |
+| `ESC T` *bpm100 ticks playing latency_us* `\n` | Control protocol 6 (v13.11): the T95's clock, sent every sixteenth while the clock module has the Daisy ticked. Tempo x100 (6000-20000, outside that the Daisy doesn't follow), position in MIDI clock ticks since the start (24 per beat; the Daisy uses it modulo one bar), playing 0/1, and how long frames take to arrive. The Daisy sets its tempo, starts and stops with it, and steers its sequencer onto that position: an error under half a sixteenth is slewed out over a second or two (tempo moves under 1 %), a bigger one is a jump. The sequencer stays on the audio clock. 2 s without a frame: the Daisy is on its own tempo again and keeps playing |
 | `ESC F O` *id track size name* `\n` | Sample transfer, control protocol 3 (v13.8): start sending a WAV file of *size* bytes for *track* (1-16). One at a time; refused while a set loads or if it doesn't fit the staging pool |
 | `ESC F D` *id seq crc32 base64* `\n` | Chunk *seq* (512 bytes, the last may be shorter), CRC32 in hex. Any order, repeats are harmless. At most 800 characters per frame |
 | `ESC F C` *id* `\n` | All chunks sent: if every one arrived, the Daisy loads the file into the track like a file from its card |
@@ -100,7 +101,9 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `JT k name` | v13.10: the set transition (0-3) and its name |
 | `KP a b n` | v13.10: the kit on tracks 1-8, on tracks 9-16 (-1 = edited since), and how many kits there are |
 | `KL k name` | v13.10: name of kit `k`, for every kit; after `ESC R` and when the list changes |
-| `V n` | Report version (11). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
+| `CK f err` | v13.11: `f` 1 while following the T95's clock, `err` how far the sequencer was from it at the last frame, smoothed, in 0.1 ms (+ = behind) |
+| `CL playing step bpm100 age_us n` | v13.11: each sequencer step as it plays (and the stop), with how long ago it fired, counted in audio samples, so the report's own delay drops out. The T95's clock module follows the Daisy from these. Not passed on to browsers |
+| `V n` | Report version (12). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields
 

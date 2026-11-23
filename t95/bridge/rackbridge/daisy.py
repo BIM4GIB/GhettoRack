@@ -216,6 +216,11 @@ class DaisyMixin:
                 continue
             if t == "P":
                 self.on_p_line(line)
+            elif t == "CL":                 # the Daisy's own steps: the clock module can follow them
+                self.clock.feed_daisy(line)
+                continue                    # 8 a second, for the bridge only: not for browsers
+            elif t == "CK":
+                self.clock.daisy_ck(line)
             self.cache.put(line)
             chunk = sse_data(line)
             for c in list(self.clients):
