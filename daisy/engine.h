@@ -251,18 +251,49 @@ class Engine
         lr_req_track_ = track;
         lr_req_       = 1;
     }
+    /** Record on top of the track's loop, in place and in time with it
+     *  (only at the tempo the loop was recorded at). Ends on LiveRecStop
+     *  (at once) or after lr_len_bars. */
+    void LiveRecOverdub(int track)
+    {
+        lr_req_track_ = track;
+        lr_req_       = 4;
+    }
+    /** Record a one-shot sample into a track: starts when the input gets
+     *  loud enough, ends on LiveRecStop or when the slot is full. Nothing
+     *  to do with the transport; the track then plays it from its steps. */
+    void LiveRecShot(int track)
+    {
+        lr_req_track_ = track;
+        lr_req_       = 5;
+    }
     void LiveRecStop() { lr_req_ = 2; }
     void LiveRecCancel() { lr_req_ = 3; }
     int  LiveRecState() const { return lr_state_; } // 0 idle, 1 armed, 2 recording
+    enum { kRecLoop = 0, kRecOverdub = 1, kRecShot = 2 };
+    int  LiveRecMode() const { return lr_mode_; }
+    /** What the mixer is using right now (mutes can wait for the beat or bar) */
+    bool MuteLive(int t) const { return mute_eff_[t]; }
+    /** Where a loop starts in the bar (sixteenths; beat-quantised takes) */
+    int  LoopOffset(int t) const { return loop_off_[t]; }
+    /** Looper and quantise settings (main loop writes) */
+    volatile uint8_t lr_len_bars = 0;     // a take stops by itself after this many bars, 0 = when told
+    volatile bool    lr_countin  = false; // clicks while armed; from stopped, one bar of them first
+    volatile uint8_t quant_rec   = 0;     // a take starts on: 0 the bar, 1 the beat
+    volatile uint8_t quant_pat   = 0;     // a pattern switch lands on: 0 the bar, 1 the beat, 2 the next step
+    volatile uint8_t quant_mute  = 0;     // mute/solo land: 0 at once, 1 on the beat, 2 on the bar
+    volatile float   in_gain     = 1.f;   // input level, 0..4
     int  LiveRecTrack() const { return lr_track_; }
     int  LiveRecBars() const { return lr_bars_done_; }
     /** True once when a recording has finished */
-    bool TakeLiveRecDone(int* track, int* bars)
+    bool TakeLiveRecDone(int* track, int* bars, int* mode = nullptr)
     {
         if(!lr_done_)
             return false;
         *track   = lr_done_track_;
         *bars    = lr_done_bars_;
+        if(mode)
+            *mode = lr_done_mode_;
         lr_done_ = false;
         return true;
     }
@@ -271,10 +302,11 @@ class Engine
     void ClearLoop(int t) { loop_clear_req_[t] = true; }
     /** The slot's data is a recorded loop of `bars` at `bpm` (restoring a
      *  saved one); it starts from its top on the next bar line */
-    void SetLoop(int t, int bars, float bpm)
+    void SetLoop(int t, int bars, float bpm, int off = 0)
     {
         loop_set_bars_[t] = bars;
         loop_set_bpm_[t]  = bpm;
+        loop_set_off_[t]  = (uint8_t)off;
         __sync_synchronize();
         loop_set_req_[t] = true;
     }
@@ -316,6 +348,8 @@ class Engine
         (void)length;
     }
     int16_t* HomeData(int t) const { return home_[t]; }
+    /** Pitch bend from a keyboard, in semitones, per track */
+    volatile float bend_st[kTracks] = {};
     /** Hear the input all the time (it's always heard while recording) */
     volatile bool input_monitor = false;
     /** Input level 0..1, peak with a slow fall */
@@ -412,8 +446,9 @@ class Engine
     void  StartVoice(int t, float vel, float rate = 1.f);
     void  RecordHit(int t);
     void  AcidStep(int t, int s);
-    void  LiveRecBar();
+    void  LiveRecStep(int s);
     void  LiveRecFinish();
+    void  ShotFinish();
     void  AcidLiveEvents();
     void  AcidRecord(int t, int note);
     float RenderVoice(Voice& v, const Slot& sl, float inc);
@@ -463,7 +498,13 @@ class Engine
     bool              lr_stop_      = false;
     uint32_t          lr_pos_       = 0;
     volatile bool     lr_done_      = false;
-    int               lr_done_track_ = 0, lr_done_bars_ = 0;
+    int               lr_done_track_ = 0, lr_done_bars_ = 0, lr_done_mode_ = 0;
+    volatile uint8_t  lr_mode_      = 0; // kRecLoop / kRecOverdub / kRecShot
+    int               lr_off_       = 0; // step in the bar the take started on
+    int               lr_wait_      = 0; // bar lines still to pass (count-in)
+    uint8_t           loop_off_[kTracks] = {};
+    bool              mute_eff_[kTracks] = {}, solo_eff_[kTracks] = {};
+    bool              mute_latch_   = true;
     uint32_t          bar_count_    = 0;
     volatile bool     loop_on_[kTracks]        = {};
     volatile bool     loop_clear_req_[kTracks] = {};
@@ -478,6 +519,7 @@ class Engine
     volatile bool     loop_set_req_[kTracks]   = {};
     int               loop_set_bars_[kTracks]  = {};
     float             loop_set_bpm_[kTracks]   = {};
+    uint8_t           loop_set_off_[kTracks]   = {};
 
     // set switching
     int16_t*                home_[kTracks] = {};

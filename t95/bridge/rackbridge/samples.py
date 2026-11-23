@@ -49,6 +49,63 @@ def convert_for_daisy(path):
     return data, "as it is (no ffmpeg)"
 
 
+def edit_wav(wav, start=0.0, end=1.0, norm=False):
+    """A 16-bit PCM WAV cut to start..end (fractions of its length) and/or
+    made as loud as it goes (peak at -0.3 dB). Cuts get a 2 ms fade so they
+    don't click. Anything else than 16-bit PCM: ValueError."""
+    i = wav.find(b"data", 12)
+    if wav[:4] != b"RIFF" or i < 0 or struct.unpack_from("<H", wav, 34)[0] != 16 \
+            or struct.unpack_from("<H", wav, 20)[0] != 1:
+        raise ValueError("trim and normalise need ffmpeg for this file (sudo apt install ffmpeg)")
+    ch = struct.unpack_from("<H", wav, 22)[0] or 1
+    rate = struct.unpack_from("<I", wav, 24)[0] or 48000
+    import array
+    a = array.array("h")
+    body = wav[i + 8:]
+    a.frombytes(body[:len(body) // (2 * ch) * 2 * ch])
+    if sys.byteorder == "big":
+        a.byteswap()
+    frames = len(a) // ch
+    start = min(max(float(start), 0.0), 1.0)
+    end = min(max(float(end), 0.0), 1.0)
+    f0, f1 = int(frames * start), int(frames * end)
+    if f1 - f0 < 16:
+        raise ValueError("nothing left after the trim")
+    a = a[f0 * ch:f1 * ch]
+    n = len(a) // ch
+    fade = min(rate // 500, n // 2)
+    for k in range(fade):
+        for c in range(ch):
+            if f0 > 0:
+                a[k * ch + c] = a[k * ch + c] * k // fade
+            if f1 < frames:
+                a[(n - 1 - k) * ch + c] = a[(n - 1 - k) * ch + c] * k // fade
+    if norm:
+        top = max(max(a), -min(a))
+        if top > 0:
+            g = 31650 / top               # -0.3 dB
+            if abs(g - 1) > 0.01:
+                a = array.array("h", [max(-32768, min(32767, int(v * g))) for v in a])
+    if sys.byteorder == "big":
+        a.byteswap()
+    data = a.tobytes()
+    head = bytearray(wav[:i + 8])
+    struct.pack_into("<I", head, i + 4, len(data))
+    struct.pack_into("<I", head, 4, len(head) - 8 + len(data))
+    return bytes(head) + data
+
+
+def edit_args(start, end, norm):
+    """(start, end, norm) checked, or None if they make no sense"""
+    try:
+        start, end = float(start if start is not None else 0), float(end if end is not None else 1)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= start < end <= 1):
+        return None
+    return start, end, norm in (True, 1, "1", "true")
+
+
 PEAK_POINTS = 96
 PREVIEW_MAX_FILE = 40 << 20     # bigger files: no waveform, no preview
 PREVIEW_KEEP = 6                # converted files kept for playing again
@@ -84,8 +141,9 @@ def wav_peaks(wav):
 class Transfer:
     """One sample on its way to the Daisy"""
 
-    def __init__(self, tid, src, rel, path, track):
+    def __init__(self, tid, src, rel, path, track, edit=None):
         self.id, self.src, self.rel, self.path, self.track = tid, src, rel, path, track
+        self.edit = edit if edit and edit != (0.0, 1.0, False) else None
         self.name = os.path.basename(path)
         self.state = "queued"          # converting, sending, loading, done, failed
         self.error = None
@@ -149,7 +207,7 @@ class SamplesMixin:
         rel = os.path.relpath(p, os.path.realpath(root))
         return 200, {"src": src, "path": "" if rel == "." else rel, "dirs": dirs[:500], "files": files[:2000]}
 
-    async def preview(self, src, rel, want_wav):
+    async def preview(self, src, rel, want_wav, edit=None):
         """What the Daisy would get of a file: (code, peaks JSON) or (200, wav bytes).
         Converted once (ffmpeg), remembered: peaks for every file seen, the audio for the last few."""
         root = self.roots(src)
@@ -178,13 +236,19 @@ class SamplesMixin:
                         self.pv_wav.popitem(last=False)
         if want_wav:
             self.pv_wav.move_to_end(key)
-            return 200, self.pv_wav[key]
+            wav = self.pv_wav[key]
+            if edit and edit != (0.0, 1.0, False):
+                try:
+                    wav = await asyncio.get_running_loop().run_in_executor(None, edit_wav, wav, *edit)
+                except ValueError as e:
+                    return 415, {"error": str(e)}
+            return 200, wav
         return 200, self.pv_peaks[key]
 
     def xfer_event(self, t):
         self.broadcast(sse_event("xfer", t.info()))
 
-    def queue_send(self, src, rel, track):
+    def queue_send(self, src, rel, track, start=None, end=None, norm=False):
         root = self.roots(src)
         p = safe_join(root, rel)
         if p is None or not os.path.isfile(p):
@@ -193,8 +257,11 @@ class SamplesMixin:
             return 400, {"error": "track 1-16"}
         if self.ctl < 3:
             return 503, {"error": "the Daisy's firmware can't take samples yet (v13.8+)"}
+        edit = edit_args(start, end, norm)
+        if edit is None:
+            return 400, {"error": "start and end: 0-1, start before end"}
         self.xfer_seq += 1
-        t = Transfer(self.xfer_seq % 250 + 1, src, rel, p, track)
+        t = Transfer(self.xfer_seq % 250 + 1, src, rel, p, track, edit)
         self.xfer_q.append(t)
         self.xfer_wake.set()
         self.xfer_event(t)
@@ -234,6 +301,9 @@ class SamplesMixin:
         t.state = "converting"
         self.xfer_event(t)
         data, t.how = await asyncio.get_running_loop().run_in_executor(None, convert_for_daisy, t.path)
+        if t.edit:
+            data = await asyncio.get_running_loop().run_in_executor(None, edit_wav, data, *t.edit)
+            t.how += ", " + " + ".join(w for w, on in (("trimmed", t.edit[:2] != (0.0, 1.0)), ("normalised", t.edit[2])) if on)
         t.size = len(data)
         t.chunks = (len(data) + XFER_CHUNK - 1) // XFER_CHUNK
         frames = None

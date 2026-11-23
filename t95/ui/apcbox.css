@@ -315,3 +315,18 @@ body.short input[type=text]{font-size:16px;padding:3px 8px;max-width:200px}
 body.short .recbtn{width:66px;height:66px;font-size:13px}
 body.short .hint{font-size:11px}
 body.short .msg{font-size:10px}
+
+/* looper view, trim view, quantise row */
+.lset{display:grid;grid-template-columns:1.2fr .8fr 1.4fr 1fr;gap:12px;min-height:0}
+.lset .cell{padding:0 8px;overflow:hidden}
+.seg span{cursor:pointer;white-space:nowrap}
+.li.file{cursor:pointer}
+.wave.trim{cursor:ew-resize}.wave.trim .tag{color:var(--dim)}
+.bigpad.warn.blink{animation:blink .5s steps(2) infinite}
+.qrow{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;min-height:0}
+.qc{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;min-width:0}
+body.phone .lset{gap:6px}body.phone .seg{gap:3px}body.phone .seg span{padding:5px 7px;font-size:11px}
+body.phone .qrow{grid-template-columns:1fr;gap:5px}body.phone .qc{padding:5px 10px}
+body.short .lset{gap:6px;grid-template-columns:1.1fr .7fr 1.5fr 1fr}body.short .seg{gap:3px}body.short .seg span{padding:3px 7px;font-size:10px}
+body.short .qrow{gap:6px}body.short .qc{padding:3px 8px;gap:4px}
+.b.r.on{color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1f99, inset 0 0 8px #ff9a1f44}

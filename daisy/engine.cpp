@@ -679,7 +679,17 @@ void Engine::HandleRequests()
         playing_        = false;
         step_           = 0;
         queued_pattern_ = -1;
-        if(lr_state_ == 2) // stopping mid-take keeps the whole bars so far
+        if(lr_mode_ == kRecShot)
+            ; // a one-shot doesn't care about the transport
+        else if(lr_state_ == 2 && lr_mode_ == kRecOverdub)
+        {
+            lr_state_      = 0;
+            lr_done_track_ = lr_track_;
+            lr_done_bars_  = lr_bars_done_;
+            lr_done_mode_  = kRecOverdub;
+            lr_done_       = true;
+        }
+        else if(lr_state_ == 2) // stopping mid-take keeps the whole bars so far
         {
             if(lr_bars_done_ > 0)
             {
@@ -752,6 +762,7 @@ void Engine::HandleRequests()
             loop_bpm_[t]       = loop_set_bpm_[t] > 0.f ? loop_set_bpm_[t] : global.bpm;
             loop_rate_[t]      = 1.f;
             loop_start_bar_[t] = bar_count_ + 1; // from the top on the next bar line
+            loop_off_[t]       = loop_set_off_[t] < kSteps ? loop_set_off_[t] : 0;
             rl_pos_[t]         = (double)rl_len_[t];
             tail_[t]           = 0;
             loop_on_[t]        = loop_bars_[t] > 0 && rl_len_[t] > 0;
@@ -769,14 +780,58 @@ void Engine::HandleRequests()
             if(t >= 0 && t < kTracks)
             {
                 lr_track_  = t;
+                lr_mode_   = kRecLoop;
                 lr_state_  = 1;
                 lr_stop_   = false;
+                lr_wait_   = 0;
                 loop_on_[t] = false;
                 synth_[t]  = false; // a 303 track becomes a sample track
                 voices_[t][0].active = voices_[t][1].active = false;
                 if(!playing_)
+                {
                     play_req_ = true; // start now: the bar line is right away
+                    if(lr_countin)
+                        lr_wait_ = 2; // the bar line it starts on, then the one after the count
+                }
             }
+        }
+        else if(r == 4 && lr_state_ == 0)
+        {
+            int t = lr_req_track_;
+            if(t >= 0 && t < kTracks && loop_on_[t] && fabsf(loop_rate_[t] - 1.f) < 0.002f)
+            {
+                lr_track_ = t;
+                lr_mode_  = kRecOverdub;
+                lr_state_ = 1;
+                lr_stop_  = false;
+                lr_wait_  = 0;
+                if(!playing_)
+                    play_req_ = true;
+            }
+        }
+        else if(r == 5 && lr_state_ == 0)
+        {
+            int t = lr_req_track_;
+            if(t >= 0 && t < kTracks)
+            {
+                lr_track_   = t;
+                lr_mode_    = kRecShot;
+                lr_state_   = 1;
+                lr_stop_    = false;
+                loop_on_[t] = false;
+                synth_[t]   = false;
+                voices_[t][0].active = voices_[t][1].active = false;
+            }
+        }
+        else if(r == 2 && lr_state_ == 2 && lr_mode_ == kRecShot)
+            ShotFinish();
+        else if(r == 2 && lr_state_ == 2 && lr_mode_ == kRecOverdub)
+        {
+            lr_state_      = 0; // it's already in the loop
+            lr_done_track_ = lr_track_;
+            lr_done_bars_  = lr_bars_done_;
+            lr_done_mode_  = kRecOverdub;
+            lr_done_       = true;
         }
         else if(r == 2 && lr_state_ == 2)
             lr_stop_ = true;
@@ -784,7 +839,7 @@ void Engine::HandleRequests()
             lr_state_ = 0; // stop before it started = cancel
         else if(r == 3)
         {
-            if(lr_state_ == 2 && lr_track_ >= 0)
+            if(lr_state_ == 2 && lr_track_ >= 0 && lr_mode_ != kRecOverdub)
                 slots_[lr_track_].length = 0; // half a take is no use
             lr_state_ = 0;
         }
@@ -796,7 +851,14 @@ void Engine::HandleRequests()
         {
             bar_count_ = 0xFFFFFFFFu; // step 0 makes it bar 0
             for(int t = 0; t < kTracks; t++)
+            {
                 loop_start_bar_[t] = 0;
+                if(loop_on_[t] && loop_off_[t]) // starts mid-bar: its tail fills the bar up to there
+                {
+                    double back = (double)loop_off_[t] * BaseStepLength() * loop_rate_[t];
+                    rl_pos_[t]  = back < (double)rl_len_[t] ? (double)rl_len_[t] - back : 0.0;
+                }
+            }
             playing_      = true;
             clock_step_   = kSteps - 1;
             to_next_step_ = 0.f; // fires step 0 on the next sample
@@ -839,7 +901,15 @@ void Engine::UpdateBlockParams(size_t size)
 {
     bool any_solo = false;
     for(int t = 0; t < kTracks; t++)
-        any_solo |= track[t].solo;
+    {
+        if(mute_latch_ || !playing_ || quant_mute == 0)
+        {
+            mute_eff_[t] = track[t].mute;
+            solo_eff_[t] = track[t].solo;
+        }
+        any_solo |= solo_eff_[t];
+    }
+    mute_latch_ = false;
 
     /* Crossfader: tracks on A fade out to the right, tracks on B fade out
        to the left, both full in the middle; AB tracks ignore it */
@@ -860,24 +930,27 @@ void Engine::UpdateBlockParams(size_t size)
 
         const float rg = side[p.xfade < 3 ? p.xfade : 0];
         float g = p.vol * p.vol * rg * dry;
-        if(p.mute || (any_solo && !p.solo))
+        if(mute_eff_[t] || (any_solo && !solo_eff_[t]))
             g = 0.f;
         float pan = Clamp01(p.pan) * kHalfPi;
         gain_l_[t].Set(cosf(pan) * kSqrt2 * g, size);
         gain_r_[t].Set(sinf(pan) * kSqrt2 * g, size);
         send_rev_[t].Set(p.rev * p.rev * rg, size);
         float ds = p.dly * p.dly;
-        if(echo && !(p.mute || (any_solo && !p.solo)))
+        if(echo && !(mute_eff_[t] || (any_solo && !solo_eff_[t])))
             ds = fmaxf(ds, 0.7f * tph * p.vol);
         send_dly_[t].Set(ds * rg, size);
 
         if(synth_prev_[t])
+        {
             acid_[t].SetParams(p.acid);
+            acid_[t].SetBend(bend_st[t]);
+        }
         if(loop_on_[t]) // follows tempo changes (varispeed)
             loop_rate_[t] = loop_bpm_[t] > 0.f ? global.bpm / loop_bpm_[t] : 1.f;
 
         float st        = roundf((Clamp01(p.pitch) - 0.5f) * 24.f);
-        pitch_ratio_[t] = powf(2.f, st / 12.f) * slots_[t].rate;
+        pitch_ratio_[t] = powf(2.f, (st + bend_st[t]) / 12.f) * slots_[t].rate;
 
         float d = Clamp01(p.drive);
         if(d < 0.02f)
@@ -1098,28 +1171,79 @@ void Engine::Click(bool downbeat)
     click_env_  = downbeat ? 0.4f : 0.25f;
 }
 
-void Engine::LiveRecBar()
+void Engine::LiveRecStep(int s)
 {
-    bar_count_++;
+    if(s == 0)
+        bar_count_++;
     for(int t = 0; t < kTracks; t++)
-        if(loop_on_[t] && loop_bars_[t] > 0
+        if(loop_on_[t] && loop_bars_[t] > 0 && s == loop_off_[t]
            && (bar_count_ - loop_start_bar_[t]) % (uint32_t)loop_bars_[t] == 0)
             rl_pos_[t] = 0.0; // back to the top on its bar
+    if(lr_mode_ == kRecShot)
+        return;
     if(lr_state_ == 1)
     {
+        if(lr_wait_ > 0)
+        {
+            if(s == 0)
+                lr_wait_--;
+            if(lr_wait_ > 0)
+                return;
+        }
+        if(s != 0 && !(quant_rec == 1 && (s % 4) == 0))
+            return;
+        if(lr_mode_ == kRecOverdub && !loop_on_[lr_track_])
+        {
+            lr_state_ = 0; // the loop went away meanwhile
+            return;
+        }
         lr_state_     = 2;
         lr_pos_       = 0;
         lr_bars_done_ = 0;
+        lr_off_       = s;
         return;
     }
-    if(lr_state_ == 2)
+    if(lr_state_ == 2 && s == lr_off_)
     {
-        lr_bars_done_    = lr_bars_done_ + 1;
+        lr_bars_done_ = lr_bars_done_ + 1;
+        const bool full = lr_len_bars && lr_bars_done_ >= lr_len_bars;
+        if(lr_mode_ == kRecOverdub)
+        {
+            if(full)
+            {
+                lr_state_      = 0;
+                lr_done_track_ = lr_track_;
+                lr_done_bars_  = lr_bars_done_;
+                lr_done_mode_  = kRecOverdub;
+                lr_done_       = true;
+            }
+            return;
+        }
         uint32_t bar_len = (uint32_t)(kSteps * BaseStepLength());
         uint32_t cap     = slots_[lr_track_].capacity;
-        if(lr_stop_ || (uint32_t)(lr_bars_done_ + 1) * bar_len > cap)
+        if(lr_stop_ || full || (uint32_t)(lr_bars_done_ + 1) * bar_len > cap)
             LiveRecFinish();
     }
+}
+
+/** A one-shot take ends: a short fade so it doesn't click */
+void Engine::ShotFinish()
+{
+    const int t = lr_track_;
+    Slot&     s = slots_[t];
+    uint32_t  n = lr_pos_, f = n < 240 ? n : 240;
+    for(uint32_t i = 0; i < f; i++)
+        s.data[n - 1 - i] = (int16_t)((int32_t)s.data[n - 1 - i] * (int32_t)i / (int32_t)f);
+    s.rate         = 1.f;
+    loop_on_[t]    = false;
+    loop_off_[t]   = 0;
+    __sync_synchronize();
+    s.length       = n;
+    lr_state_      = 0;
+    lr_done_track_ = t;
+    lr_done_bars_  = 0;
+    lr_done_mode_  = kRecShot;
+    lr_done_       = true;
 }
 
 void Engine::LiveRecFinish()
@@ -1133,12 +1257,14 @@ void Engine::LiveRecFinish()
     loop_bpm_[t]       = global.bpm;
     loop_rate_[t]      = 1.f;
     loop_start_bar_[t] = bar_count_;
+    loop_off_[t]       = (uint8_t)lr_off_;
     rl_pos_[t]       = 0.0;
     tail_[t]           = 0;
     loop_on_[t]        = true;
     lr_state_          = 0;
     lr_done_track_     = t;
     lr_done_bars_      = lr_bars_done_;
+    lr_done_mode_      = kRecLoop;
     lr_done_           = true;
 }
 
@@ -1174,6 +1300,7 @@ void Engine::ApplySwap()
             loop_bpm_[t]       = sw->loop_bpm[t] > 0.f ? sw->loop_bpm[t] : sw->global.bpm;
             loop_rate_[t]      = 1.f;
             loop_start_bar_[t] = bar_count_ + 1;
+            loop_off_[t]       = 0;
             rl_pos_[t]         = (double)rl_len_[t];
             tail_[t]           = 0;
             loop_on_[t]        = true;
@@ -1218,9 +1345,9 @@ void Engine::OnStep(int s)
                 trans_      = swap_->transition;
             }
         }
-        if(s == 0)
-            LiveRecBar();
-        if(s == 0 && queued_pattern_ >= 0)
+        LiveRecStep(s);
+        if(queued_pattern_ >= 0
+           && (s == 0 || quant_pat == 2 || (quant_pat == 1 && (s % 4) == 0)))
         {
             pattern_        = queued_pattern_;
             queued_pattern_ = -1;
@@ -1250,7 +1377,9 @@ void Engine::OnStep(int s)
                 continue;
             StartVoice(t, v == kStepAccent ? 1.f : 0.7f);
         }
-        if(global.metronome && (s % 4) == 0)
+        if(quant_mute == 0 || (s % 4 == 0 && quant_mute == 1) || s == 0)
+            mute_latch_ = true;
+        if((global.metronome || (lr_countin && lr_state_ == 1 && lr_mode_ != kRecShot)) && (s % 4) == 0)
             Click(s == 0);
     }
     for(int t = 0; t < kTracks; t++)
@@ -1684,12 +1813,17 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
         }
 
         /* ---- audio input: meter, live recording ---- */
-        float in = in_l_ ? in_l_[i] : 0.f;
+        float in = in_l_ ? in_l_[i] * in_gain : 0.f;
         {
             float a = fabsf(in);
             in_peak_ = a > in_peak_ ? a : in_peak_ * 0.99995f;
+            if(lr_state_ == 1 && lr_mode_ == kRecShot && a > 0.02f)
+            {
+                lr_state_ = 2; // a one-shot starts with the sound
+                lr_pos_   = 0;
+            }
         }
-        if(lr_state_ == 2)
+        if(lr_state_ == 2 && lr_mode_ != kRecOverdub)
         {
             Slot& s = slots_[lr_track_];
             if(lr_pos_ < s.capacity)
@@ -1698,6 +1832,8 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
                 v             = v > 32767.f ? 32767.f : (v < -32768.f ? -32768.f : v);
                 s.data[lr_pos_++] = (int16_t)v;
             }
+            else if(lr_mode_ == kRecShot)
+                ShotFinish(); // the slot is full
         }
 
         /* ---- tracks ---- */
@@ -1737,10 +1873,15 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
                     }
                     else
                     {
-                        const int16_t* d  = slots_[t].data;
-                        uint32_t       k  = (uint32_t)p;
-                        float          fr = (float)(p - (double)k);
+                        int16_t* d  = slots_[t].data;
+                        uint32_t k  = (uint32_t)p;
+                        float    fr = (float)(p - (double)k);
                         mono = (d[k] + (d[k + 1] - d[k]) * fr) * (1.f / 32768.f);
+                        if(lr_state_ == 2 && lr_mode_ == kRecOverdub && lr_track_ == t)
+                        {
+                            float v = (float)d[k] + in * 32767.f; // on top, in place
+                            d[k]    = (int16_t)(v > 32767.f ? 32767.f : (v < -32768.f ? -32768.f : v));
+                        }
                         rl_pos_[t] = p + loop_rate_[t];
                         tail_[t]     = (uint32_t)(sr_ * 0.5f);
                     }

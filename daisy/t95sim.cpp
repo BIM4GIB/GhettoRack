@@ -150,6 +150,12 @@ class SimPlat : public Platform
     bool     ControllerPresent() override;
     uint32_t Dropped() override { return 0; }
     bool     AudioRunning() override { return true; }
+    int16_t* UndoMem(uint32_t* n) override
+    {
+        static std::vector<int16_t> u(1536 * 1024);
+        *n = (uint32_t)u.size();
+        return u.data();
+    }
     int16_t* Staging(uint32_t* n) override // like the Daisy's (SDRAM there)
     {
         static std::vector<int16_t> stage(4600 * 1024);
@@ -215,6 +221,8 @@ int main(int argc, char** argv)
 
     float    outl[48], outr[48], in[48] = {};
     uint32_t last = NowMs();
+    const bool tone = getenv("T95SIM_INPUT") != nullptr;
+    uint32_t   tone_n = 0;
     for(;;)
     {
         /* Like main.cpp: `now` is read at the top of the pass, frames are
@@ -236,6 +244,9 @@ int main(int argc, char** argv)
         }
         while(last != now) // 1 ms of audio per ms, like the Daisy
         {
+            if(tone) // T95SIM_INPUT=1: something on the audio input (a plucked 220 Hz twice a second)
+                for(int k = 0; k < 48; k++, tone_n++)
+                    in[k] = 0.5f * expf(-(float)(tone_n % 24000) / 6000.f) * sinf(6.2831853f * 220.f * (float)(tone_n % 48000) / 48000.f);
             eng_.SetInput(in, in);
             eng_.Process(outl, outr, 48);
             last++;

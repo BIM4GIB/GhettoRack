@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <dirent.h>
+#include <functional>
 #include <string>
 #include <sys/stat.h>
 #include <vector>
@@ -114,6 +115,12 @@ class TestPlat : public Platform
         return ok;
     }
     bool Remove(const char* p) override { return ::remove(Full(p).c_str()) == 0; }
+    int16_t* UndoMem(uint32_t* n) override
+    {
+        static std::vector<int16_t> u(1536 * 1024);
+        *n = (uint32_t)u.size();
+        return u.data();
+    }
     int16_t* Staging(uint32_t* n) override
     {
         static std::vector<int16_t> m(stage_samples);
@@ -143,6 +150,7 @@ static Engine   e;
 static uint32_t now_ms = 0;
 static float    outl[48], outr[48];
 static float    peak_last = 0.f;
+static float    test_in_amp = 0.f; // a 220 Hz tone on the audio input
 
 /* 1 ms of everything: audio block, main loop poll */
 static void Tick(int n = 1)
@@ -150,6 +158,9 @@ static void Tick(int n = 1)
     for(int i = 0; i < n; i++)
     {
         static float in[48] = {};
+        static uint32_t ph = 0;
+        for(int k = 0; k < 48; k++, ph++)
+            in[k] = test_in_amp * sinf(6.2831853f * 220.f * (float)(ph % 48000) / 48000.f);
         e.SetInput(in, in);
         e.Process(outl, outr, 48);
         for(int k = 0; k < 48; k++)
@@ -629,7 +640,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 6 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 7 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -702,7 +713,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 6 03 01 02 1") >= 1);
+        CHECK(T95Count("P 7 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -721,7 +732,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 6 ") >= 1);
+        CHECK(T95Count("P 7 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1110,7 +1121,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 6 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 7 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1246,6 +1257,212 @@ int main()
         T95Frame("\x1bM3 903c64\n\x1bM9 903c64\n\x1bMx\n\x1bN\n");
         CHECK(t95p.Unattached() == 1);
         printf("t95 ports ok\n");
+    }
+
+    /* ---------- looper, one-shot sampling, quantise, roll, keyboard knobs ---------- */
+    {
+        auto U     = [](const char* a) {
+            CHECK(BoxUiCommand(a, now_ms));
+            Tick(2);
+        };
+        auto until = [](const std::function<bool()>& f, int max_ms) {
+            int n = 0;
+            while(!f() && n++ < max_ms)
+                Tick();
+            return f();
+        };
+        auto idle = [] { return e.LiveRecState() == 0; };
+        e.Stop();
+        WaitIdle();
+        Tick(50);
+        U("tempo 1200"); // a bar is 2000 ms, a step 125 ms
+        U("pat 1");
+        const Slot& s5 = e.GetSlot(4);
+
+        /* a take of a fixed length stops by itself */
+        U("lrec len 1");
+        test_in_amp = 0.3f;
+        ui_lines.clear();
+        U("lrec arm 5");
+        Tick(30);
+        CHECK(e.LiveRecState() == 2 && e.LiveRecMode() == Engine::kRecLoop);
+        Tick(2100);
+        CHECK(idle() && e.IsLoop(4) && e.LoopBars(4) == 1 && labs((long)s5.length - 96000) < 4);
+        Tick(40);
+        CHECK(rep_lp[0] && atoi(strrchr(rep_lp, ' ')) == 5); // the take on track 5 can be undone
+
+        /* overdub: on top, in place, one pass; undo puts the first take back */
+        std::vector<int16_t> first(s5.data, s5.data + s5.length);
+        test_in_amp = 0.2f;
+        U("lrec over 5");
+        CHECK(e.LiveRecState() == 1 && e.LiveRecMode() == Engine::kRecOverdub);
+        CHECK(until([] { return e.LiveRecState() == 2; }, 2100));
+        CHECK(e.IsLoop(4)); // still playing underneath
+        CHECK(until(idle, 2100));
+        Tick(5);
+        long diff = 0;
+        for(uint32_t k = 0; k < s5.length; k++)
+            diff += labs((long)s5.data[k] - first[k]);
+        CHECK(diff > 96000L * 1000 && labs((long)s5.length - 96000) < 4 && e.LoopBars(4) == 1);
+        U("lrec undo");
+        CHECK(!memcmp(s5.data, first.data(), first.size() * 2) && e.IsLoop(4));
+        U("lrec undo"); // only one take back
+        CHECK(e.IsLoop(4));
+
+        /* not at another tempo (it would land in the wrong place) */
+        U("tempo 1300");
+        U("lrec over 5");
+        CHECK(idle());
+        U("tempo 1200");
+        Tick(5);
+
+        /* a new take over a loop, undone: the old loop is back */
+        U("lrec len 2");
+        U("lrec arm 5");
+        CHECK(until([] { return e.LiveRecState() == 2; }, 2100));
+        CHECK(until(idle, 4100));
+        Tick(5);
+        CHECK(e.LoopBars(4) == 2 && labs((long)s5.length - 192000) < 4);
+        U("lrec undo");
+        Tick(2100);
+        CHECK(e.IsLoop(4) && e.LoopBars(4) == 1 && labs((long)s5.length - 96000) < 4);
+        CHECK(!memcmp(s5.data, first.data(), first.size() * 2));
+
+        /* cancelling an armed take gives the loop back too */
+        U("lrec arm 5");
+        Tick(3);
+        U("lrec cancel");
+        Tick(2100);
+        CHECK(idle() && e.IsLoop(4) && labs((long)s5.length - 96000) < 4);
+
+        /* a take that starts on the beat keeps its place in the bar */
+        U("quant rec 1");
+        U("lrec len 1");
+        CHECK(until([] { return e.CurrentStep() == 5; }, 2100));
+        U("lrec arm 6");
+        CHECK(until([] { return e.LiveRecState() == 2; }, 500));
+        CHECK(e.CurrentStep() == 8);
+        CHECK(until(idle, 2100));
+        CHECK(e.CurrentStep() == 8 && e.IsLoop(5) && e.LoopBars(5) == 1 && e.LoopOffset(5) == 8);
+        U("quant rec 0");
+
+        /* count-in: from stopped, a bar of clicks first */
+        e.Stop();
+        Tick(50);
+        U("lrec count 1");
+        U("lrec arm 8");
+        Tick(1500);
+        CHECK(e.LiveRecState() == 1 && e.Playing());
+        Tick(600);
+        CHECK(e.LiveRecState() == 2);
+        CHECK(until(idle, 2100));
+        CHECK(e.IsLoop(7) && e.LoopBars(7) == 1);
+        U("lrec count 0");
+        U("lrec len 0");
+
+        /* one-shot: waits for sound, ends when told, nothing to do with the transport */
+        e.Stop();
+        Tick(50);
+        test_in_amp = 0.f;
+        U("lrec shot 7");
+        Tick(200);
+        CHECK(e.LiveRecState() == 1 && e.LiveRecMode() == Engine::kRecShot && !e.Playing());
+        test_in_amp = 0.5f;
+        Tick(300);
+        CHECK(e.LiveRecState() == 2);
+        U("lrec stop");
+        Tick(5);
+        const Slot& s7 = e.GetSlot(6);
+        CHECK(idle() && !e.IsLoop(6) && !e.Playing());
+        CHECK(s7.length > 13500 && s7.length < 15000 && s7.data[s7.length - 1] == 0);
+        CHECK(IsRecPath(slot_path[6]));
+        test_in_amp = 0.f;
+        U("lrec undo"); // the kit sound comes back
+        WaitIdle();
+        CHECK(!IsRecPath(slot_path[6]) && BuiltInKitOf(slot_path[6]) >= 0);
+
+        /* pattern switches: on the next step, on the beat, on the bar */
+        e.Play();
+        Tick(20);
+        U("quant pat 2");
+        CHECK(until([] { return e.CurrentStep() == 5; }, 2100));
+        U("pat 3");
+        Tick(130);
+        CHECK(e.CurrentPattern() == 2);
+        U("quant pat 1");
+        CHECK(until([] { return e.CurrentStep() == 9; }, 2100));
+        U("pat 1");
+        Tick(130);
+        CHECK(e.CurrentPattern() == 2);
+        CHECK(until([] { return e.CurrentStep() == 12; }, 500));
+        CHECK(e.CurrentPattern() == 0);
+        U("quant pat 0");
+        CHECK(until([] { return e.CurrentStep() == 2; }, 2100));
+        U("pat 3");
+        Tick(1000);
+        CHECK(e.CurrentPattern() == 0);
+        CHECK(until([] { return e.CurrentStep() == 0; }, 2100));
+        CHECK(e.CurrentPattern() == 2);
+        U("pat 1");
+
+        /* mutes can wait for the bar */
+        U("quant mute 2");
+        CHECK(until([] { return e.CurrentStep() == 2; }, 4100));
+        U("mute 1 1");
+        Tick(300);
+        CHECK(e.track[0].mute && !e.MuteLive(0));
+        CHECK(until([] { return e.CurrentStep() == 0; }, 2100));
+        Tick(3);
+        CHECK(e.MuteLive(0));
+        U("quant mute 0");
+        U("mute 1 0");
+        Tick(3);
+        CHECK(!e.MuteLive(0));
+
+        /* roll from a page; it lets go when the T95 goes quiet */
+        uint32_t c = e.TriggerCount(2);
+        U("roll 3 1");
+        Tick(1000);
+        CHECK(e.TriggerCount(2) - c >= 4);
+        BoxUiGone();
+        Tick(300);
+        c = e.TriggerCount(2);
+        e.ClearTrack(e.CurrentPattern(), 2);
+        Tick(1000);
+        CHECK(e.TriggerCount(2) == c);
+        e.Stop();
+        Tick(50);
+
+        /* a keyboard's knobs, wheel and pads */
+        SelectTrack(1);
+        BoxKeys(3, 0, 74, 100, now_ms);
+        CHECK(fabsf(e.track[1].filter - 100.f / 127.f) < 0.001f);
+        BoxKeys(3, 0, 7, 50, now_ms);
+        CHECK(fabsf(e.track[1].vol - 50.f / 127.f) < 0.001f);
+        BoxKeys(6, 0, 0, 96, now_ms); // half way up
+        CHECK(fabsf(e.bend_st[1] - 1.f) < 0.01f);
+        BoxKeys(6, 0, 0, 64, now_ms);
+        CHECK(e.bend_st[1] == 0.f);
+        c = e.TriggerCount(2);
+        BoxKeys(1, 9, 38, 100, now_ms);
+        Tick(5);
+        CHECK(e.TriggerCount(2) == c + 1);
+        e.track[1] = TrackParams();
+        U("ingain 127");
+        CHECK(fabsf(e.in_gain - 4.f) < 0.01f);
+        U("ingain 64");
+        CHECK(e.in_gain == 1.f);
+        CHECK(!BoxUiCommand("lrec len 3", now_ms) && !BoxUiCommand("quant rec 2", now_ms));
+        for(int t : {4, 5, 7}) // back to kit sounds
+        {
+            e.ClearLoop(t);
+            char p[8];
+            snprintf(p, sizeof(p), "@k%d", BuiltInKitFor(t));
+            QueueLoad(t, p, false);
+        }
+        WaitIdle();
+        SelectTrack(0);
+        printf("looper, quantise, roll, keyboard controls ok\n");
     }
 
     /* A performance FX held from a page lets go when the T95 goes quiet,

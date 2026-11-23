@@ -34,14 +34,15 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 3 Mixer | Mixer | `mixer` | per track: pan, reverb, delay, send C, fader, meters, mute/solo, crossfader side; master strip | built |
 | 4 Sound | Sample track | `sound` | waveform with start and playhead; 8 device pots, 8 track pots | built |
 | 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | built |
-| 4 Sound | Live loop | `loop` | loop waveform with bar lines, arm, stop at bar, cancel, back to a sample | built (no input level yet) |
-| 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete | built |
-| 5 Samples | Record | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built (trim, normalise: later; the Daisy's own input records as a live loop, ARM) |
+| 4 Sound | Live loop | `loop` | loop waveform with bar lines, re-record, overdub, stop, undo take | built (v13.12) |
+| 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete. Tap a file: trim view (two markers on a big waveform, normalise, hear the result, send) | built |
+| 5 Samples | Looper | - | the Daisy's own input into the selected track: input meter, level pot, monitor, count-in, take length (free/1/2/4/8 bars), start on bar or beat; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO TAKE, CLEAR; the track's waveform | built (v13.12) |
+| 5 Samples | Mic | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built |
 | 5 Samples | Kits | - | every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.10) |
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
 | 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
-| 8 System | System | `system` | links, ping, OLED mirror, APC40 LED mirror, log, settings | built |
+| 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat), other modules | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
 | - | Slice | - | chop a sample or loop across steps | later (new firmware feature) |
 | - | Keys | - | on-screen keyboard and pads for the selected track, scale lock | later |
@@ -72,7 +73,10 @@ live, with markers and bar lines), pad, list row with waveform.
 - 303 steps: note and slide. 303 pots: cutoff, reso, env mod, decay, accent,
   tune, slide, wave (saw/square).
 - Sample track pots: pitch, decay, filter, reso, start, reverse, drive, prob.
-- Live loop: arm, records whole bars, stop ends on the bar, cancel. No overdub.
+- Live loop: arm, records whole bars, stop ends on the bar, cancel. From
+  v13.12: fixed take lengths, overdub (in place, at the loop's tempo), undo
+  of the last take, count-in, start on the beat, input level, and one-shot
+  sampling from the input (starts with the sound).
 - The APC40's REC ARM button is "roll" (hold to repeat a track), not record
   arm. On these screens ARM means arming a live loop recording for that track.
 - v13.9 (control protocol 4, report 10) adds what the screens need, with no
@@ -82,8 +86,13 @@ live, with markers and bar lines), pad, list row with waveform.
   level meters (`H`), the 64-pattern mask (`O`) and a waveform outline per
   track (`Z`). See `protocol/serial.md`. Desktop-tested; not flashed yet.
 - v13.10 (control protocol 5, report 11): sets and the kit list for the pages.
+- v13.12 (control protocol 7, report 13): looper and quantise settings (`LP`),
+  roll from a page (ROLL on the Perform strips, hold), keyboard knobs (CC 1/74
+  filter, 71 reso, 72 decay, 73 start, 7 volume, 10 pan, 91 reverb, 93 delay),
+  pitch bend (2 semitones) and pads (channel 10, notes 36-51 = tracks 1-16)
+  on the selected track. Desktop-tested; not flashed yet.
 - Still missing in the firmware: sample browser on the Daisy's card from the
-  T95, roll from a page.
+  T95.
 
 ## Layouts
 

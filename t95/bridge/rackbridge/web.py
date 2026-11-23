@@ -1,7 +1,7 @@
 """HTTP, SSE /events, the JSON API, HTTPS certificate."""
 from .common import *
 from .util import *
-from .samples import safe_join
+from .samples import safe_join, edit_args
 
 
 class Client:
@@ -152,7 +152,8 @@ class WebMixin:
         if path in ("/presets/save", "/presets/load", "/presets/delete"):
             return self.preset(path.rsplit("/", 1)[1], d.get("name"))
         if path == "/samples/send":
-            return self.queue_send(d.get("src", "lib"), d.get("path", ""), d.get("track"))
+            return self.queue_send(d.get("src", "lib"), d.get("path", ""), d.get("track"),
+                                   d.get("start"), d.get("end"), d.get("norm", False))
         if path == "/samples/delete":
             p = safe_join(self.roots("lib"), d.get("path", ""))
             if p is None or not os.path.isfile(p):
@@ -250,7 +251,12 @@ class WebMixin:
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
             elif path in ("/samples/peaks", "/samples/preview"):
                 wav = path.endswith("preview")
-                code, out = await self.preview(params.get("src", "lib"), urllib.parse.unquote(params.get("path", "")), wav)
+                edit = edit_args(params.get("start"), params.get("end"), params.get("norm"))
+                if edit is None:
+                    code, out = 400, {"error": "start and end: 0-1, start before end"}
+                else:
+                    code, out = await self.preview(params.get("src", "lib"),
+                                                   urllib.parse.unquote(params.get("path", "")), wav, edit)
                 if code == 200 and wav:
                     await self.reply(writer, 200, "audio/wav", out)
                 else:

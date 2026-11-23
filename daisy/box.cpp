@@ -295,6 +295,11 @@ int       undo_top = 0, undo_count = 0;
 void      ClearUndo();
 bool     recording = false;
 bool     roll_held[kTracks]     = {};
+bool     ui_roll[kTracks]       = {}; // held from a T95 page
+int      kb_bend_track          = -1; // the track a keyboard's wheel is bending
+int      in_gain_ui             = 64; // input level as the pages set it (0-127, 64 = as it comes)
+void     ForgetReportedName(int t); // the next report sends the track's name again
+void     ReleaseKeys();
 bool     fx_latched[kNumPerfFx] = {};
 bool     fx_pressed[kNumPerfFx] = {};
 uint32_t last_trig[kTracks]     = {};
@@ -960,6 +965,155 @@ bool LoadProject()
 /* ================================================================== */
 /* Controls                                                            */
 
+/* ---- looper: what was on the track before a take, for undo and cancel ---- */
+struct LooperUndo
+{
+    int      track = -1;
+    bool     valid = false;   // a finished take can be undone
+    bool     data  = false;   // the sound itself is in the undo memory
+    bool     loop  = false;
+    int      mode  = 0;       // what the take was (Engine::kRec...)
+    int      bars = 0, off = 0;
+    float    bpm  = 0.f;
+    uint32_t length = 0, gen = 0;
+    char     path[kPathLen] = "", orig[kPathLen] = "";
+};
+LooperUndo lundo;
+
+void LooperBackup(int t, int mode)
+{
+    uint32_t    cap = 0;
+    int16_t*    mem = plat->UndoMem(&cap);
+    const Slot& s   = eng->GetSlot(t);
+    lundo.track     = t;
+    lundo.valid     = false;
+    lundo.mode      = mode;
+    lundo.loop      = eng->IsLoop(t);
+    lundo.bars      = eng->LoopBars(t);
+    lundo.off       = eng->LoopOffset(t);
+    lundo.bpm       = eng->LoopBpm(t);
+    lundo.length    = s.length;
+    snprintf(lundo.path, kPathLen, "%s", slot_path[t]);
+    snprintf(lundo.orig, kPathLen, "%s", slot_orig[t]);
+    /* recordings exist nowhere else; anything else reloads from where it came */
+    lundo.data = mem && (lundo.loop || IsRecPath(slot_path[t])) && s.length && s.length <= cap
+                 && !eng->IsSynth(t);
+    if(lundo.data)
+        memcpy(mem, s.data, (size_t)s.length * sizeof(int16_t));
+}
+
+/** Puts back what LooperBackup kept */
+void LooperRestore()
+{
+    const int t = lundo.track;
+    if(t < 0)
+        return;
+    lundo.valid = false;
+    if(lundo.data)
+    {
+        uint32_t cap = 0;
+        int16_t* mem = plat->UndoMem(&cap);
+        Slot&    s   = eng->GetSlot(t);
+        if(lundo.mode == Engine::kRecOverdub)
+        {
+            memcpy(s.data, mem, (size_t)lundo.length * sizeof(int16_t)); // same loop, keeps running
+            slot_gen[t]++;
+            return;
+        }
+        s.length = 0;
+        memcpy(s.data, mem, (size_t)lundo.length * sizeof(int16_t));
+        s.rate   = 1.f;
+        s.length = lundo.length;
+        if(lundo.loop)
+            eng->SetLoop(t, lundo.bars, lundo.bpm, lundo.off);
+        else
+            eng->ClearLoop(t);
+        snprintf(slot_path[t], kPathLen, "%s", lundo.path);
+        snprintf(slot_orig[t], kPathLen, "%s", lundo.orig);
+        slot_gen[t]++;
+        ForgetReportedName(t);
+        return;
+    }
+    if(lundo.mode == Engine::kRecOverdub)
+        return; // nothing kept (no memory): it stays as it is
+    eng->ClearLoop(t);
+    const char* p = lundo.orig[0] ? lundo.orig : lundo.path;
+    char        k[8];
+    if(!p[0] || IsRecPath(p))
+    {
+        snprintf(k, sizeof(k), "@k%d", BuiltInKitFor(t));
+        p = k;
+    }
+    QueueLoad(t, p, false);
+}
+
+/** mode: Engine::kRecLoop / kRecOverdub / kRecShot. false = not now */
+bool LooperStart(int t, int mode)
+{
+    if(eng->LiveRecState() != 0 || TrackLoading(t) || set_op)
+        return false;
+    if(mode == Engine::kRecOverdub)
+    {
+        if(!eng->IsLoop(t))
+        {
+            Popup("track %d has no loop", t + 1);
+            return false;
+        }
+        if(fabsf(eng->global.bpm - eng->LoopBpm(t)) > 0.002f * eng->LoopBpm(t))
+        {
+            Popup("overdub: at %d BPM only", (int)(eng->LoopBpm(t) + 0.5f));
+            return false;
+        }
+    }
+    if(t == sel_track)
+        ReleaseKeys();
+    LooperBackup(t, mode);
+    const char* q = eng->quant_rec ? "beat" : "bar";
+    if(mode == Engine::kRecOverdub)
+    {
+        eng->LiveRecOverdub(t);
+        Popup("overdub %d: from the %s", t + 1, q);
+    }
+    else if(mode == Engine::kRecShot)
+    {
+        eng->LiveRecShot(t);
+        Popup("sample %d: waiting for sound", t + 1);
+    }
+    else
+    {
+        eng->LiveRecArm(t);
+        Popup("rec %d: from the %s", t + 1, q);
+    }
+    return true;
+}
+
+void LooperCancel()
+{
+    if(eng->LiveRecState() == 0)
+        return;
+    eng->LiveRecCancel();
+    LooperRestore(); // arming already took the track's sound away
+    Popup("rec cancelled");
+}
+
+void LooperUndoTake()
+{
+    if(eng->LiveRecState() != 0)
+    {
+        LooperCancel();
+        return;
+    }
+    if(!lundo.valid || lundo.track < 0 || slot_gen[lundo.track] != lundo.gen)
+    {
+        Popup("no take to undo");
+        return;
+    }
+    int t = lundo.track;
+    LooperRestore();
+    Popup("take on %d undone", t + 1);
+    Log("looper: undid the last take on track %d", t + 1);
+}
+
 void ToggleRecord()
 {
     recording = !recording;
@@ -1364,7 +1518,7 @@ void TrackButton(uint8_t note, int strip, bool on)
     {
         case apc::kRecArm:
             roll_held[col] = on;
-            eng->SetRoll(col, on);
+            eng->SetRoll(col, on || ui_roll[col]);
             break;
         case apc::kSolo:
             if(!on)
@@ -1497,13 +1651,10 @@ void OnButton(uint8_t ch, uint8_t note, bool on, uint32_t now)
                 case 0:
                     if(TrackLoading(sel_track))
                         break;
-                    ReleaseKeys();
-                    eng->LiveRecArm(sel_track);
-                    Popup("rec %d: from the bar", sel_track + 1);
+                    LooperStart(sel_track, Engine::kRecLoop);
                     break;
                 case 1:
-                    eng->LiveRecCancel();
-                    Popup("rec cancelled");
+                    LooperCancel();
                     break;
                 default:
                     eng->LiveRecStop();
@@ -2199,6 +2350,8 @@ void TrackLabel(char* o, size_t n, int t)
     }
     else if(IsSynthPath(p))
         snprintf(o, n, "%d 303", t + 1);
+    else if(IsRecPath(p) && !eng->IsLoop(t))
+        snprintf(o, n, "%d recorded", t + 1);
     else if(IsRecPath(p))
         snprintf(o, n, "%d loop %d bar%s", t + 1, eng->LoopBars(t), eng->LoopBars(t) == 1 ? "" : "s");
     else
@@ -2399,7 +2552,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 12; // 12: CK (following a clock), CL (step timing, for the T95 to follow the Daisy)
+constexpr int kReportVersion = 13; // 12: CK (following a clock), CL (step timing); 13: LP (looper and quantise settings), N "[recorded]"
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2428,6 +2581,8 @@ char     rep_notes[kTracks][2 * kSteps + 1];
 int      rep_notes_pat[kTracks];
 uint8_t  rep_acid[kTracks][8];
 char     rep_name[kTracks][kPathLen];
+char     rep_lp[48] = "";
+void     ForgetReportedName(int t) { rep_name[t][0] = 0; }
 int      rep_browse[4] = {-2, -2, -2, -2};
 int      rep_kit[4]    = {-2, -2, -2, -2};
 char     rep_leds[2][81];
@@ -2457,6 +2612,7 @@ void ForceFullReport()
         rep_sets[i][0] = 0;
     rep_trans    = -1;
     rep_ck[0]    = 0;
+    rep_lp[0]    = 0;
     rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
 
@@ -2510,7 +2666,7 @@ void Report(uint32_t now)
     }
     for(int t = 0; t < kTracks; t++)
     {
-        roll |= roll_held[t] << t;
+        roll |= (roll_held[t] || ui_roll[t]) << t;
         mute |= eng->track[t].mute << t;
         solo |= eng->track[t].solo << t;
         loading |= TrackLoading(t) << t;
@@ -2654,7 +2810,12 @@ void Report(uint32_t now)
             else if(IsSynthPath(slot_path[t]))
                 Out("N %d [303]", t);
             else if(IsRecPath(slot_path[t]))
-                Out("N %d [loop %d bars]", t, eng->LoopBars(t));
+            {
+                if(eng->IsLoop(t))
+                    Out("N %d [loop %d bars]", t, eng->LoopBars(t));
+                else
+                    Out("N %d [recorded]", t);
+            }
             else
             {
                 int k = BuiltInKitOf(slot_path[t]);
@@ -2821,6 +2982,22 @@ void Report(uint32_t now)
             strcpy(rep_ck, ck);
             rep_ck_at = g_now;
             Out("%s", ck);
+        }
+    }
+    {
+        /* looper and quantise settings: take length, count-in, quantise of
+           takes / pattern switches / mutes, input level, what the running
+           take is (0 loop, 1 overdub, 2 one-shot), the track whose last take
+           can be undone (0 = none) */
+        char lp[48];
+        bool can = lundo.valid && lundo.track >= 0 && slot_gen[lundo.track] == lundo.gen;
+        snprintf(lp, sizeof(lp), "LP %d %d %d %d %d %d %d %d", eng->lr_len_bars, eng->lr_countin ? 1 : 0,
+                 eng->quant_rec, eng->quant_pat, eng->quant_mute, in_gain_ui, eng->LiveRecMode(),
+                 can ? lundo.track + 1 : 0);
+        if(strcmp(lp, rep_lp))
+        {
+            strcpy(rep_lp, lp);
+            Out("%s", lp);
         }
     }
     {
@@ -3041,8 +3218,47 @@ void BoxKeys(int type, int ch, int d0, int d1, uint32_t now)
     if(d0 < 0 || d0 > 127)
         return;
     bool on = type == kMidiNoteOn && d1 > 0;
+    if(type == 6) // pitch bend: +-2 semitones on the selected track
+    {
+        int v = ((d1 & 127) << 7 | (d0 & 127)) - 8192;
+        if(kb_bend_track >= 0 && kb_bend_track != sel_track)
+            eng->bend_st[kb_bend_track] = 0.f;
+        kb_bend_track          = v ? sel_track : -1;
+        eng->bend_st[sel_track] = v * (2.f / 8192.f);
+        return;
+    }
+    if(type == 3) // knobs and wheels: the selected track
+    {
+        TrackParams& p = eng->track[sel_track];
+        const float  v = Knob((uint8_t)(d1 & 127));
+        const bool   s = eng->IsSynth(sel_track);
+        switch(d0)
+        {
+            case 1: // mod wheel
+            case 74: *(s ? &p.acid.cutoff : &p.filter) = v; break;
+            case 71: *(s ? &p.acid.reso : &p.reso) = v; break;
+            case 72: *(s ? &p.acid.decay : &p.decay) = v; break;
+            case 73: p.start = v; break;
+            case 7:
+                p.vol = v;
+                if(sel_track >= track_page * 8 && sel_track < track_page * 8 + 8)
+                    fader_live[sel_track - track_page * 8] = false;
+                break;
+            case 10: p.pan = v; break;
+            case 91: p.rev = v; break;
+            case 93: p.dly = v; break;
+            default: break;
+        }
+        return;
+    }
     if(!on && type != kMidiNoteOn && type != kMidiNoteOff)
-        return; // CCs, bends: not mapped yet
+        return;
+    if(ch == 9) // drum pads (channel 10): 36.. = tracks 1..16
+    {
+        if(on && d0 >= 36 && d0 < 36 + kTracks)
+            eng->TriggerLive(d0 - 36);
+        return;
+    }
     if(kb_track[d0] >= 0) // release what this key started (also on a repeat)
     {
         eng->KeyNote(kb_track[d0], kb_note[d0], 64, false);
@@ -3068,6 +3284,9 @@ void BoxKeys(int type, int ch, int d0, int d1, uint32_t now)
 
 void BoxKeysGone()
 {
+    if(kb_bend_track >= 0)
+        eng->bend_st[kb_bend_track] = 0.f;
+    kb_bend_track = -1;
     if(!kb_init)
         return;
     for(int k = 0; k < 128; k++)
@@ -3082,15 +3301,40 @@ void BoxPoll(uint32_t now)
 {
     g_now = now;
     {
-        int t, bars;
-        if(eng->TakeLiveRecDone(&t, &bars))
+        int t, bars, mode = 0;
+        if(eng->TakeLiveRecDone(&t, &bars, &mode))
         {
-            snprintf(slot_path[t], kPathLen, "%s", kRecPath);
-            snprintf(slot_orig[t], kPathLen, "%s", kRecPath);
             slot_gen[t]++;
-            loaded_kit_pg[t / 8] = -1;
-            Popup("loop %d: %d bar%s", t + 1, bars, bars == 1 ? "" : "s");
-            Log("recorded a %d bar loop into track %d", bars, t + 1);
+            if(lundo.track == t)
+            {
+                lundo.valid = true;
+                lundo.gen   = slot_gen[t];
+            }
+            if(mode == Engine::kRecOverdub)
+            {
+                Popup("overdub %d done", t + 1);
+                Log("overdubbed the loop on track %d", t + 1);
+            }
+            else
+            {
+                snprintf(slot_path[t], kPathLen, "%s", kRecPath);
+                snprintf(slot_orig[t], kPathLen, "%s", kRecPath);
+                ForgetReportedName(t);
+                loaded_kit_pg[t / 8] = -1;
+                if(mode == Engine::kRecShot)
+                {
+                    uint32_t ms = (uint32_t)((uint64_t)eng->GetSlot(t).length * 1000u / 48000u);
+                    Popup("sample %d: %lu.%lu s", t + 1, (unsigned long)(ms / 1000), (unsigned long)(ms % 1000 / 100));
+                    Log("recorded a %lu ms sample into track %d", (unsigned long)ms, t + 1);
+                    if(!eng->Playing())
+                        eng->Audition(t);
+                }
+                else
+                {
+                    Popup("loop %d: %d bar%s", t + 1, bars, bars == 1 ? "" : "s");
+                    Log("recorded a %d bar loop into track %d", bars, t + 1);
+                }
+            }
         }
     }
     static uint32_t last_screen = 0;
@@ -3210,6 +3454,13 @@ bool ui_fx_held[kNumPerfFx] = {};
 
 void BoxUiGone()
 {
+    for(int t = 0; t < kTracks; t++)
+        if(ui_roll[t])
+        {
+            ui_roll[t] = false;
+            if(!roll_held[t])
+                eng->SetRoll(t, false);
+        }
     for(int f = 0; f < kNumPerfFx; f++)
         if(ui_fx_held[f])
         {
@@ -3365,24 +3616,45 @@ bool BoxUiCommand(const char* c, uint32_t now)
         }
     }
     else if(sscanf(c, "lrec arm %d", &n) == 1 && n >= 1 && n <= kTracks)
-    {
-        if(eng->LiveRecState() == 0 && !TrackLoading(n - 1))
-        {
-            if(n - 1 == sel_track)
-                ReleaseKeys();
-            eng->LiveRecArm(n - 1);
-            Popup("rec %d: from the bar", n);
-        }
-    }
+        LooperStart(n - 1, Engine::kRecLoop);
+    /* ---- control protocol 7: looper, one-shot sampling, quantise, roll ---- */
+    else if(sscanf(c, "lrec over %d", &n) == 1 && n >= 1 && n <= kTracks)
+        LooperStart(n - 1, Engine::kRecOverdub);
+    else if(sscanf(c, "lrec shot %d", &n) == 1 && n >= 1 && n <= kTracks)
+        LooperStart(n - 1, Engine::kRecShot);
     else if(strcmp(c, "lrec stop") == 0)
     {
         if(eng->LiveRecState() == 2)
             eng->LiveRecStop();
+        else if(eng->LiveRecState() == 1)
+            LooperCancel();
     }
     else if(strcmp(c, "lrec cancel") == 0)
+        LooperCancel();
+    else if(strcmp(c, "lrec undo") == 0)
+        LooperUndoTake();
+    else if(sscanf(c, "lrec len %d", &n) == 1 && (n == 0 || n == 1 || n == 2 || n == 4 || n == 8))
+        eng->lr_len_bars = (uint8_t)n;
+    else if(sscanf(c, "lrec count %d", &a) == 1 && a >= 0 && a <= 2)
+        eng->lr_countin = Flag(eng->lr_countin, a);
+    else if(sscanf(c, "quant %11s %d", w, &a) == 2 && a >= 0 && a <= 2)
     {
-        if(eng->LiveRecState() != 0)
-            eng->LiveRecCancel();
+        if(strcmp(w, "rec") == 0 && a <= 1)
+            eng->quant_rec = (uint8_t)a;
+        else if(strcmp(w, "pat") == 0)
+            eng->quant_pat = (uint8_t)a;
+        else if(strcmp(w, "mute") == 0)
+            eng->quant_mute = (uint8_t)a;
+        else
+            return false;
+    }
+    else if(sscanf(c, "ingain %d", &a) == 1 && a >= 0 && a <= 127)
+        in_gain_ui = a, eng->in_gain = a == 64 ? 1.f : a * (2.f / 127.f) * a * (2.f / 127.f); // 64 = as it comes, 127 = x4
+    else if(sscanf(c, "roll %d %d", &n, &a) == 2 && n >= 1 && n <= kTracks && a >= 0 && a <= 1)
+    {
+        ui_roll[n - 1] = a == 1;
+        if(a || !roll_held[n - 1])
+            eng->SetRoll(n - 1, a == 1);
     }
     else if(sscanf(c, "kit %d %d", &n, &a) == 2 && n >= 1 && n <= num_kits && a >= 0 && a <= 1)
         LoadKit(n - 1, true, a); // a: track page (0 = tracks 1-8, 1 = 9-16)

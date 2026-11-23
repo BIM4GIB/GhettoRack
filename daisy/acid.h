@@ -115,6 +115,8 @@ class AcidVoice
     }
 
     /** Knobs: once per audio block */
+    /** Pitch bend in semitones (a keyboard's wheel) */
+    void SetBend(float st) { bend_st_ = st; }
     void SetParams(const AcidParams& p)
     {
         float slide_tau = 0.012f * powf(25.f, p.slide);
@@ -171,7 +173,7 @@ class AcidVoice
 
         /* ---- slide ---- */
         float pitch_s = retrig ? note_ : pitch_s_ + (note_ - pitch_s_) * slide_k_;
-        float semis   = pitch_s + tune_st_;
+        float semis   = pitch_s + tune_st_ + bend_st_;
         float freq    = 440.f * FastExp2((semis - 69.f) * (1.f / 12.f));
 
         /* ---- oscillator ---- */
@@ -247,7 +249,7 @@ class AcidVoice
 
     // knobs (per block)
     float slide_k_ = 0.f, meg_tau_ = 0.f, meg_mul_ = 0.f, envmod_ = 0.f;
-    float accent_amt_ = 0.f, tune_st_ = 0.f, cut_hz_ = 150.f, k_ = 0.f, makeup_ = 1.f;
+    float accent_amt_ = 0.f, tune_st_ = 0.f, bend_st_ = 0.f, cut_hz_ = 150.f, k_ = 0.f, makeup_ = 1.f;
     bool  square_ = false;
 
     // fixed coefficients

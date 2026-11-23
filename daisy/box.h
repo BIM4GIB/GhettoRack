@@ -62,6 +62,14 @@ class Platform
         return nullptr;
     }
 
+    /** Spare memory the size of one slot for the looper's undo (samples;
+     *  nullptr = takes can't be undone) */
+    virtual int16_t* UndoMem(uint32_t* samples)
+    {
+        *samples = 0;
+        return nullptr;
+    }
+
     /* Status for the monitor */
     virtual float    CpuAvg()            = 0; // 0..1
     virtual float    CpuMax()            = 0;

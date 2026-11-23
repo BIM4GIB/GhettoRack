@@ -284,13 +284,13 @@ class DaisyMixin:
             if not isinstance(a, str) or not 0 < len(a) <= UI_ACTION_MAX or \
                     not all(c in "abcdefghijklmnopqrstuvwxyz0123456789 -" for c in a):
                 return 400, {"error": "bad action"}
-            need = UI_ACTIONS.get(a.split(" ", 1)[0])
+            need = UI_ACTIONS2.get(" ".join(a.split(" ")[:2])) or UI_ACTIONS.get(a.split(" ", 1)[0])
             if need is None:
                 return 400, {"error": "unknown action %s" % a.split(" ", 1)[0]}
             if self.fd is None:
                 return 503, {"error": "the Daisy isn't connected"}
             if self.ctl < need:
-                return 503, {"error": "the Daisy's firmware is too old for this (needs v13.%d+)" % {4: 9, 5: 10}.get(need, 7)}
+                return 503, {"error": "the Daisy's firmware is too old for this (needs %s+)" % UI_FIRMWARE.get(need, "v13.7")}
         sent = sum(1 for a in actions if self.ui_send(a))
         if sent < len(actions):
             return 503, {"error": "the Daisy isn't taking commands fast enough", "sent": sent}

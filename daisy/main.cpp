@@ -87,6 +87,8 @@ alignas(32) FIL     save_file;
    of the SDRAM after the slots (about 9 MB, ~95 s of mono audio) */
 constexpr uint32_t   kStageCap = 4600 * 1024;
 DSY_SDRAM_BSS int16_t stage_mem[kStageCap];
+/* The looper's undo: what a track held before the last take (one slot) */
+DSY_SDRAM_BSS int16_t undo_mem[kSlotCap];
 DIR                 dir;
 FILINFO             fno;
 
@@ -629,6 +631,11 @@ class DaisyPlatform : public Platform
         *samples = kStageCap;
         return stage_mem;
     }
+    int16_t* UndoMem(uint32_t* samples) override
+    {
+        *samples = kSlotCap;
+        return undo_mem;
+    }
 
     float    CpuAvg() override { return cpu.GetAvgCpuLoad(); }
     float    CpuMax() override { return cpu.GetMaxCpuLoad(); }
@@ -855,7 +862,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.11 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.12 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

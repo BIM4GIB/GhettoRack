@@ -223,6 +223,12 @@ class MacPlatform : public Platform
         std::string f = Full(path);
         return ::remove(f.c_str()) == 0;
     }
+    int16_t* UndoMem(uint32_t* n) override
+    {
+        static std::vector<int16_t> u(1536 * 1024);
+        *n = (uint32_t)u.size();
+        return u.data();
+    }
     int16_t* Staging(uint32_t* samples) override
     {
         static std::vector<int16_t> mem(4600 * 1024);

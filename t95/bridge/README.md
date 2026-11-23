@@ -258,7 +258,7 @@ The clock module (`/clock`): one tempo for everything.
 | `/apcbox` | The T95's ApcBox page (`t95/ui/apcbox.html`): full-screen views, works with no APC40, needs firmware v13.9 |
 | `/audio.pcm` | The Daisy's audio for the page's LISTEN button: raw s16le 48 kHz stereo, endless |
 | `/samples/peaks?src=&path=` | JSON `{secs, peaks}`: 96 peaks (hex) of what the Daisy would get of that file, for the waveform in the list |
-| `/samples/preview?src=&path=` | That file as the Daisy would get it (WAV), for hearing it in the browser |
+| `/samples/preview?src=&path=` | That file as the Daisy would get it (WAV), for hearing it in the browser. `&start=&end=` (0-1, fractions of its length) and `&norm=1`: trimmed (2 ms fades at the cuts) and normalised to -0.3 dB, as `/samples/send` would send it |
 | `POST /do` | `{"a": "mute 3 2"}` or a list of up to 32: page actions for the Daisy (`ESC U`), checked against a list before they go on the wire |
 | `/classic` | `daisy/ui/apcbox-ui.html`, the monitor page. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |
@@ -277,7 +277,7 @@ The clock module (`/clock`): one tempo for everything.
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 | `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |
-| `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy |
+| `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy. Optional `"start"`, `"end"` (0-1) and `"norm": true`: trim and normalise first |
 | `POST /samples/upload?name=` | raw file body (up to 64 MB) into `uploads/`; page recordings come as `.webm` (Chrome) or `.mp4` (Safari) |
 | `POST /samples/import` | `{"path"}`: copy a file or folder (audio only) from the SD card into the library |
 | `POST /samples/delete`, `/samples/cancel` | delete from the library, drop the queue |

@@ -1608,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 6)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 7)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -1797,6 +1797,139 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
         self.do("track 1", "type 4 sample")
+
+    def lp(self):
+        return [int(x) for x in self.last("LP ").split()[1:]]
+
+    def test_p65_looper_quantise_roll_trim(self):
+        """v13.12, control protocol 7: looper lengths, overdub, undo, quantise, roll; trim and normalise on the T95"""
+        import wave
+        import io
+        from rackbridge.samples import edit_wav, edit_args
+        # ---- trim and normalise, on the bytes ----
+        src = open(os.path.join(self.lib, "b tone.wav"), "rb").read()          # 1 s, 48 kHz mono 16-bit
+        out = edit_wav(src, 0.25, 0.75, True)
+        w = wave.open(io.BytesIO(out))
+        self.assertEqual((w.getnframes(), w.getframerate(), w.getnchannels()), (24000, 48000, 1))
+        fr = struct.unpack("<24000h", w.readframes(24000))
+        self.assertEqual((fr[0], fr[-1]), (0, 0))                              # faded at both cuts
+        self.assertTrue(31500 <= max(max(fr), -min(fr)) <= 31700)              # -0.3 dB
+        self.assertEqual(edit_wav(src, 0, 1, False), src)
+        self.assertRaises(ValueError, edit_wav, src, 0.5, 0.5001, False)
+        self.assertRaises(ValueError, edit_wav, b"RIFFxxxxWAVEnope" + bytes(64), 0, 1, True)
+        self.assertEqual(edit_args(None, None, False), (0.0, 1.0, False))
+        self.assertIsNone(edit_args("0.8", "0.2", False))
+        self.assertIsNone(edit_args("x", 1, False))
+        # ---- over HTTP: the preview is what would be sent ----
+        q = "/samples/preview?src=lib&path=" + urllib.parse.quote("b tone.wav")
+        whole = BridgeTest.get(q)[2]
+        half = BridgeTest.get(q + "&start=0.5&end=1&norm=1")[2]
+        self.assertTrue(abs((len(half) - 44) * 2 - (len(whole) - 44)) <= 8, (len(half), len(whole)))
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            BridgeTest.get(q + "&start=0.9&end=0.1")
+        self.assertEqual(e.exception.code, 400)
+        self.assertEqual(self.post("/samples/send", {"src": "lib", "path": "b tone.wav", "track": 11, "start": 2, "end": 3})[0], 400)
+        code, out = self.post("/samples/send", {"src": "lib", "path": "b tone.wav", "track": 11, "start": 0.25, "end": 0.5, "norm": True})
+        self.assertEqual(code, 200, out)
+        # the firmware loaded a quarter of a second: its outline line says how long
+        self.assertTrue(self.box.wait_for(lambda c: any(l.startswith("Z 10 ") and abs(int(l.split()[2]) - 12000) < 200 for l in c.lines), 20),
+                        [l[:30] for l in self.box.lines if l.startswith("Z 10 ")])
+        # ---- looper from a page ----
+        self.do("stop", "tempo 1800", "track 9")                               # a bar is 1.33 s
+        self.assertEqual(self.do("lrec len 1", "lrec count 0", "quant rec 0")[0], 200)
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 1, 5), self.last("LP "))
+        self.assertEqual(self.do("lrec arm 9")[0], 200)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 2 and self.s(48) == 8, 5))          # recording on track 9
+        self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0 and self.lp()[7] == 9, 5), self.last("LP "))   # stopped by itself; can be undone
+        self.assertEqual(self.last("N 8 "), "N 8 [loop 1 bars]")
+        self.do("lrec over 9")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(47) != 0 and self.lp()[6] == 1, 5), self.last("LP "))
+        self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0, 6))
+        self.do("lrec undo")                                                   # the overdub
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0, 5), self.last("LP "))
+        self.assertEqual(self.last("N 8 "), "N 8 [loop 1 bars]")
+        self.do("lrec over 3")                                                 # no loop there: refused
+        time.sleep(0.3)
+        self.assertEqual(self.s(47), 0)
+        # settings come back on the LP line
+        self.do("lrec len 4", "lrec count 1", "quant rec 1", "quant pat 2", "quant mute 1", "ingain 100")
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[:6] == [4, 1, 1, 2, 1, 100], 5), self.last("LP "))
+        for bad in ("lrec len 3", "quant pat 3", "quant rec 2", "quant banana 1", "roll 17 1", "ingain 200"):
+            self.do(bad)
+        time.sleep(0.3)
+        self.assertEqual(self.lp()[:6], [4, 1, 1, 2, 1, 100])
+        # roll: held from a page, shows in the S line's roll mask
+        self.do("roll 3 1")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(18) & 4, 5), self.last("S "))
+        self.do("roll 3 0")
+        self.assertTrue(self.box.wait_for(lambda c: not self.s(18) & 4, 5))
+        self.do("lrec len 0", "lrec count 0", "quant rec 0", "quant pat 0", "quant mute 0", "ingain 64", "stop", "type 9 sample", "type 11 sample")
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
+                pg = b.new_page(viewport={"width": w_, "height": h_})
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                # the looper view: settings go to the firmware and come back lit
+                pg.goto("http://127.0.0.1:%d/apcbox?v=samples&sm=loop" % self.http)
+                pg.wait_for_selector(".lset .seg")
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
+                pg.click(".lset .seg span:text-is('beat')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[2] == 1, 5), self.last("LP "))
+                pg.click(".lset .seg span:text-is('bar')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[2] == 0, 5))
+                self.assertTrue(pg.locator("button.bigpad:has-text('OVERDUB')").is_disabled())      # no loop on the track
+                pg.click(".lset .seg span:text-is('1')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 1, 5))
+                pg.locator("button.bigpad:has-text('REC LOOP')").click()
+                self.assertTrue(self.box.wait_for(lambda c: self.s(47) != 0, 5))
+                pg.wait_for_function("document.querySelector('.msg').textContent.includes('bar 1 of 1') || document.querySelector('.msg').textContent.includes('armed')")
+                self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0 and self.lp()[7] == self.s(7) + 1, 6), self.last("LP "))
+                pg.wait_for_function("!document.querySelectorAll('button.bigpad')[1].disabled")       # OVERDUB now
+                pg.locator("button.bigpad:has-text('UNDO TAKE')").click()
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0, 5))
+                self.do("stop", "lrec len 0")
+                # quantise on the System view
+                pg.goto("http://127.0.0.1:%d/apcbox?v=system" % self.http)
+                pg.wait_for_selector(".qrow .seg")
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
+                pg.click(".qrow .qc:nth-child(1) span:text-is('step')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[3] == 2, 5))
+                pg.wait_for_function("document.querySelector('.qrow .qc:nth-child(1) span.on').textContent === 'step'")
+                pg.click(".qrow .qc:nth-child(1) span:text-is('bar')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[3] == 0, 5))
+                # trim view: drag both markers in, send
+                pg.goto("http://127.0.0.1:%d/apcbox?v=samples&sm=lib" % self.http)
+                pg.wait_for_selector(".li.file")
+                pg.locator(".li.file").nth(1).locator(".nm2").click()
+                pg.wait_for_selector(".wave.trim")
+                pg.wait_for_function("document.querySelector('.wave.trim .tag').textContent.includes('of 1.00 s')")
+                bb = pg.locator(".wave.trim").bounding_box()
+                y = bb["y"] + bb["height"] / 2
+                for a, c in ((0.02, 0.25), (0.98, 0.75)):
+                    pg.mouse.move(bb["x"] + bb["width"] * a, y)
+                    pg.mouse.down()
+                    pg.mouse.move(bb["x"] + bb["width"] * c, y, steps=4)
+                    pg.mouse.up()
+                self.assertRegex(pg.locator(".wave.trim .tag").inner_text(), r"0\.2[45] – 0\.7[456] s · keeps 0\.5[0-2] of 1\.00 s")
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
+                self.do("track 12")
+                pg.wait_for_function("[...document.querySelectorAll('.hdr .big')].pop().textContent.startsWith('12 ')")
+                n0 = len([l for l in self.box.lines if l.startswith("Z 11 ")])
+                pg.click("button:text-is('SEND')")
+                pg.wait_for_function("document.querySelector('.msg').textContent.includes('is in track 12')", timeout=20000)
+                self.assertTrue(self.box.wait_for(lambda c: len([l for l in c.lines if l.startswith("Z 11 ")]) > n0
+                                                  and abs(int(self.last("Z 11 ").split()[2]) - 24500) < 1500, 8), self.last("Z 11 ")[:30])
+                pg.click("button:text-is('‹ back')")
+                pg.wait_for_selector(".li.file")
+                pg.close()
+                self.do("type 12 sample", "track 1")
+            b.close()
+        self.assertEqual(errors, [])
 
     def test_p7_sets_from_the_page(self):
         try:

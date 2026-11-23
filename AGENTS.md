@@ -48,7 +48,7 @@ daisy/mac/build.sh                 # macOS build of the same engine
 tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
-touch, T95 controller routing), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
+touch, T95 controller routing, looper/quantise/keyboard controls), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
 `acid_engine_test.cpp`, `host_test.cpp`, `t95/bridge/test_bridge.py` (its end-to-end part
 runs the firmware control code via `daisy/hostbuild/t95sim`, built by `build_host.sh`); build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
@@ -69,7 +69,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   hot-swap, sync set switching on the real card). Say so.
 - `box.cpp` is shared by the firmware and the Mac build: no Daisy-only calls
   there; Daisy specifics go in `main.cpp`, `tft.h`, `usbdev.cpp`.
-- SDRAM is reported ~93% used (slots + staging pool). Verify against the current
+- SDRAM is ~98% used from v13.12 (slots, staging pool, one slot of looper undo). Verify against the current
   build with `arm-none-eabi-size -A` before adding buffers. 64 MB total SDRAM is
   not 64 MB available for incoming samples.
 - The screen (SunFounder 3.5", ST7796U behind shift registers) needs 16-bit
@@ -79,7 +79,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 12 are separate version numbers.
+  version 13 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
@@ -89,8 +89,8 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   actions), from v13.8 `ESC F` (sample transfer; see `protocol/serial.md`
   and `daisy/xfer.h`), from v13.9 the page actions in `ESC U` (control
   protocol 4: mute, solo, knobs, steps...), from v13.10 set actions (protocol 5), from v13.11 `ESC T` (protocol 6: the T95's clock; the Daisy steers
-  its sequencer onto it, the audio clock stays the timing source). Send control frames only after the Daisy reports a
-  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+. v13.2 and older act
+  its sequencer onto it, the audio clock stays the timing source), from v13.12 the looper, quantise and roll actions in `ESC U` (protocol 7). Send control frames only after the Daisy reports a
+  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+, looper/quantise/roll actions at 7+. v13.2 and older act
   on any bare `R`/`B` byte, so never open the port with echo on (plain
   `cat`/`stty`/`screen` on Linux). Sample data goes only as `ESC F` frames
   (never ESC M), sent at low priority behind MIDI by the bridge.
