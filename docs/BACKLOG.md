@@ -97,6 +97,8 @@ them one on the map (REC still arms a loop).
   when no known Wi-Fi is around (agreed: automatic), Bluetooth pairing and
   Bluetooth MIDI, sound cards and SD cards under Devices, the remote's
   buttons moved over from the start screen, TV remote navigation on the page.
+  Rene, 2026-11-23: the join works on the rig (wrong password comes back),
+  but the error and info banners are ugly and stay too long. UI pass later.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
 - **Numark DJ**: likely Mixxx on the T95 in the kiosk; which Numark?
