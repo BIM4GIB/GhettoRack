@@ -1721,6 +1721,13 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
             float sr = mono * gr;
             L += sl;
             R += sr;
+            {
+                float a = fabsf(sl), b = fabsf(sr);
+                if(b > a)
+                    a = b;
+                if(a > peak_[t])
+                    peak_[t] = a;
+            }
             float rs = send_rev_[t].Next();
             float ds = send_dly_[t].Next();
             rev_l += sl * rs;
@@ -1852,6 +1859,10 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
             R = -1.f;
         out_l[i] = L;
         out_r[i] = R;
+        if(fabsf(L) > peak_[kTracks])
+            peak_[kTracks] = fabsf(L);
+        if(fabsf(R) > peak_[kTracks + 1])
+            peak_[kTracks + 1] = fabsf(R);
     }
 }
 

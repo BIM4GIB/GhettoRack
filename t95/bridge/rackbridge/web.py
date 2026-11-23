@@ -141,6 +141,8 @@ class WebMixin:
             return 200, {"ok": True}
         if path == "/routes":
             return self.set_routes(d.get("routes"))
+        if path == "/do":
+            return self.ui_do(d.get("a"))
         if path == "/clock":
             return self.clock.set(d)
         if path == "/clock/transport":
@@ -247,7 +249,7 @@ class WebMixin:
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
-                caps = {"source": "daisy-bridge", "bridge": 6, "control": self.ctl >= 2, "midi": True, "ir": True,
+                caps = {"source": "daisy-bridge", "bridge": 7, "control": self.ctl >= 2, "control_version": self.ctl, "midi": True, "ir": True,
                         "samples": True, "https_port": self.args.https_port,
                         "selector": "/", "ui": self.ctl >= 2, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")

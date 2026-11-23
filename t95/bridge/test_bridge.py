@@ -1224,6 +1224,7 @@ class ClockTest(unittest.TestCase):
         async def peer():
             lk = aalink.Link(97.0)
             lk.enabled = True
+            await aio.sleep(1.5)       # a session that has been running a while, like Live left open
             # the bridge joins the session: it takes the peer's tempo
             self.post("/clock", {"on": True, "source": "link", "outputs": ["Synth"]})
             for _ in range(60):
@@ -1545,6 +1546,100 @@ class EndToEndTest(unittest.TestCase):
         self.assertTrue(samples_shown and smp_rows >= 1, "Samples panel should list the library")
 
 
+
+
+@unittest.skipUnless(os.path.exists(SIM), "build daisy/hostbuild/t95sim first (see daisy/t95sim.cpp)")
+class PageControlTest(unittest.TestCase):
+    """v13.9, control protocol 4: a page drives the real firmware control code
+    through POST /do with no APC40 or keyboard anywhere."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        link = os.path.join(cls.dir, "daisy")
+        cls.sim = subprocess.Popen([SIM, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.addClassCleanup(cls.sim.kill)
+        end = time.time() + 5
+        while not os.path.exists(link) and time.time() < end:
+            time.sleep(0.05)
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+             "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--no-midi"],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: h["control"] >= 4, 10)
+        cls.box = SseClient(cls.http, path="/events?view=apcbox")
+        assert cls.box.wait_for(lambda c: any(l.startswith("S ") for l in c.lines))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.box.close()
+        cls.proc.terminate()
+        cls.sim.terminate()
+        cls.proc.wait(5)
+        cls.sim.wait(5)
+
+    post = RouterTest.post
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    def do(self, *a):
+        return self.post("/do", {"a": list(a)})
+
+    def last(self, prefix):
+        return [l for l in list(self.box.lines) if l.startswith(prefix)][-1]
+
+    def s(self, i):
+        return int(self.last("S ").split()[1 + i])
+
+    def test_p1_no_controller_and_the_page_still_drives(self):
+        h = BridgeTest.health()
+        self.assertEqual(h["controllers"], [])
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 4)
+        self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
+        self.do("mute 3 0", "solo 9 0", "track 1")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(19) == 0 and self.s(20) == 0))
+
+    def test_p2_bad_actions_never_reach_the_daisy(self):
+        for bad in ("explode 1", "MUTE 3 1", "mute 3 1\nboot", "mute\x1bBOOT", "", "x" * 40, 5, ["mute 3 1"] * 33):
+            code, _ = self.post("/do", {"a": bad})
+            self.assertEqual(code, 400, repr(bad))
+        self.assertTrue(BridgeTest.health()["daisy"])
+
+    def test_p3_pots_steps_patterns(self):
+        self.do("knob 5 0 100", "knob 5 1 20", "glob 0 90", "tempo 1337")
+        self.assertTrue(self.box.wait_for(lambda c: self.last("T 4 ").split()[2:4] == ["100", "20"]))
+        self.assertTrue(self.box.wait_for(lambda c: self.last("M ").split()[1] == "90" and self.s(5) == 1337))
+        self.do("tempo 1200", "glob 0 102")
+        pat = self.s(2)
+        g0 = self.last("G ").split()[2]
+        self.do("step %d 16 16 2" % (pat + 1))
+        self.assertTrue(self.box.wait_for(lambda c: self.last("G ").split()[2][255] == "2"))
+        self.do("step %d 16 16 %s" % (pat + 1, g0[255]))
+        # pattern H8 gets a step: the 64-pattern mask shows it, clearing removes it
+        self.do("step 64 1 1 1")
+        self.assertTrue(self.box.wait_for(lambda c: int(self.last("O ").split()[1], 16) >> 63 & 1))
+        self.do("pclear 64 0")
+        self.assertTrue(self.box.wait_for(lambda c: not int(self.last("O ").split()[1], 16) >> 63 & 1))
+
+    def test_p4_meters_and_waveforms(self):
+        # a browser that connects late gets an outline for all 16 tracks
+        late = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(late.wait_for(lambda c: len({l.split()[1] for l in c.lines if l.startswith("Z ")}) == 16, 8))
+        z = [l for l in late.lines if l.startswith("Z 0 ")][-1].split()
+        self.assertEqual(len(z[4]), 192)
+        self.assertGreater(int(z[2]), 100)
+        late.close()
+        n = len(self.box.lines)
+        self.do("knob 1 0 110", "audition 1")
+        hit = lambda c: any(l.startswith("H ") and int(l[2:4], 16) > 20 and int(l[34:36], 16) > 10 for l in c.lines[n:])
+        self.assertTrue(self.box.wait_for(hit, 3), "no meter movement after a hit on track 1")
+        quiet = lambda c: self.last("H ") == "H " + "0" * 36
+        self.assertTrue(self.box.wait_for(quiet, 6))
 
 class IrTest(unittest.TestCase):
     """The remote: a FIFO stands in for the input device; frames are real

@@ -24,6 +24,7 @@ static int         fails = 0;
     } while(0)
 
 static std::vector<std::string> xfer_lines;
+static std::vector<std::string> ui_lines; // H (meters), O (pattern mask), Z (waveform outline)
 class TestPlat : public Platform
 {
   public:
@@ -31,6 +32,8 @@ class TestPlat : public Platform
     {
         if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
             xfer_lines.push_back(l);
+        if(strchr("HOZ", l[0]) && l[1] == ' ')
+            ui_lines.push_back(l);
     }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
     int32_t FileRead(void* d, uint32_t n) override { return (int32_t)fread(d, 1, n, rf); }
@@ -626,7 +629,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 3 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 4 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -699,7 +702,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 3 03 01 02 1") >= 1);
+        CHECK(T95Count("P 4 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -718,7 +721,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 3 ") >= 1);
+        CHECK(T95Count("P 4 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -740,6 +743,193 @@ int main()
         T95Frame("\x1bU turn 1\n");
         SelectTrack(0);
 
+        /* Control protocol 4: the T95 pages drive everything. None of it
+           goes through the APC40 code (test_bridge.py runs it with no
+           controller at all) */
+        {
+            auto U = [](const char* a) { T95Frame(std::string("\x1bU ") + a + "\n"); };
+            auto last = [](char type) {
+                for(auto it = ui_lines.rbegin(); it != ui_lines.rend(); ++it)
+                    if((*it)[0] == type)
+                        return *it;
+                return std::string();
+            };
+            e.Stop();
+            U("mute 3 1");
+            U("solo 9 1");
+            CHECK(e.track[2].mute && e.track[8].solo);
+            U("mute 3 2");
+            U("solo 9 0");
+            CHECK(!e.track[2].mute && !e.track[8].solo);
+            U("knob 4 0 127");   // volume
+            U("knob 4 1 0");     // pan hard left
+            U("knob 4 12 2");    // crossfader side B
+            CHECK(e.track[3].vol > 0.99f && e.track[3].pan < 0.01f && e.track[3].xfade == 2);
+            U("knob 4 12 3");    // no such side
+            U("knob 17 0 5");
+            U("knob 4 13 5");
+            U("knob 4 0 128");
+            CHECK(e.track[3].xfade == 2 && e.track[3].vol > 0.99f);
+            U("knob 4 0 100");
+            U("knob 4 1 64");
+            U("knob 4 12 0");
+            U("acid 2 0 127");
+            U("acid 2 5 64");    // tune snaps to the centre
+            CHECK(e.track[1].acid.cutoff > 0.99f && e.track[1].acid.tune == 0.5f);
+            U("glob 0 64");
+            U("glob 8 0");
+            CHECK(fabsf(e.global.master - 64 / 127.f) < 0.01f && e.global.swing < 0.01f);
+            U("glob 0 102");
+            U("tempo 1337");
+            CHECK(fabsf(e.global.bpm - 133.7f) < 0.01f);
+            U("tempo 5000");
+            CHECK(fabsf(e.global.bpm - 133.7f) < 0.01f);
+            U("tempo 1200");
+
+            /* steps and notes in any pattern, undo for copy and clear */
+            int p = 40;          // pattern F1, empty so far
+            CHECK(e.PatternEmpty(p));
+            U("step 41 6 1 1");
+            U("step 41 6 5 2");
+            CHECK(e.GetStep(p, 5, 0) == kStepOn && e.GetStep(p, 5, 4) == kStepAccent);
+            U("step 41 6 5 3");  // no such value
+            U("step 65 1 1 1");
+            U("step 41 6 17 1");
+            CHECK(e.GetStep(p, 5, 4) == kStepAccent);
+            U("note 41 10 3 48 1");
+            CHECK(e.GetNote(p, 9, 2) == 48 && e.GetSlide(p, 9, 2));
+            U("note 41 10 3 50 0");
+            CHECK(e.GetNote(p, 9, 2) == 50 && !e.GetSlide(p, 9, 2));
+            T95Tick(40);
+            {
+                std::string o = last('O');
+                CHECK(o.size() == 18);
+                unsigned long long m = strtoull(o.c_str() + 2, nullptr, 16);
+                CHECK(m & (1ull << p));
+                CHECK(!(m & (1ull << 41)));
+            }
+            U("pcopy 41 42");
+            CHECK(e.GetStep(41, 5, 4) == kStepAccent);
+            U("undo");
+            CHECK(e.PatternEmpty(41));
+            U("pclear 41 6");
+            CHECK(e.GetStep(p, 5, 0) == kStepOff && e.GetNote(p, 9, 2) == 50);
+            U("undo");
+            CHECK(e.GetStep(p, 5, 0) == kStepOn);
+            U("pclear 41 0");
+            CHECK(e.PatternEmpty(p));
+            U("pat 41");
+            CHECK(e.QueuedPattern() == p || e.CurrentPattern() == p);
+            U("pat 1");
+            T95Tick(5);
+
+            /* transport bits */
+            U("rec 1");
+            CHECK(recording);
+            U("rec 2");
+            CHECK(!recording);
+            U("metro 1");
+            U("mon 1");
+            CHECK(e.global.metronome && e.input_monitor);
+            U("metro 0");
+            U("mon 0");
+            CHECK(!e.global.metronome && !e.input_monitor);
+
+            /* a held FX lets go when the T95 goes quiet */
+            U("fx 2 1");
+            CHECK(e.PerfFxActive(1));
+            U("fx 2 0");
+            CHECK(!e.PerfFxActive(1));
+            U("fx 9 1");
+
+            /* track type, live loop arm from the page */
+            U("type 7 303");
+            T95Tick(300);
+            CHECK(e.IsSynth(6));
+            U("type 7 sample");
+            T95Tick(300);
+            CHECK(!e.IsSynth(6));
+            U("type 7 banana");
+            U("lrec arm 7");
+            T95Tick(5);
+            CHECK(e.LiveRecState() != 0 && e.LiveRecTrack() == 6); // armed, or already recording from the bar
+            U("lrec cancel");
+            T95Tick(5);
+            CHECK(e.LiveRecState() == 0);
+            e.Stop();            // arming started the transport
+            T95Tick(1500);
+
+            /* meters: a hit on track 1 shows there and on the master, not on track 2 */
+            ui_lines.clear();
+            U("knob 1 0 110");
+            U("audition 1");
+            T95Tick(60);
+            {
+                int peak1 = 0, peak2 = 0, pm = 0;
+                for(auto& l : ui_lines)
+                    if(l[0] == 'H' && l.size() == 2 + 36)
+                    {
+                        auto hx = [&](int i) { return (int)strtol(l.substr(2 + 2 * i, 2).c_str(), nullptr, 16); };
+                        peak1 = std::max(peak1, hx(0));
+                        peak2 = std::max(peak2, hx(1));
+                        pm    = std::max(pm, hx(16));
+                    }
+                printf("meters: track 1 peak %d/255, master %d/255\n", peak1, pm);
+                CHECK(peak1 > 20 && pm > 10 && peak2 == 0);
+            }
+            T95Tick(3000);
+            if(last('H') != "H " + std::string(36, '0'))
+                printf("last meters: %s\n", last('H').c_str());
+            CHECK(last('H') == "H " + std::string(36, '0'));   // silence: all zero
+
+            /* waveform outlines: every track once after a resync; 96 points for a sample */
+            ui_lines.clear();
+            BoxResync();
+            T95Tick(33 * 20);
+            {
+                int n = 0, with = 0;
+                std::string z1;
+                for(auto& l : ui_lines)
+                    if(l[0] == 'Z')
+                    {
+                        n++;
+                        int t = atoi(l.c_str() + 2);
+                        size_t sp = l.rfind(' ');
+                        if(l.substr(sp + 1) != "-")
+                        {
+                            with++;
+                            CHECK(l.size() - sp - 1 == 192);
+                        }
+                        if(t == 0)
+                            z1 = l;
+                    }
+                if(!(n == 16 && with >= 8))
+                    printf("outlines: %d lines, %d with a waveform\n", n, with);
+                CHECK(n == 16 && with >= 8);
+                CHECK(!z1.empty());
+                unsigned long len = 0;
+                int           sr  = 0;
+                sscanf(z1.c_str(), "Z 0 %lu %d", &len, &sr);
+                CHECK(len > 100 && sr == 48000);
+                // a kick: loud at the start, quiet at the end
+                size_t sp = z1.rfind(' ');
+                int head = (int)strtol(z1.substr(sp + 1 + 2, 2).c_str(), nullptr, 16);
+                int tail = (int)strtol(z1.substr(sp + 1 + 190, 2).c_str(), nullptr, 16);
+                printf("outline of track 1: %lu samples, first %d last %d\n", len, head, tail);
+                CHECK(head > tail);
+            }
+            ui_lines.clear();
+            T95Tick(1500);       // the once-a-second repeat doesn't resend outlines
+            {
+                int n = 0;
+                for(auto& l : ui_lines)
+                    n += l[0] == 'Z';
+                CHECK(n == 0);
+            }
+            SelectTrack(0);
+            printf("t95 page controls ok\n");
+        }
+
         /* ping */
         T95Frame("\x1bP abc123\n");
         CHECK(T95Count("Y abc123") == 1);
@@ -756,7 +946,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 3 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 4 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -893,6 +1083,14 @@ int main()
         CHECK(t95p.Unattached() == 1);
         printf("t95 ports ok\n");
     }
+
+    /* A performance FX held from a page lets go when the T95 goes quiet,
+       even with no controller attached */
+    T95Frame("\x1bK\x1bU fx 3 1\n");
+    T95Tick(1500);
+    CHECK(e.PerfFxActive(2));       // keepalives still coming
+    T95Tick(2200, false, false);    // the bridge died with the pad held
+    CHECK(!e.PerfFxActive(2));
 
     CHECK(e.nan_count == 0);
     printf("%s (%d failures), peak %.2f\n", fails ? "FAILED" : "all ok", fails, peak_last);

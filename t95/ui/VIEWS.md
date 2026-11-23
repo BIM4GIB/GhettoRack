@@ -71,11 +71,16 @@ live, with markers and bar lines), pad, list row with waveform.
   tune, slide, wave (saw/square).
 - Sample track pots: pitch, decay, filter, reso, start, reverse, drive, prob.
 - Live loop: arm, records whole bars, stop ends on the bar, cancel. No overdub.
-- From the T95 the Daisy accepts only: encoder turn/push/back, play, stop,
-  select track. Everything else on these screens needs new commands
-  (mute, solo, arm, record, pots, faders, step and note edits, pattern queue,
-  FX hold, kit/set actions), level meters in the reports, and a waveform
-  outline for samples that live on the Daisy's card.
+- The APC40's REC ARM button is "roll" (hold to repeat a track), not record
+  arm. On these screens ARM means arming a live loop recording for that track.
+- v13.9 (control protocol 4, report 10) adds what the screens need, with no
+  APC40 required: page actions through `POST /do` on the bridge (mute, solo,
+  pots, tempo, steps, notes, pattern queue/copy/clear/undo, FX hold, record,
+  metronome, track type, live loop arm/stop/cancel, kit load, audition),
+  level meters (`H`), the 64-pattern mask (`O`) and a waveform outline per
+  track (`Z`). See `protocol/serial.md`. Desktop-tested; not flashed yet.
+- Still missing in the firmware: set save/load from the T95, sample browser
+  on the Daisy's card from the T95, roll from a page.
 
 ## Phone
 

@@ -320,6 +320,15 @@ class Engine
     volatile bool input_monitor = false;
     /** Input level 0..1, peak with a slow fall */
     float InputPeak() const { return in_peak_; }
+    /** Level meters for the UI: the highest post-fader sample of a track
+     *  (0..15) or of the master output (16 left, 17 right) since the last
+     *  call. The audio thread only raises it; reading clears it. */
+    float TakePeak(int i)
+    {
+        float v  = peak_[i];
+        peak_[i] = 0.f;
+        return v;
+    }
 
     /* ---- Samples (main loop) ---- */
     Slot& GetSlot(int track) { return slots_[track]; }
@@ -445,6 +454,7 @@ class Engine
     double            rl_pos_[kTracks]         = {};
     float             loop_rate_[kTracks]      = {};
     volatile float    in_peak_ = 0.f;
+    volatile float    peak_[kTracks + 2] = {};
     volatile bool     loop_set_req_[kTracks]   = {};
     int               loop_set_bars_[kTracks]  = {};
     float             loop_set_bpm_[kTracks]   = {};

@@ -109,8 +109,12 @@ void BoxUiTurn(int d, uint32_t now);
 void BoxUiPush(uint32_t now);
 void BoxUiBack(uint32_t now);
 /** A UI action from the T95 (remote, page): "turn N", "push", "back",
- *  "play", "stop", "track N" (1-16). false = not understood */
+ *  "play", "stop", "track N" (1-16) and, from control protocol 4, the
+ *  commands in protocol/serial.md (mute, solo, knob, step...).
+ *  false = not understood */
 bool BoxUiCommand(const char* action, uint32_t now);
+/** The T95 went quiet: let go of what its pages were holding (FX) */
+void BoxUiGone();
 /** A sample transfer frame from the T95 (text after ESC F, see xfer.h) */
 void BoxFileFrame(const char* frame, uint32_t now);
 /** Touch: raw XPT2046 readings (Daisy), a tap in screen pixels (Mac build),

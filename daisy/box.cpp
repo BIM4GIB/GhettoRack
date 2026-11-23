@@ -2399,9 +2399,15 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 9;
+constexpr int kReportVersion = 10; // 10: H (meters), O (patterns with steps), Z (waveform outline)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
+constexpr int kWavePoints = 96;
+float    rep_peak[kTracks + 2] = {};
+char     rep_meter[2 * (kTracks + 2) + 1] = "";
+uint64_t rep_patmask = 0;
+bool     rep_patmask_force = true;
+uint32_t rep_wave[kTracks] = {};
 uint8_t  rep_track[kTracks][13];
 uint8_t  rep_global[10];
 char     rep_notes[kTracks][2 * kSteps + 1];
@@ -2431,6 +2437,8 @@ void ForceFullReport()
     for(int i = 0; i < 4; i++)
         rep_browse[i] = rep_kit[i] = -2;
     rep_leds[0][0] = rep_leds[1][0] = 0;
+    rep_meter[0]      = 0;
+    rep_patmask_force = true;
 }
 
 const char* BaseName(const char* path)
@@ -2682,6 +2690,91 @@ void Report(uint32_t now)
         }
     }
 
+    /* Level meters: 16 tracks then master left and right, peak since the
+       last line as two hex digits (0-ff, full scale = ff). Held a little so
+       a short hit is seen. Quiet = one line of zeros, then nothing. */
+    {
+        static const char hx[] = "0123456789abcdef";
+        char              h[2 * (kTracks + 2) + 1];
+        for(int i = 0; i < kTracks + 2; i++)
+        {
+            float p = eng->TakePeak(i);
+            if(p > 1.f)
+                p = 1.f;
+            rep_peak[i] = p > rep_peak[i] ? p : rep_peak[i] * 0.8f;
+            int v       = (int)(rep_peak[i] * 255.f + 0.5f);
+            h[2 * i]     = hx[v >> 4];
+            h[2 * i + 1] = hx[v & 15];
+        }
+        h[2 * (kTracks + 2)] = 0;
+        if(strcmp(h, rep_meter))
+        {
+            strcpy(rep_meter, h);
+            Out("H %s", h);
+        }
+    }
+
+    /* Which of the 64 patterns have steps: 16 hex digits, pattern 1 = bit 0
+       of the last digit */
+    {
+        uint64_t m = 0;
+        for(int p = 0; p < kPatterns; p++)
+            if(!eng->PatternEmpty(p))
+                m |= (uint64_t)1 << p;
+        if(m != rep_patmask || rep_patmask_force)
+        {
+            rep_patmask       = m;
+            rep_patmask_force = false;
+            Out("O %08lx%08lx", (unsigned long)(m >> 32), (unsigned long)(m & 0xFFFFFFFFu));
+        }
+    }
+
+    /* Waveform outline of one track per pass, when its sound changed:
+       96 points, the peak of each slice as two hex digits. 303 tracks and
+       empty slots send length 0. Not part of the once-a-second repeat. */
+    {
+        static int wt = 0;
+        wt            = (wt + 1) % kTracks;
+        const int t   = wt;
+        if(!TrackLoading(t) && !(eng->LiveRecState() == 2 && eng->LiveRecTrack() == t))
+        {
+            Slot&    s   = eng->GetSlot(t);
+            uint32_t len = eng->IsSynth(t) ? 0 : (uint32_t)s.length;
+            uint32_t key = slot_gen[t] * 2654435761u + len * 40503u + (eng->IsSynth(t) ? 1u : 0u) + 1u;
+            if(key != rep_wave[t])
+            {
+                rep_wave[t] = key;
+                static const char hx[] = "0123456789abcdef";
+                char              z[2 * kWavePoints + 1];
+                for(int i = 0; i < kWavePoints; i++)
+                {
+                    int peak = 0;
+                    if(len && s.data)
+                    {
+                        uint32_t a0 = (uint32_t)((uint64_t)len * i / kWavePoints);
+                        uint32_t a1 = (uint32_t)((uint64_t)len * (i + 1) / kWavePoints);
+                        uint32_t st = (a1 - a0) / 256 + 1; // at most 256 reads per point
+                        for(uint32_t k = a0; k < a1; k += st)
+                        {
+                            int v = s.data[k];
+                            if(v < 0)
+                                v = -v;
+                            if(v > peak)
+                                peak = v;
+                        }
+                    }
+                    int v      = peak >> 7; // 0..255
+                    z[2 * i]     = hx[(v >> 4) & 15];
+                    z[2 * i + 1] = hx[v & 15];
+                }
+                z[len ? 2 * kWavePoints : 0] = 0;
+                /* length in samples at the engine's rate, so the page can show seconds */
+                Out("Z %d %lu %d %s", t, (unsigned long)(len ? (uint32_t)(len / (s.rate > 0.f ? s.rate : 1.f)) : 0),
+                    (int)eng->SampleRate(), len ? z : "-");
+            }
+        }
+    }
+
     /* Grid + track button LEDs: what the firmware wants vs what the
        APC40 has confirmed. A mismatch that sticks = a lost message. */
     char want[81], sent[81];
@@ -2927,6 +3020,7 @@ void BoxPoll(uint32_t now)
 void BoxResync()
 {
     ForceFullReport();
+    memset(rep_wave, 0, sizeof(rep_wave)); // waveform outlines again too (16 lines over 16 passes)
 }
 
 const uint8_t* BoxScreen(uint32_t* version)
@@ -3009,10 +3103,29 @@ void BoxUiBack(uint32_t now)
         tft_view = 0;
 }
 
+/* Things held from the T95's pages (performance FX): let go when the T95
+   goes quiet, like a controller's held buttons */
+bool ui_fx_held[kNumPerfFx] = {};
+
+void BoxUiGone()
+{
+    for(int f = 0; f < kNumPerfFx; f++)
+        if(ui_fx_held[f])
+        {
+            ui_fx_held[f] = false;
+            if(!fx_latched[f] && !fx_pressed[f])
+                eng->SetPerfFx(f, false);
+        }
+}
+
+/** 0 = off, 1 = on, 2 = toggle */
+static bool Flag(bool cur, int v) { return v == 2 ? !cur : v == 1; }
+
 bool BoxUiCommand(const char* c, uint32_t now)
 {
     g_now = now;
-    int n = 0;
+    int n = 0, a = 0, b = 0, d = 0, e = 0;
+    char w[12];
     if(sscanf(c, "turn %d", &n) == 1 && n >= -16 && n <= 16)
         BoxUiTurn(n, now);
     else if(strcmp(c, "push") == 0)
@@ -3028,6 +3141,152 @@ bool BoxUiCommand(const char* c, uint32_t now)
         SelectTrack(n - 1);
         Popup("track %d", n);
     }
+    /* ---- control protocol 4: everything the T95 pages show. Tracks, steps,
+       patterns and FX count from 1, values are 0-127 like the T/A/M lines ---- */
+    else if(sscanf(c, "mute %d %d", &n, &a) == 2 && n >= 1 && n <= kTracks && a >= 0 && a <= 2)
+        eng->track[n - 1].mute = Flag(eng->track[n - 1].mute, a);
+    else if(sscanf(c, "solo %d %d", &n, &a) == 2 && n >= 1 && n <= kTracks && a >= 0 && a <= 2)
+        eng->track[n - 1].solo = Flag(eng->track[n - 1].solo, a);
+    else if(sscanf(c, "knob %d %d %d", &n, &a, &b) == 3 && n >= 1 && n <= kTracks && a >= 0 && a <= 12
+            && b >= 0 && b <= 127)
+    {
+        TrackParams& p     = eng->track[n - 1];
+        float*       f[12] = {&p.vol,    &p.pan,  &p.rev,   &p.dly,     &p.pitch, &p.decay,
+                              &p.filter, &p.reso, &p.start, &p.reverse, &p.drive, &p.prob};
+        if(a == 12)
+        {
+            if(b > 2)
+                return false;
+            p.xfade = (uint8_t)b;
+        }
+        else
+        {
+            *f[a] = Knob((uint8_t)b);
+            if(a == 0 && n - 1 >= track_page * 8 && n - 1 < track_page * 8 + 8)
+                fader_live[n - 1 - track_page * 8] = false; // the APC40 fader picks it up again
+        }
+    }
+    else if(sscanf(c, "acid %d %d %d", &n, &a, &b) == 3 && n >= 1 && n <= kTracks && a >= 0 && a <= 7
+            && b >= 0 && b <= 127)
+    {
+        AcidParams& p    = eng->track[n - 1].acid;
+        float*      f[8] = {&p.cutoff, &p.reso, &p.envmod, &p.decay, &p.accent, &p.tune, &p.slide, &p.wave};
+        *f[a]            = (a == 5 && (b == 63 || b == 64)) ? 0.5f : Knob((uint8_t)b);
+    }
+    else if(sscanf(c, "glob %d %d", &a, &b) == 2 && a >= 0 && a <= 9 && b >= 0 && b <= 127)
+    {
+        GlobalParams& g     = eng->global;
+        float*        f[10] = {&g.master, &g.xfader, &g.rev_size,  &g.rev_tone, &g.dly_time,
+                               &g.dly_fb, &g.drive,  &g.fx_return, &g.swing,    &g.djfilter};
+        *f[a] = ((a == 1 || a == 9) && (b == 63 || b == 64)) ? 0.5f : Knob((uint8_t)b);
+    }
+    else if(sscanf(c, "tempo %d", &n) == 1 && n >= 600 && n <= 2000)
+        SetBpm(n / 10.f);
+    else if(sscanf(c, "step %d %d %d %d", &n, &a, &b, &d) == 4 && n >= 1 && n <= kPatterns && a >= 1
+            && a <= kTracks && b >= 1 && b <= kSteps && d >= 0 && d <= 2)
+        eng->SetStep(n - 1, a - 1, b - 1, (uint8_t)d);
+    else if(sscanf(c, "note %d %d %d %d %d", &n, &a, &b, &d, &e) == 5 && n >= 1 && n <= kPatterns
+            && a >= 1 && a <= kTracks && b >= 1 && b <= kSteps && d >= 1 && d <= 127 && e >= 0 && e <= 1)
+    {
+        eng->SetNote(n - 1, a - 1, b - 1, d);
+        eng->SetSlide(n - 1, a - 1, b - 1, e == 1);
+    }
+    else if(sscanf(c, "pat %d", &n) == 1 && n >= 1 && n <= kPatterns)
+    {
+        eng->QueuePattern(n - 1);
+        view_bank = (n - 1) / 8;
+    }
+    else if(sscanf(c, "pcopy %d %d", &n, &a) == 2 && n >= 1 && n <= kPatterns && a >= 1 && a <= kPatterns
+            && n != a)
+    {
+        char x[3], y[3], lbl[28];
+        PatName(n - 1, x);
+        PatName(a - 1, y);
+        snprintf(lbl, sizeof(lbl), "copy %s>%s", x, y);
+        PushUndo(a - 1, lbl);
+        eng->CopyPattern(n - 1, a - 1);
+        Log("%s", lbl);
+    }
+    else if(sscanf(c, "pclear %d %d", &n, &a) == 2 && n >= 1 && n <= kPatterns && a >= 0 && a <= kTracks)
+    {
+        char x[3], lbl[28]; // a: 0 = the whole pattern, else one track
+        PatName(n - 1, x);
+        if(a)
+            snprintf(lbl, sizeof(lbl), "clear %s trk %d", x, a);
+        else
+            snprintf(lbl, sizeof(lbl), "clear %s", x);
+        PushUndo(n - 1, lbl);
+        if(a)
+            eng->ClearTrack(n - 1, a - 1);
+        else
+            eng->ClearPattern(n - 1);
+        Log("%s", lbl);
+    }
+    else if(strcmp(c, "undo") == 0)
+        Undo();
+    else if(sscanf(c, "fx %d %d", &n, &a) == 2 && n >= 1 && n <= kNumPerfFx && a >= 0 && a <= 1)
+    {
+        ui_fx_held[n - 1] = a == 1;
+        if(a)
+            eng->SetPerfFx(n - 1, true);
+        else if(!fx_latched[n - 1] && !fx_pressed[n - 1])
+            eng->SetPerfFx(n - 1, false);
+    }
+    else if(sscanf(c, "rec %d", &a) == 1 && a >= 0 && a <= 2)
+    {
+        if(Flag(recording, a) != recording)
+            ToggleRecord();
+    }
+    else if(sscanf(c, "metro %d", &a) == 1 && a >= 0 && a <= 2)
+        eng->global.metronome = Flag(eng->global.metronome, a);
+    else if(sscanf(c, "mon %d", &a) == 1 && a >= 0 && a <= 2)
+        eng->input_monitor = Flag(eng->input_monitor, a);
+    else if(sscanf(c, "type %d %11s", &n, w) == 2 && n >= 1 && n <= kTracks
+            && (strcmp(w, "303") == 0 || strcmp(w, "sample") == 0))
+    {
+        int t = n - 1; // "sample" = the built-in sound for that track
+        if(TrackLoading(t) || (eng->LiveRecState() != 0 && eng->LiveRecTrack() == t))
+            return true;
+        if(strcmp(w, "303") == 0)
+        {
+            if(!IsSynthPath(slot_path[t]))
+            {
+                if(t == sel_track)
+                    ReleaseKeys();
+                QueueLoad(t, kSynthPath, false);
+            }
+        }
+        else if(IsSynthPath(slot_path[t]) || IsRecPath(slot_path[t]) || IsSdSample(slot_path[t]))
+        {
+            char p[8];
+            snprintf(p, sizeof(p), "@k%d", BuiltInKitFor(t));
+            QueueLoad(t, p, false);
+        }
+    }
+    else if(sscanf(c, "lrec arm %d", &n) == 1 && n >= 1 && n <= kTracks)
+    {
+        if(eng->LiveRecState() == 0 && !TrackLoading(n - 1))
+        {
+            if(n - 1 == sel_track)
+                ReleaseKeys();
+            eng->LiveRecArm(n - 1);
+            Popup("rec %d: from the bar", n);
+        }
+    }
+    else if(strcmp(c, "lrec stop") == 0)
+    {
+        if(eng->LiveRecState() == 2)
+            eng->LiveRecStop();
+    }
+    else if(strcmp(c, "lrec cancel") == 0)
+    {
+        if(eng->LiveRecState() != 0)
+            eng->LiveRecCancel();
+    }
+    else if(sscanf(c, "kit %d %d", &n, &a) == 2 && n >= 1 && n <= num_kits && a >= 0 && a <= 1)
+        LoadKit(n - 1, true, a); // a: track page (0 = tracks 1-8, 1 = 9-16)
+    else if(sscanf(c, "audition %d", &n) == 1 && n >= 1 && n <= kTracks)
+        eng->Audition(n - 1);
     else
         return false;
     return true;

@@ -29,7 +29,7 @@ class T95Ports
     static constexpr int      kPorts     = 8; // 1..8
     static constexpr uint32_t kKeepalive = 2000;
     static constexpr uint32_t kIdentify  = 1000; // no identity reply by then: decide by name
-    static constexpr int      kVersion   = 3;    // the "P" line's control version (2: ESC U, 3: ESC F)
+    static constexpr int      kVersion   = 4;    // the "P" line's control version (2: ESC U, 3: ESC F, 4: more U actions)
 
     /** send: queue one line; false = no room right now (nothing queued) */
     using SendFn = bool (*)(const char* line);
@@ -38,6 +38,7 @@ class T95Ports
     void OnCmd(const HostCmd& c, HostCmd::Cmd cmd, uint32_t now)
     {
         last_frame_ = now;
+        heard_      = true;
         switch(cmd)
         {
             case HostCmd::kKeepalive: break;
@@ -67,11 +68,16 @@ class T95Ports
     /** Main loop. direct_up: an APC40 is running on the Daisy's own USB-A */
     void Poll(uint32_t now, bool direct_up)
     {
-        if(any_attached() && Since(now, last_frame_) > (int32_t)kKeepalive)
+        if(heard_ && Since(now, last_frame_) > (int32_t)kKeepalive)
         {
-            ab::BoxLog("T95 bridge silent for 2 s: dropping its controllers");
-            for(int p = 1; p <= kPorts; p++)
-                Detach(p, now);
+            heard_ = false;
+            ab::BoxUiGone(); // FX held from a page
+            if(any_attached())
+            {
+                ab::BoxLog("T95 bridge silent for 2 s: dropping its controllers");
+                for(int p = 1; p <= kPorts; p++)
+                    Detach(p, now);
+            }
         }
         for(int p = 1; p <= kPorts; p++)
         {
@@ -344,5 +350,6 @@ class T95Ports
     bool     changed_    = true;
     uint32_t p_time_     = 0;
     uint32_t last_frame_ = 0;
+    bool     heard_      = false; // a frame since the last silence
     uint32_t unattached_ = 0;
 };

@@ -269,6 +269,28 @@ class DaisyMixin:
     def ui_send(self, action):
         return self.ctl_send(b"%sU %s\n" % (ESC, action.encode()))
 
+    def ui_do(self, actions):
+        """POST /do: UI actions from a page, checked before they go on the wire"""
+        if isinstance(actions, str):
+            actions = [actions]
+        if not isinstance(actions, list) or not 0 < len(actions) <= 32:
+            return 400, {"error": "a: an action or a list of up to 32"}
+        for a in actions:
+            if not isinstance(a, str) or not 0 < len(a) <= UI_ACTION_MAX or \
+                    not all(c in "abcdefghijklmnopqrstuvwxyz0123456789 -" for c in a):
+                return 400, {"error": "bad action"}
+            need = UI_ACTIONS.get(a.split(" ", 1)[0])
+            if need is None:
+                return 400, {"error": "unknown action %s" % a.split(" ", 1)[0]}
+            if self.fd is None:
+                return 503, {"error": "the Daisy isn't connected"}
+            if self.ctl < need:
+                return 503, {"error": "the Daisy's firmware is too old for this (needs v13.%d+)" % (9 if need == 4 else 7)}
+        sent = sum(1 for a in actions if self.ui_send(a))
+        if sent < len(actions):
+            return 503, {"error": "the Daisy isn't taking commands fast enough", "sent": sent}
+        return 200, {"ok": True}
+
     def apc_button(self, note):
         """Press and release one APC40 button, as if on the APC40 itself"""
         p = self.apc_port()
