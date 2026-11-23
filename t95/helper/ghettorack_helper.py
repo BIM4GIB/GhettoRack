@@ -168,11 +168,16 @@ class Helper:
         return st.get("ssid", ""), st.get("wpa_state", ""), st.get("ip_address", "")
 
     def cmd_scan(self, d):
-        self.wpa("scan")
-        time.sleep(self.a.scan_s)
-        rc, out = self.wpa("scan_results")
+        rc, out = self.wpa("scan")
         if rc:
-            return {"error": "the Wi-Fi isn't answering (wpa_cli)"}
+            return {"error": "the Wi-Fi isn't answering (wpa_cli: %s)" % (out.strip().splitlines() or ["no output"])[-1][:120]}
+        for _ in range(4):                                   # a scan of both bands can take several seconds
+            time.sleep(self.a.scan_s)
+            rc, out = self.wpa("scan_results")
+            if rc:
+                return {"error": "the Wi-Fi isn't answering (wpa_cli: %s)" % (out.strip().splitlines() or ["no output"])[-1][:120]}
+            if len(out.splitlines()) > 1:
+                break
         cur, saved, best = self.wifi_now()[0], self.saved(), {}
         for l in out.splitlines()[1:]:
             f = l.split("\t")
