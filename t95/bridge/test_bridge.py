@@ -1672,7 +1672,7 @@ class PageControlTest(unittest.TestCase):
                 pg = b.new_page(viewport=vp)
                 pg.on("pageerror", lambda e: errors.append(str(e)))
                 pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-                for v in ("perform", "steps", "mixer", "sound", "samples", "samples&sm=rec", "samples&sm=kits", "patterns",
+                for v in ("perform", "steps", "mixer", "sound", "samples", "samples&sm=rec", "samples&sm=kits", "samples&sm=loop", "map", "patterns",
                           "patterns&pt=sets", "fx", "system"):
                     pg.goto(url + "?v=" + v + ("&tv=1" if name == "tv" else ""))
                     pg.wait_for_selector(".tab.on")

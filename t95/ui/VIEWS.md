@@ -42,6 +42,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
 | 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
+| 8 System | APC40 map | - | a drawing of the APC40: every button, knob and fader with what it does alone (white), with SHIFT (amber), on SEND C or a 303 track (blue); tap one for the full description. Read-only | built (the texts are written from `daisy/box.cpp`; editing the mapping is next) |
 | 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat; held FX: at once/step/beat), other modules | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
 | - | Slice | - | chop a sample or loop across steps | later (new firmware feature) |

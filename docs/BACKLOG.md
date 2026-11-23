@@ -67,6 +67,16 @@ loop; it follows the take length and beat settings).
 - ROLL and the trim markers with a thumb; keyboard knobs through the T95
   (which CCs the MPK249 actually sends).
 
+## APC40 button map (agreed 2026-11-23)
+
+- Step 1, done: System > APC40 map shows every control and its SHIFT
+  function (read-only; texts written by hand from `daisy/box.cpp`).
+- Step 2, to build: the whole layout remappable (pads, strips, knobs,
+  faders, single buttons), plain and SHIFT, saved on the Daisy's card so it
+  works without the T95, reset to default. The firmware then owns the table
+  the map is drawn from.
+- Step 3, later: the same for other controllers (keyboards' knobs and pads).
+
 ## Modules
 
 - **Settings** (start screen): network manager (Wi-Fi, address, name),
