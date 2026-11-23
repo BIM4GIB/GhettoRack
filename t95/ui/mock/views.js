@@ -188,4 +188,4 @@ const views = {
       + box("Settings", `<div class="pg" style="grid-template-columns:1fr 1fr;height:80%">${["Remote buttons", "Start-up", "Sound on the TV", "Network name", "Flash firmware", "Classic monitor page"].map(t => `<div class="bigpad" style="font-size:15px">${t}</div>`).join("")}</div>`);
   },
 };
-(views[V] || views.perform)();
+const run = () => ((PHONE && window.PV && PV[V]) || views[V] || views.perform)();

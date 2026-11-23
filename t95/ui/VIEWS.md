@@ -79,4 +79,10 @@ live, with markers and bar lines), pad, list row with waveform.
 
 ## Phone
 
-Same views in portrait, 8 strips at a time (1-8 / 9-16). Not drawn yet.
+Every view has a portrait layout that fits 390x844 with no scrolling:
+`mock/views.html?phone=1&v=<name>` (`mock/phone.js`). Compact top bar, eight
+short tabs at the bottom. Differences from the TV: Perform and Mixer show 8
+strips at a time (1-8 / 9-16, master as a third page in the mixer); the drum
+grid keeps all 16 x 16; pots are 4 across; big steps are 2 rows of 8; sets
+are a second page under Patterns; OLED and LED mirrors are behind a button
+in System.
