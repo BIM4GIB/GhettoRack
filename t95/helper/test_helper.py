@@ -25,9 +25,7 @@ case "$(basename "$0") $*" in
      printf 'c\\t2437\\t-81\\t[ESS]\\tCafe Open\\n'
      printf 'd\\t2437\\t-60\\t[WPA2-PSK-CCMP][ESS]\\t\\n' ;;
   "netplan generate") [ -f "$FAKEDIR/netplan-broken" ] && { echo "bad yaml"; exit 1; } ;;
-  "systemctl is-active ghettorack-bluetooth.service") [ -f "$FAKEDIR/bt-on" ] && echo active || echo inactive ;;
-  "systemctl enable --now ghettorack-bluetooth.service") touch "$FAKEDIR/bt-on" ;;
-  "systemctl disable --now ghettorack-bluetooth.service") rm -f "$FAKEDIR/bt-on" ;;
+  "systemctl start --no-block ghettorack-bluetooth.service") [ -f "$FAKEDIR/chip-dead" ] || mkdir -p "$FAKEDIR/btclass/hci0" ;;
   "bluetoothctl show") printf 'Controller XX:XX:XX:XX:XX:XX (public)\\n\\tPowered: yes\\n' ;;
 esac
 exit 0
@@ -49,6 +47,10 @@ class HelperTest(unittest.TestCase):
             open(p, "w").write(FAKE)
             os.chmod(p, 0o755)
             tools[t] = p
+        for i, (typ, soft) in enumerate((("wlan", "0"), ("bluetooth", "1"))):                          # the radios' block switches
+            os.makedirs(os.path.join(cls.dir, "rfkill", "rfkill%d" % i))
+            open(os.path.join(cls.dir, "rfkill", "rfkill%d" % i, "type"), "w").write(typ + "\n")
+            open(os.path.join(cls.dir, "rfkill", "rfkill%d" % i, "soft"), "w").write(soft)
         cls.log = os.path.join(cls.dir, "calls.log")
         cls.sock = os.path.join(cls.dir, "h.sock")
         cls.attach = os.path.join(cls.dir, "hciattach_opi")
@@ -56,6 +58,7 @@ class HelperTest(unittest.TestCase):
         cls.proc = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
              "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
              "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
             env=env, stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "helper.log"), "w"))
@@ -95,7 +98,7 @@ class HelperTest(unittest.TestCase):
         st = self.ask(cmd="status")
         self.assertEqual(st["wifi"], {"ssid": "Home Net", "state": "COMPLETED", "ip": "198.51.100.7", "iface": "wlan0"})
         self.assertEqual((st["saved"], st["trial_s"], st["pin_set"]), ([], 0, False))
-        self.assertEqual(st["bt"], {"tool": False, "on": False, "powered": False, "controller": False})
+        self.assertEqual(st["bt"], {"tool": False, "attached": False, "on": False, "powered": False})
         n = self.ask(cmd="scan")["networks"]
         self.assertEqual([(x["ssid"], x["signal"], x["secure"], x["current"]) for x in n],
                          [("Home Net", 100, True, True), ("Cafe Open", 38, False, False)])    # best of two, hidden one dropped
@@ -181,10 +184,31 @@ class HelperTest(unittest.TestCase):
         self.assertIn("attach tool", self.ask(cmd="bt", pin=P, on=True)["error"])                     # not on the box
         open(self.attach, "w").close()
         self.assertIn("true or false", self.ask(cmd="bt", pin=P, on="yes")["error"])
+        soft = os.path.join(self.dir, "rfkill", "rfkill1", "soft")
+        wlan = os.path.join(self.dir, "rfkill", "rfkill0", "soft")
+        # the chip doesn't come up: said so, with what to do
+        open(os.path.join(self.dir, "chip-dead"), "w").close()
+        self.assertIn("didn't attach", self.ask(cmd="bt", pin=P, on=True)["error"])
+        self.assertEqual(open(soft).read(), "1")
+        os.unlink(os.path.join(self.dir, "chip-dead"))
+        # on: attach (once), lift the block, start the stack
         self.assertEqual(self.ask(cmd="bt", pin=P, on=True), {"ok": True})
-        self.assertEqual(self.ask(cmd="status")["bt"], {"tool": True, "on": True, "powered": True, "controller": True})
+        self.assertEqual(self.ask(cmd="status")["bt"], {"tool": True, "attached": True, "on": True, "powered": True})
+        self.assertEqual((open(soft).read(), open(wlan).read()), ("0", "0"))
+        self.assertIn("systemctl enable ghettorack-bluetooth.service", self.calls())
+        self.assertIn("systemctl start --no-block bluetooth.service", self.calls())
+        # off: the radio is blocked and it won't start at the next boot, but the attach tool is never stopped
         self.assertEqual(self.ask(cmd="bt", pin=P, on=False), {"ok": True})
-        self.assertFalse(self.ask(cmd="status")["bt"]["on"])
+        self.assertEqual(self.ask(cmd="status")["bt"], {"tool": True, "attached": True, "on": False, "powered": False})
+        self.assertEqual((open(soft).read(), open(wlan).read()), ("1", "0"))                          # the Wi-Fi's switch is not touched
+        self.assertIn("systemctl disable ghettorack-bluetooth.service", self.calls())
+        n = self.calls().count("systemctl start --no-block ghettorack-bluetooth.service")
+        # on again in the same boot: no second attach
+        self.assertEqual(self.ask(cmd="bt", pin=P, on=True), {"ok": True})
+        self.assertEqual(self.calls().count("systemctl start --no-block ghettorack-bluetooth.service"), n)
+        self.assertTrue(self.ask(cmd="status")["bt"]["on"])
+        self.assertFalse([c for c in self.calls() if "stop ghettorack-bluetooth" in c or "restart ghettorack-bluetooth" in c
+                          or "--now ghettorack-bluetooth" in c])
         self.assertEqual(self.ask(cmd="restart_bridge", pin=P), {"ok": True})
         self.assertEqual(self.ask(cmd="reboot", pin=P), {"ok": True})
         self.assertNotIn("systemctl reboot", self.calls())                                            # after the answer is out

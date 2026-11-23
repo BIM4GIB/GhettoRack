@@ -204,7 +204,7 @@ function draw() {
   $("n-ip").textContent = h && w.ip ? w.ip : "";
   if (document.activeElement !== $("n-host") && h) $("n-host").value = st.hostname || "";
   const b = st.bt || {};
-  $("b-now").textContent = !h ? "?" : !b.tool ? "not set up" : b.on ? (b.powered ? "on" : b.controller ? "on, radio starting" : "starting") : "off";
+  $("b-now").textContent = !h ? "?" : !b.tool ? "not set up" : b.on ? (b.powered ? "on" : "on, radio starting") : "off";
   $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
   $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box." :
     "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
@@ -238,7 +238,8 @@ $("n-prev").onclick = () => { npage--; drawNets(); }; $("n-next").onclick = () =
 $("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const o = await sys("hostname", { name: $("n-host").value.trim() }, true);
   banner("n-banner", o.error || "The box is now called " + $("n-host").value.trim() + ". Other devices pick the new name up within a minute.", o.error ? "bad" : "good"); poll(); };
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
-  const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth is starting: the radio takes about ten seconds." : "Bluetooth is off."), o.error ? "bad" : "good"); poll(); };
+  banner("b-banner", on ? "Starting Bluetooth: up to 20 seconds the first time after a restart." : "");
+  const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth is starting: the radio takes about ten seconds." : "Bluetooth is off, and stays off after a restart."), o.error ? "bad" : "good"); poll(); };
 $("y-auto-save").onclick = async () => { const a = +$("y-auto").value;
   try { const r = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autostart_s: a }) })).json(); banner("y-banner", r.error || "Saved.", r.error ? "bad" : "good"); }
   catch (e) { banner("y-banner", "the box isn't answering", "bad"); } };

@@ -11,7 +11,9 @@ helper over a local socket, and this helper does only what is on its list:
                           box goes back to how it was (no lockout)
     forget ssid         remove a network this helper added
     hostname name       the box's name on the network
-    bt on|off           Bluetooth on the UWE5622 (needs the attach tool)
+    bt on|off           Bluetooth on the UWE5622 (needs the attach tool): the
+                          chip attaches once per boot and is never detached;
+                          on / off is the radio's block switch
     restart_bridge, reboot, poweroff
     pin_set old new     the PIN for everything that changes something
     pin_check pin
@@ -282,21 +284,73 @@ class Helper:
         self.later(self.a.systemctl, "poweroff")
         return {"ok": True}
 
+    # Bluetooth. The chip's attach tool must never be stopped once it has attached:
+    # on this driver a killed one hangs in the kernel and nothing can attach again
+    # until a reboot (rig, 2026-11-23). So it attaches once per boot, and on / off
+    # is the radio's block switch plus the Bluetooth service.
+    def bt_radios(self):
+        out = []
+        try:
+            for n in sorted(os.listdir(self.a.rfkill_dir)):
+                p = os.path.join(self.a.rfkill_dir, n)
+                try:
+                    if open(os.path.join(p, "type")).read().strip() == "bluetooth":
+                        out.append(os.path.join(p, "soft"))
+                except OSError:
+                    pass
+        except OSError:
+            pass
+        return out
+
+    def bt_attached(self):
+        try:
+            return any(n.startswith("hci") for n in os.listdir(self.a.bt_class_dir))
+        except OSError:
+            return False
+
+    def bt_block(self, block):
+        for p in self.bt_radios():
+            try:
+                with open(p, "w") as f:
+                    f.write("1" if block else "0")
+            except OSError:
+                pass
+
     def bt(self):
-        tool = os.path.exists(self.a.attach)
-        active = self.run(self.a.systemctl, "is-active", BT_UNIT)[1].strip() == "active"
-        show = self.run(self.a.bluetoothctl, "show", timeout=6)[1] if active else ""
-        return {"tool": tool, "on": active, "powered": "Powered: yes" in show,
-                "controller": "Controller " in show}
+        tool, attached = os.path.exists(self.a.attach), self.bt_attached()
+        soft = []
+        for p in self.bt_radios():
+            try:
+                soft.append(open(p).read().strip())
+            except OSError:
+                pass
+        on = attached and bool(soft) and all(x == "0" for x in soft)
+        show = self.run(self.a.bluetoothctl, "show", timeout=6)[1] if on else ""
+        return {"tool": tool, "attached": attached, "on": on, "powered": "Powered: yes" in show}
 
     def cmd_bt(self, d):
         on = d.get("on")
         if not isinstance(on, bool):
             return {"error": "on: true or false"}
-        if on and not os.path.exists(self.a.attach):
+        if not on:
+            self.bt_block(True)
+            self.run(self.a.systemctl, "stop", "bluetooth.service", timeout=20)
+            self.run(self.a.systemctl, "disable", BT_UNIT, timeout=20)     # not at the next boot; the chip stays attached till then
+            return {"ok": True}
+        if not os.path.exists(self.a.attach):
             return {"error": "the attach tool isn't on the box (%s): see t95/helper/README.md" % self.a.attach}
-        rc, out = self.run(self.a.systemctl, "enable" if on else "disable", "--now", BT_UNIT, timeout=40)
-        return {"ok": True} if rc == 0 else {"error": "systemctl: " + out.strip()[-160:]}
+        self.run(self.a.systemctl, "enable", BT_UNIT, timeout=20)
+        if not self.bt_attached():
+            self.run(self.a.systemctl, "start", "--no-block", BT_UNIT, timeout=20)
+            end = time.monotonic() + self.a.bt_wait_s
+            while not self.bt_attached() and time.monotonic() < end:
+                time.sleep(0.25)
+            if not self.bt_attached():
+                return {"error": "the chip didn't attach. Reboot the box (System) and it starts by itself; "
+                                 "if it still doesn't: journalctl -u " + BT_UNIT}
+        self.bt_block(False)
+        self.run(self.a.systemctl, "start", "--no-block", "bluetooth.service", timeout=20)
+        return {"ok": True}
 
     def cmd_status(self, d):
         ssid, state, ip = self.wifi_now()
@@ -370,6 +424,9 @@ def main():
     ap.add_argument("--scan-s", type=float, default=3)
     ap.add_argument("--lock-s", type=float, default=60)
     ap.add_argument("--attach", default=ATTACH)
+    ap.add_argument("--rfkill-dir", default="/sys/class/rfkill")
+    ap.add_argument("--bt-class-dir", default="/sys/class/bluetooth")
+    ap.add_argument("--bt-wait-s", type=float, default=20)
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
                        ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl")):
         ap.add_argument("--" + tool, default=path)

@@ -1,14 +1,19 @@
 [Unit]
-Description=Bluetooth on the T95's UWE5622 (loads the tty module, attaches the chip, unblocks the radio)
+Description=Bluetooth on the T95's UWE5622: attaches the chip, once per boot
 ConditionPathExists=/usr/local/bin/hciattach_opi
 After=sys-subsystem-net-devices-wlan0.device
 
 [Service]
-# As found by hand on the rig 2026-11-23 (t95/README.md). Off unless turned on in Settings.
-# A script, not shell on this line: systemd swallows "$r" and "$(...)" in ExecStart.
+# As found by hand on the rig 2026-11-23 (t95/README.md). Enabled by turning
+# Bluetooth on in Settings. A script, not shell on this line: systemd swallows
+# "$r" and "$(...)" in ExecStart.
 ExecStart=/opt/apcbox-bridge/ghettorack-bt.sh
-Restart=on-failure
-RestartSec=5
+# Never restart it and never kill it: a killed attach tool hangs in the kernel
+# and blocks every later attach until a reboot (see the script).
+Restart=no
+RemainAfterExit=yes
+KillMode=none
+TimeoutStopSec=5
 # the attach tool prints the chip's whole settings table: keep that out of the journal, errors stay
 StandardOutput=null
 StandardError=journal
