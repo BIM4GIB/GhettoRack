@@ -965,11 +965,13 @@ bool LoadProject()
 /* ================================================================== */
 /* Controls                                                            */
 
-/* ---- looper: what was on the track before a take, for undo and cancel ---- */
+/* ---- looper: what was on the track before a take, for undo, redo and cancel ---- */
 struct LooperUndo
 {
     int      track = -1;
-    bool     valid = false;   // a finished take can be undone
+    bool     valid = false;   // there is something to go back (or forward) to
+    bool     redo  = false;   // it's the take that was undone
+    bool     await = false;   // a reload is still under way
     bool     data  = false;   // the sound itself is in the undo memory
     bool     loop  = false;
     int      mode  = 0;       // what the take was (Engine::kRec...)
@@ -980,71 +982,113 @@ struct LooperUndo
 };
 LooperUndo lundo;
 
-void LooperBackup(int t, int mode)
+/** What track t holds now, described; `keep`: and whether its sound can go
+ *  into the undo memory (recordings exist nowhere else; anything else
+ *  reloads from where it came) */
+void LooperDescribe(int t, LooperUndo& u, bool keep)
 {
     uint32_t    cap = 0;
     int16_t*    mem = plat->UndoMem(&cap);
     const Slot& s   = eng->GetSlot(t);
-    lundo.track     = t;
-    lundo.valid     = false;
-    lundo.mode      = mode;
-    lundo.loop      = eng->IsLoop(t);
-    lundo.bars      = eng->LoopBars(t);
-    lundo.off       = eng->LoopOffset(t);
-    lundo.bpm       = eng->LoopBpm(t);
-    lundo.length    = s.length;
-    snprintf(lundo.path, kPathLen, "%s", slot_path[t]);
-    snprintf(lundo.orig, kPathLen, "%s", slot_orig[t]);
-    /* recordings exist nowhere else; anything else reloads from where it came */
-    lundo.data = mem && (lundo.loop || IsRecPath(slot_path[t])) && s.length && s.length <= cap
-                 && !eng->IsSynth(t);
-    if(lundo.data)
-        memcpy(mem, s.data, (size_t)s.length * sizeof(int16_t));
+    u.track         = t;
+    u.loop          = eng->IsLoop(t);
+    u.bars          = eng->LoopBars(t);
+    u.off           = eng->LoopOffset(t);
+    u.bpm           = eng->LoopBpm(t);
+    u.length        = s.length;
+    snprintf(u.path, kPathLen, "%s", slot_path[t]);
+    snprintf(u.orig, kPathLen, "%s", slot_orig[t]);
+    u.data = keep && mem && (u.loop || IsRecPath(slot_path[t])) && s.length && s.length <= cap
+             && !eng->IsSynth(t);
 }
 
-/** Puts back what LooperBackup kept */
-void LooperRestore()
+void LooperBackup(int t, int mode)
+{
+    uint32_t cap = 0;
+    int16_t* mem = plat->UndoMem(&cap);
+    LooperDescribe(t, lundo, true);
+    lundo.valid = lundo.redo = lundo.await = false;
+    lundo.mode  = mode;
+    if(lundo.data)
+        memcpy(mem, eng->GetSlot(t).data, (size_t)lundo.length * sizeof(int16_t));
+}
+
+/** Puts back what the undo holds. `keep`: what the track has now goes into
+ *  the undo instead, so the same call takes it back again (undo, redo);
+ *  otherwise it's dropped (cancel) */
+void LooperExchange(bool keep)
 {
     const int t = lundo.track;
     if(t < 0)
         return;
-    lundo.valid = false;
-    if(lundo.data)
+    uint32_t   cap = 0;
+    int16_t*   mem = plat->UndoMem(&cap);
+    Slot&      s   = eng->GetSlot(t);
+    LooperUndo cur = lundo;
+    LooperDescribe(t, cur, keep);
+    if(!lundo.data && lundo.mode == Engine::kRecOverdub)
     {
-        uint32_t cap = 0;
-        int16_t* mem = plat->UndoMem(&cap);
-        Slot&    s   = eng->GetSlot(t);
-        if(lundo.mode == Engine::kRecOverdub)
-        {
-            memcpy(s.data, mem, (size_t)lundo.length * sizeof(int16_t)); // same loop, keeps running
-            slot_gen[t]++;
-            return;
-        }
-        s.length = 0;
-        memcpy(s.data, mem, (size_t)lundo.length * sizeof(int16_t));
-        s.rate   = 1.f;
-        s.length = lundo.length;
-        if(lundo.loop)
-            eng->SetLoop(t, lundo.bars, lundo.bpm, lundo.off);
-        else
-            eng->ClearLoop(t);
-        snprintf(slot_path[t], kPathLen, "%s", lundo.path);
-        snprintf(slot_orig[t], kPathLen, "%s", lundo.orig);
-        slot_gen[t]++;
-        ForgetReportedName(t);
+        lundo.valid = false; // nothing was kept (no memory): it stays as it is
         return;
     }
-    if(lundo.mode == Engine::kRecOverdub)
-        return; // nothing kept (no memory): it stays as it is
-    eng->ClearLoop(t);
-    const char* p = lundo.orig[0] ? lundo.orig : lundo.path;
-    char        k[8];
-    if(!p[0] || IsRecPath(p))
+    /* the same loop with other sound in it (an overdub): it keeps running */
+    const bool same = lundo.data && lundo.loop && cur.loop && lundo.length == cur.length
+                      && lundo.bars == cur.bars;
+    if(lundo.data && cur.data)
     {
-        snprintf(k, sizeof(k), "@k%d", BuiltInKitFor(t));
-        p = k;
+        uint32_t n = lundo.length > cur.length ? lundo.length : cur.length;
+        int16_t  tmp[512];
+        for(uint32_t i = 0; i < n; i += 512)
+        {
+            size_t k = (n - i < 512 ? n - i : 512) * sizeof(int16_t);
+            memcpy(tmp, s.data + i, k);
+            memcpy(s.data + i, mem + i, k);
+            memcpy(mem + i, tmp, k);
+        }
     }
-    QueueLoad(t, p, false);
+    else if(lundo.data)
+        memcpy(s.data, mem, (size_t)lundo.length * sizeof(int16_t));
+    else if(cur.data)
+        memcpy(mem, s.data, (size_t)cur.length * sizeof(int16_t));
+    bool await = false;
+    if(lundo.data)
+    {
+        if(!same)
+        {
+            s.rate   = 1.f;
+            s.length = lundo.length;
+            if(lundo.loop)
+                eng->SetLoop(t, lundo.bars, lundo.bpm, lundo.off);
+            else
+                eng->ClearLoop(t);
+            snprintf(slot_path[t], kPathLen, "%s", lundo.path);
+            snprintf(slot_orig[t], kPathLen, "%s", lundo.orig);
+            ForgetReportedName(t);
+        }
+        slot_gen[t]++;
+    }
+    else
+    {
+        eng->ClearLoop(t);
+        const char* p = lundo.orig[0] ? lundo.orig : lundo.path;
+        char        k[8];
+        if(!p[0] || IsRecPath(p))
+        {
+            snprintf(k, sizeof(k), "@k%d", BuiltInKitFor(t));
+            p = k;
+        }
+        QueueLoad(t, p, false);
+        await = true;
+    }
+    const bool redo = !lundo.redo;
+    const int  mode = lundo.mode;
+    lundo           = cur;
+    lundo.mode      = mode;
+    lundo.redo      = redo;
+    lundo.await     = await;
+    lundo.gen       = slot_gen[t];
+    /* it can come back if its sound was kept, or it reloads from a path */
+    lundo.valid = keep && (cur.data || !(cur.loop || IsRecPath(cur.path)));
 }
 
 /** mode: Engine::kRecLoop / kRecOverdub / kRecShot. false = not now */
@@ -1092,26 +1136,49 @@ void LooperCancel()
     if(eng->LiveRecState() == 0)
         return;
     eng->LiveRecCancel();
-    LooperRestore(); // arming already took the track's sound away
+    LooperExchange(false); // arming already took the track's sound away
     Popup("rec cancelled");
 }
 
-void LooperUndoTake()
+bool LooperCan(bool redo)
+{
+    return lundo.valid && !lundo.await && lundo.track >= 0 && lundo.redo == redo
+           && slot_gen[lundo.track] == lundo.gen && eng->LiveRecState() == 0 && !set_op
+           && !TrackLoading(lundo.track);
+}
+
+/** One take back, or (redo) the take that was undone back again */
+void LooperUndoTake(bool redo = false)
 {
     if(eng->LiveRecState() != 0)
     {
-        LooperCancel();
+        if(!redo)
+            LooperCancel();
         return;
     }
-    if(!lundo.valid || lundo.track < 0 || slot_gen[lundo.track] != lundo.gen)
+    if(!LooperCan(redo))
     {
-        Popup("no take to undo");
+        Popup(redo ? "no take to redo" : "no take to undo");
         return;
     }
     int t = lundo.track;
-    LooperRestore();
-    Popup("take on %d undone", t + 1);
-    Log("looper: undid the last take on track %d", t + 1);
+    LooperExchange(true);
+    Popup(redo ? "take on %d back" : "take on %d undone", t + 1);
+    Log("looper: %s the last take on track %d", redo ? "redid" : "undid", t + 1);
+}
+
+/** The APC40's OVERDUB button: on top of the selected track's loop */
+void LooperOverdubButton()
+{
+    if(eng->LiveRecState() != 0)
+    {
+        if(eng->LiveRecState() == 2)
+            eng->LiveRecStop();
+        else
+            LooperCancel();
+        return;
+    }
+    LooperStart(sel_track, Engine::kRecOverdub);
 }
 
 void ToggleRecord()
@@ -1661,7 +1728,10 @@ void OnButton(uint8_t ch, uint8_t note, bool on, uint32_t now)
                     Popup("rec %d: ends with the bar", eng->LiveRecTrack() + 1);
             }
             break;
-        case kOverdub:
+        case kOverdub: // overdub on the selected track's loop; again = stop
+            if(on)
+                LooperOverdubButton();
+            break;
         case kMaster:
             if(on)
                 ToggleRecord();
@@ -1745,7 +1815,9 @@ void OnButton(uint8_t ch, uint8_t note, bool on, uint32_t now)
             break;
         case kDevLeft:
         case kDevRight:
-            if(on && num_files > 0)
+            if(on && shift) // SHIFT + arrows: undo / redo the looper's last take
+                LooperUndoTake(note == kDevRight);
+            else if(on && num_files > 0)
             {
                 int d = (note == kDevRight) ? 1 : -1;
                 if(cur_file < 0)
@@ -2552,7 +2624,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 13; // 12: CK (following a clock), CL (step timing); 13: LP (looper and quantise settings), N "[recorded]"
+constexpr int kReportVersion = 14; // 13: LP (looper and quantise settings), N "[recorded]"; 14: LP has redo and FX quantise
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2990,10 +3062,14 @@ void Report(uint32_t now)
            take is (0 loop, 1 overdub, 2 one-shot), the track whose last take
            can be undone (0 = none) */
         char lp[48];
-        bool can = lundo.valid && lundo.track >= 0 && slot_gen[lundo.track] == lundo.gen;
-        snprintf(lp, sizeof(lp), "LP %d %d %d %d %d %d %d %d", eng->lr_len_bars, eng->lr_countin ? 1 : 0,
+        if(lundo.await && lundo.track >= 0 && !TrackLoading(lundo.track))
+        {
+            lundo.await = false; // the reload an undo asked for is in
+            lundo.gen   = slot_gen[lundo.track];
+        }
+        snprintf(lp, sizeof(lp), "LP %d %d %d %d %d %d %d %d %d %d", eng->lr_len_bars, eng->lr_countin ? 1 : 0,
                  eng->quant_rec, eng->quant_pat, eng->quant_mute, in_gain_ui, eng->LiveRecMode(),
-                 can ? lundo.track + 1 : 0);
+                 LooperCan(false) ? lundo.track + 1 : 0, LooperCan(true) ? lundo.track + 1 : 0, eng->quant_fx);
         if(strcmp(lp, rep_lp))
         {
             strcpy(rep_lp, lp);
@@ -3308,6 +3384,7 @@ void BoxPoll(uint32_t now)
             if(lundo.track == t)
             {
                 lundo.valid = true;
+                lundo.redo  = false;
                 lundo.gen   = slot_gen[t];
             }
             if(mode == Engine::kRecOverdub)
@@ -3632,7 +3709,9 @@ bool BoxUiCommand(const char* c, uint32_t now)
     else if(strcmp(c, "lrec cancel") == 0)
         LooperCancel();
     else if(strcmp(c, "lrec undo") == 0)
-        LooperUndoTake();
+        LooperUndoTake(false);
+    else if(strcmp(c, "lrec redo") == 0) // control protocol 8
+        LooperUndoTake(true);
     else if(sscanf(c, "lrec len %d", &n) == 1 && (n == 0 || n == 1 || n == 2 || n == 4 || n == 8))
         eng->lr_len_bars = (uint8_t)n;
     else if(sscanf(c, "lrec count %d", &a) == 1 && a >= 0 && a <= 2)
@@ -3645,6 +3724,8 @@ bool BoxUiCommand(const char* c, uint32_t now)
             eng->quant_pat = (uint8_t)a;
         else if(strcmp(w, "mute") == 0)
             eng->quant_mute = (uint8_t)a;
+        else if(strcmp(w, "fx") == 0) // control protocol 8
+            eng->quant_fx = (uint8_t)a;
         else
             return false;
     }

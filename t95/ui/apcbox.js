@@ -42,7 +42,7 @@ const st = {
   grid: "0".repeat(256), gridPat: -1, patmask: 0n, meters: new Uint8Array(18), glob: new Uint8Array(10),
   tr: Array.from({ length: 16 }, () => ({ v: new Uint8Array(13), name: "", acid: new Uint8Array(8), notes: null, notesPat: -1, wave: null })),
   log: [], daisy: false, ctl: 0, bridge: null, ver: 0,
-  lp: { len: 0, count: 0, qrec: 0, qpat: 0, qmute: 0, gain: 64, mode: 0, undo: 0 },
+  lp: { len: 0, count: 0, qrec: 0, qpat: 0, qmute: 0, gain: 64, mode: 0, undo: 0, redo: 0, qfx: 1 },
   sets: Array.from({ length: 8 }, () => ({ exists: false })), trans: 0, transName: "", setOp: 0, kits: [], kitPg: [-1, -1], xfer: null, caps: {},
 };
 const patName = p => "ABCDEFGH"[p >> 3] + (1 + (p & 7));
@@ -649,7 +649,7 @@ V.sound = {
     const mt = el("div", "cell"); mt.style.flexDirection = "row"; this.m = Meter(PHONE ? 10 : 14); mt.appendChild(this.m.el); this.m.el.style.height = "70%"; r2.appendChild(mt);
     if (ty === "loop") {
       const pg = el("div", "pg"); pg.style.gridTemplateColumns = PHONE ? "1fr 1fr" : "repeat(4,1fr)";
-      [["RE-RECORD", `lrec arm ${t + 1}`], ["OVERDUB", `lrec over ${t + 1}`], ["STOP", "lrec stop"], ["UNDO TAKE", "lrec undo"]].forEach(([n, c]) => { const b = el("button", "bigpad", n); b.onclick = () => act(c); pg.appendChild(b); });
+      [["RE-RECORD", `lrec arm ${t + 1}`], ["OVERDUB", `lrec over ${t + 1}`], ["STOP", "lrec stop"], ["UNDO / REDO", () => st.lp.undo !== t + 1 && st.lp.redo === t + 1 ? "lrec redo" : "lrec undo"]].forEach(([n, c]) => { const b = el("button", "bigpad", n); b.onclick = () => act(typeof c === "function" ? c() : c); pg.appendChild(b); });
       this.state = el("div", "hdr");
       view.style.gridTemplateRows = sz("auto auto 1fr 110px 190px", "auto auto 1fr 110px 120px", "auto auto 1fr 44px 92px");
       view.append(this.h.hdr, this.state, this.wave.el, pg, r2);
@@ -1006,7 +1006,7 @@ V.samples = {
       over: pad("OVERDUB", "on top of the loop", () => act(st.lrec ? "lrec stop" : "lrec over " + T())),
       shot: pad("SAMPLE", "one-shot, starts with the sound", () => act(st.lrec ? "lrec stop" : "lrec shot " + T())),
       stop: pad("STOP", "", () => act("lrec stop")),
-      undo: pad("UNDO TAKE", "", () => act("lrec undo")),
+      undo: pad("UNDO TAKE", "", () => act(st.lrec ? "lrec cancel" : st.lp.undo !== T() && st.lp.redo === T() ? "lrec redo" : "lrec undo")),
       clear: pad("CLEAR", "back to the kit sound", () => act(`type ${T()} sample`)),
     };
     if (PHONE) view.append(hdr, hdr2, this.wave.el, set, pg); else view.append(hdr, this.wave.el, set, pg);
@@ -1026,8 +1026,8 @@ V.samples = {
     cls(P.over, rec && m === 1, rec && m === 1 && st.lrec === 1, (st.lrec && !(rec && m === 1)) || (!st.lrec && ty !== "loop"));
     cls(P.shot, rec && m === 2, rec && m === 2 && st.lrec === 1, st.lrec && !(rec && m === 2));
     cls(P.stop, false, false, !st.lrec);
-    cls(P.undo, false, false, !st.lrec && st.lp.undo !== t + 1);
-    P.undo.firstChild.textContent = st.lrec ? "CANCEL" : "UNDO TAKE";
+    cls(P.undo, false, false, !st.lrec && st.lp.undo !== t + 1 && st.lp.redo !== t + 1);
+    P.undo.firstChild.textContent = st.lrec ? "CANCEL" : st.lp.undo !== t + 1 && st.lp.redo === t + 1 ? "REDO TAKE" : "UNDO TAKE";
     this.m.set(Math.min(255, st.inPeak * 2.55));
     this.ZL();
   },
@@ -1140,9 +1140,10 @@ V.system = {
     const qb = el("div", "qrow"); if (!PHONE) qb.style.gridColumn = "span 2";
     const qc = (label, seg) => { const c = el("div", "qc"); c.append(el("span", "lbl", label), seg.el); qb.appendChild(c); return seg; };
     this.q = [
-      qc(SHORT ? "patterns" : "pattern switch on the", Seg([[0, "bar"], [1, "beat"], [2, "step"]], () => st.lp.qpat, v => lpAct("qpat", v, "quant pat " + v))),
+      qc(SHORT ? "patterns" : PHONE ? "pattern switch on the" : "patterns on the", Seg([[0, "bar"], [1, "beat"], [2, "step"]], () => st.lp.qpat, v => lpAct("qpat", v, "quant pat " + v))),
       qc(SHORT ? "mutes" : "mute / solo", Seg([[0, "at once"], [1, "beat"], [2, "bar"]], () => st.lp.qmute, v => lpAct("qmute", v, "quant mute " + v))),
-      qc(SHORT ? "takes" : "loop takes start on the", Seg([[0, "bar"], [1, "beat"]], () => st.lp.qrec, v => lpAct("qrec", v, "quant rec " + v)))];
+      qc(SHORT ? "takes" : PHONE ? "loop takes start on the" : "takes start on the", Seg([[0, "bar"], [1, "beat"]], () => st.lp.qrec, v => lpAct("qrec", v, "quant rec " + v))),
+      qc(SHORT ? "FX" : "held FX", Seg([[0, "at once"], [1, "step"], [2, "beat"]], () => st.lp.qfx, v => lpAct("qfx", v, "quant fx " + v)))];
     view.style.gridTemplateRows = PHONE ? "auto 1fr auto auto" : "1fr auto auto";
     view.append(box("Links", this.kv), box("Log", this.logEl), qb, pg);
     this.B(); this.L();
@@ -1209,13 +1210,13 @@ function line(l) {
     case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
     case "CK": st.ext = rest[0] === "1"; topStatus(); break;
     case "LP": { const f = rest.split(" ").map(Number); if (f.length < 8) break;
-      const o = { len: f[0], count: f[1], qrec: f[2], qpat: f[3], qmute: f[4], gain: f[5], mode: f[6], undo: f[7] };
+      const o = { len: f[0], count: f[1], qrec: f[2], qpat: f[3], qmute: f[4], gain: f[5], mode: f[6], undo: f[7], redo: f[8] || 0, qfx: f.length > 9 ? f[9] : 0 };
       for (const k in o) if (!isBusy("lp." + k)) st.lp[k] = o[k]; call("P"); call("S"); break; }
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); call("B"); break;
   }
 }
-const REPORT_VERSION = 13;
+const REPORT_VERSION = 14;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

@@ -172,8 +172,11 @@ class Engine
     /** Plays a track once without recording it (sample preview) */
     void Audition(int track);
     void SetRoll(int track, bool on) { roll_[track] = on; }
-    void SetPerfFx(int fx, bool on) { fx_held_[fx] = on; }
-    bool PerfFxActive(int fx) const { return fx_held_[fx]; }
+    /** Held FX wait for the grid while playing (quant_fx) */
+    void SetPerfFx(int fx, bool on) { fx_want_[fx] = on; }
+    bool PerfFxActive(int fx) const { return fx_want_[fx]; }
+    /** What is really running right now */
+    bool PerfFxLive(int fx) const { return fx_held_[fx]; }
 
     /** Increments every time a track fires; the UI uses it to flash LEDs */
     uint32_t TriggerCount(int track) const { return trig_count_[track]; }
@@ -282,6 +285,7 @@ class Engine
     volatile uint8_t quant_rec   = 0;     // a take starts on: 0 the bar, 1 the beat
     volatile uint8_t quant_pat   = 0;     // a pattern switch lands on: 0 the bar, 1 the beat, 2 the next step
     volatile uint8_t quant_mute  = 0;     // mute/solo land: 0 at once, 1 on the beat, 2 on the bar
+    volatile uint8_t quant_fx    = 1;     // held FX start and end: 0 at once, 1 on the step, 2 on the beat
     volatile float   in_gain     = 1.f;   // input level, 0..4
     int  LiveRecTrack() const { return lr_track_; }
     int  LiveRecBars() const { return lr_bars_done_; }
@@ -609,6 +613,8 @@ class Engine
         kCapReverse
     };
     volatile bool fx_held_[kNumPerfFx] = {};
+    volatile bool fx_want_[kNumPerfFx] = {};
+    bool          fx_latch_            = true;
     bool          fx_prev_[kNumPerfFx] = {};
     float*        cap_l_ = nullptr;
     float*        cap_r_ = nullptr;

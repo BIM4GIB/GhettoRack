@@ -862,7 +862,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.12 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.13 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

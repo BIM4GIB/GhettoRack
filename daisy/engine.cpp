@@ -910,6 +910,10 @@ void Engine::UpdateBlockParams(size_t size)
         any_solo |= solo_eff_[t];
     }
     mute_latch_ = false;
+    if(fx_latch_ || !playing_ || quant_fx == 0)
+        for(int f = 0; f < kNumPerfFx; f++)
+            fx_held_[f] = fx_want_[f];
+    fx_latch_ = false;
 
     /* Crossfader: tracks on A fade out to the right, tracks on B fade out
        to the left, both full in the middle; AB tracks ignore it */
@@ -1379,6 +1383,8 @@ void Engine::OnStep(int s)
         }
         if(quant_mute == 0 || (s % 4 == 0 && quant_mute == 1) || s == 0)
             mute_latch_ = true;
+        if(quant_fx <= 1 || s % 4 == 0)
+            fx_latch_ = true;
         if((global.metronome || (lr_countin && lr_state_ == 1 && lr_mode_ != kRecShot)) && (s % 4) == 0)
             Click(s == 0);
     }

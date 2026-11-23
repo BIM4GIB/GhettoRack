@@ -640,7 +640,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 7 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 8 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -713,7 +713,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 7 03 01 02 1") >= 1);
+        CHECK(T95Count("P 8 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -732,7 +732,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 7 ") >= 1);
+        CHECK(T95Count("P 8 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1121,7 +1121,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 7 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 8 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1289,7 +1289,12 @@ int main()
         Tick(2100);
         CHECK(idle() && e.IsLoop(4) && e.LoopBars(4) == 1 && labs((long)s5.length - 96000) < 4);
         Tick(40);
-        CHECK(rep_lp[0] && atoi(strrchr(rep_lp, ' ')) == 5); // the take on track 5 can be undone
+        auto lpf = [](int i) { // field i of the LP line
+            int f[10] = {};
+            sscanf(rep_lp, "LP %d %d %d %d %d %d %d %d %d %d", f, f + 1, f + 2, f + 3, f + 4, f + 5, f + 6, f + 7, f + 8, f + 9);
+            return f[i];
+        };
+        CHECK(lpf(7) == 5 && lpf(8) == 0 && lpf(9) == 1); // the take on track 5 can be undone; FX snap to the step
 
         /* overdub: on top, in place, one pass; undo puts the first take back */
         std::vector<int16_t> first(s5.data, s5.data + s5.length);
@@ -1304,10 +1309,39 @@ int main()
         for(uint32_t k = 0; k < s5.length; k++)
             diff += labs((long)s5.data[k] - first[k]);
         CHECK(diff > 96000L * 1000 && labs((long)s5.length - 96000) < 4 && e.LoopBars(4) == 1);
+        std::vector<int16_t> dubbed(s5.data, s5.data + s5.length);
         U("lrec undo");
         CHECK(!memcmp(s5.data, first.data(), first.size() * 2) && e.IsLoop(4));
+        Tick(40);
+        CHECK(lpf(7) == 0 && lpf(8) == 5);
         U("lrec undo"); // only one take back
-        CHECK(e.IsLoop(4));
+        CHECK(e.IsLoop(4) && !memcmp(s5.data, first.data(), first.size() * 2));
+        U("lrec redo"); // and forward again
+        CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2) && e.IsLoop(4));
+        U("lrec redo");
+        CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2));
+        /* the APC40: SHIFT + the device arrows are undo and redo, OVERDUB overdubs the selected track */
+        Btn(apc::kShift, 0, true);
+        Btn(apc::kDevLeft, 0, true);
+        Btn(apc::kDevLeft, 0, false);
+        CHECK(!memcmp(s5.data, first.data(), first.size() * 2));
+        Btn(apc::kDevRight, 0, true);
+        Btn(apc::kDevRight, 0, false);
+        CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2));
+        Btn(apc::kDevLeft, 0, true);
+        Btn(apc::kDevLeft, 0, false);
+        Btn(apc::kShift, 0, false);
+        CHECK(!memcmp(s5.data, first.data(), first.size() * 2) && e.IsLoop(4));
+        SelectTrack(4);
+        Btn(apc::kOverdub, 0, true);
+        Btn(apc::kOverdub, 0, false);
+        Tick(3);
+        CHECK(e.LiveRecState() == 1 && e.LiveRecMode() == Engine::kRecOverdub && e.LiveRecTrack() == 4);
+        Btn(apc::kOverdub, 0, true); // again before it started: off
+        Btn(apc::kOverdub, 0, false);
+        Tick(2100);
+        CHECK(idle() && e.IsLoop(4) && !memcmp(s5.data, first.data(), first.size() * 2));
+        SelectTrack(0);
 
         /* not at another tempo (it would land in the wrong place) */
         U("tempo 1300");
@@ -1377,7 +1411,14 @@ int main()
         CHECK(s7.length > 13500 && s7.length < 15000 && s7.data[s7.length - 1] == 0);
         CHECK(IsRecPath(slot_path[6]));
         test_in_amp = 0.f;
+        const uint32_t shot_len = s7.length;
         U("lrec undo"); // the kit sound comes back
+        WaitIdle();
+        CHECK(!IsRecPath(slot_path[6]) && BuiltInKitOf(slot_path[6]) >= 0);
+        Tick(40);
+        U("lrec redo"); // and the recording again
+        CHECK(IsRecPath(slot_path[6]) && s7.length == shot_len && !e.IsLoop(6));
+        U("lrec undo");
         WaitIdle();
         CHECK(!IsRecPath(slot_path[6]) && BuiltInKitOf(slot_path[6]) >= 0);
 
@@ -1418,6 +1459,37 @@ int main()
         U("mute 1 0");
         Tick(3);
         CHECK(!e.MuteLive(0));
+
+        /* held FX wait for the step or the beat, on and off; at once when stopped */
+        CHECK(e.quant_fx == 1);
+        U("quant fx 2");
+        CHECK(until([] { return e.CurrentStep() == 5; }, 2100));
+        U("fx 3 1");
+        Tick(60);
+        CHECK(e.PerfFxActive(2) && !e.PerfFxLive(2));
+        CHECK(until([] { return e.CurrentStep() == 8; }, 500));
+        Tick(3);
+        CHECK(e.PerfFxLive(2));
+        U("fx 3 0");
+        Tick(60);
+        CHECK(!e.PerfFxActive(2) && e.PerfFxLive(2));
+        CHECK(until([] { return e.CurrentStep() == 12; }, 600));
+        Tick(3);
+        CHECK(!e.PerfFxLive(2));
+        U("quant fx 1");
+        CHECK(until([] { return e.CurrentStep() == 1; }, 2100));
+        Tick(20);
+        U("fx 3 1");
+        Tick(20);
+        CHECK(!e.PerfFxLive(2));
+        CHECK(until([] { return e.CurrentStep() == 2; }, 200));
+        Tick(3);
+        CHECK(e.PerfFxLive(2));
+        U("quant fx 0");
+        U("fx 3 0");
+        Tick(3);
+        CHECK(!e.PerfFxLive(2));
+        U("quant fx 1");
 
         /* roll from a page; it lets go when the T95 goes quiet */
         uint32_t c = e.TriggerCount(2);

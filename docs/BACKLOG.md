@@ -4,9 +4,9 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## In the firmware to flash (v13.12, built, desktop-tested, NOT flashed)
+## In the firmware to flash (v13.13, built, desktop-tested, NOT flashed)
 
-`daisy/release/ApcBox.bin`. Control protocol 7, report 13.
+`daisy/release/ApcBox.bin`. Control protocol 8, report 14.
 
 - Clock: the Daisy follows the T95's clock, the T95 can follow the Daisy.
 - Looper (Samples > looper, or the loop page under Sound): take length
@@ -14,21 +14,25 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   last take, count-in, start on the bar or the beat, input level, monitor.
 - One-shot sampling from the Daisy's input (SAMPLE: starts with the sound).
 - Quantise (System): pattern switch on bar/beat/step, mute and solo at
-  once/beat/bar.
+  once/beat/bar, held FX at once/step/beat (step by default: on and off
+  both land on the grid).
+- Redo of an undone take. APC40: OVERDUB = overdub the selected track's loop,
+  SHIFT + device arrows = undo / redo (the arrows alone still browse the SD
+  card's samples).
 - ROLL (hold) on the Perform strips.
 - Keyboard knobs, pitch bend and pads (channel 10) on the selected track.
 - T95 side, no flash needed: trim and normalise before sending (tap a file
   in the library).
 
-Left out on purpose, say if wanted: snapping FX holds to the grid (they are
-momentary), auto-stop of a one-shot on silence, a pre-roll for one-shots (the
-first fraction of a millisecond below the threshold is lost).
+Left out on purpose, say if wanted: auto-stop of a one-shot on silence, a
+pre-roll for one-shots (the first fraction of a millisecond below the
+threshold is lost).
 
 Known limits: looper and quantise settings are not saved over a power cycle.
 A loop that started on a beat goes back to the bar line when its set is
-loaded again. Undo is one take deep. On the APC40 there is no button yet for
-overdub, one-shot or undo (REC still arms a loop; it now follows the take
-length and beat settings).
+loaded again. Undo is one take deep (undo and redo go back and forth). On
+the APC40 there is no button yet for one-shot sampling (REC still arms a
+loop; it follows the take length and beat settings).
 
 ## To check on the rig (built, desktop-tested only)
 
@@ -46,7 +50,7 @@ length and beat settings).
 - Boot straight into the last mode. The remote after relearning (OK button).
 - Daisy: the screen's 7-9 ms per loop, the one-off 52 ms ping spike.
 - Mac build of the shared code (`daisy/mac/build.sh`) since v13.9.
-- v13.12 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
+- v13.13 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
   slot, at the top of the memory nothing used before). Watch the boot log and
   try an undo of a long take. Overdub and one-shot levels with the real
   input; the one-shot start threshold with real noise on the line.
@@ -75,8 +79,8 @@ length and beat settings).
 - The Daisy's own SD card browsed from the T95; sets copied to and from the
   T95 (backup); a whole kit sent from the T95 library in one go.
 - 303 cutoff shown in Hz (a percentage today).
-- Looper: settings saved with the project; more than one undo; overdub,
-  one-shot and undo on APC40 buttons; learn for keyboard knobs.
+- Looper: settings saved with the project; more than one undo; one-shot on
+  an APC40 button; learn for keyboard knobs.
 
 ## MIDI and clock
 

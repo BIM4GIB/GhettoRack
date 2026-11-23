@@ -36,13 +36,13 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | built |
 | 4 Sound | Live loop | `loop` | loop waveform with bar lines, re-record, overdub, stop, undo take | built (v13.12) |
 | 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete. Tap a file: trim view (two markers on a big waveform, normalise, hear the result, send) | built |
-| 5 Samples | Looper | - | the Daisy's own input into the selected track: input meter, level pot, monitor, count-in, take length (free/1/2/4/8 bars), start on bar or beat; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO TAKE, CLEAR; the track's waveform | built (v13.12) |
+| 5 Samples | Looper | - | the Daisy's own input into the selected track: input meter, level pot, monitor, count-in, take length (free/1/2/4/8 bars), start on bar or beat; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE, CLEAR; the track's waveform | built (v13.13) |
 | 5 Samples | Mic | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built |
 | 5 Samples | Kits | - | every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.10) |
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
 | 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
-| 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat), other modules | built |
+| 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat; held FX: at once/step/beat), other modules | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
 | - | Slice | - | chop a sample or loop across steps | later (new firmware feature) |
 | - | Keys | - | on-screen keyboard and pads for the selected track, scale lock | later |
@@ -91,6 +91,11 @@ live, with markers and bar lines), pad, list row with waveform.
   filter, 71 reso, 72 decay, 73 start, 7 volume, 10 pan, 91 reverb, 93 delay),
   pitch bend (2 semitones) and pads (channel 10, notes 36-51 = tracks 1-16)
   on the selected track. Desktop-tested; not flashed yet.
+- v13.13 (control protocol 8, report 14): held FX snap to the step (or the
+  beat, or not), redo of an undone take. On the APC40: OVERDUB overdubs the
+  selected track's loop (it used to do the same as the record button),
+  SHIFT + the two device arrows are undo and redo of the last take (the
+  arrows alone still step through the SD card's samples).
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

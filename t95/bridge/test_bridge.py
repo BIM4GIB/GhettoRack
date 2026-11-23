@@ -1608,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 7)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 8)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -1846,15 +1846,20 @@ class PageControlTest(unittest.TestCase):
         self.assertTrue(self.box.wait_for(lambda c: self.s(47) != 0 and self.lp()[6] == 1, 5), self.last("LP "))
         self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0, 6))
         self.do("lrec undo")                                                   # the overdub
-        self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0, 5), self.last("LP "))
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[7:9] == [0, 9], 5), self.last("LP "))
         self.assertEqual(self.last("N 8 "), "N 8 [loop 1 bars]")
+        self.do("lrec redo")                                                   # v13.13: and back again
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[7:9] == [9, 0], 5), self.last("LP "))
+        self.do("lrec undo")
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[7:9] == [0, 9], 5), self.last("LP "))
         self.do("lrec over 3")                                                 # no loop there: refused
         time.sleep(0.3)
         self.assertEqual(self.s(47), 0)
         # settings come back on the LP line
-        self.do("lrec len 4", "lrec count 1", "quant rec 1", "quant pat 2", "quant mute 1", "ingain 100")
-        self.assertTrue(self.box.wait_for(lambda c: self.lp()[:6] == [4, 1, 1, 2, 1, 100], 5), self.last("LP "))
-        for bad in ("lrec len 3", "quant pat 3", "quant rec 2", "quant banana 1", "roll 17 1", "ingain 200"):
+        self.assertEqual(self.lp()[9], 1)                                      # held FX snap to the step unless told
+        self.do("lrec len 4", "lrec count 1", "quant rec 1", "quant pat 2", "quant mute 1", "ingain 100", "quant fx 2")
+        self.assertTrue(self.box.wait_for(lambda c: self.lp()[:6] == [4, 1, 1, 2, 1, 100] and self.lp()[9] == 2, 5), self.last("LP "))
+        for bad in ("lrec len 3", "quant pat 3", "quant rec 2", "quant banana 1", "roll 17 1", "ingain 200", "quant fx 3"):
             self.do(bad)
         time.sleep(0.3)
         self.assertEqual(self.lp()[:6], [4, 1, 1, 2, 1, 100])
@@ -1863,7 +1868,7 @@ class PageControlTest(unittest.TestCase):
         self.assertTrue(self.box.wait_for(lambda c: self.s(18) & 4, 5), self.last("S "))
         self.do("roll 3 0")
         self.assertTrue(self.box.wait_for(lambda c: not self.s(18) & 4, 5))
-        self.do("lrec len 0", "lrec count 0", "quant rec 0", "quant pat 0", "quant mute 0", "ingain 64", "stop", "type 9 sample", "type 11 sample")
+        self.do("lrec len 0", "lrec count 0", "quant rec 0", "quant pat 0", "quant mute 0", "quant fx 1", "ingain 64", "stop", "type 9 sample", "type 11 sample")
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
@@ -1891,6 +1896,10 @@ class PageControlTest(unittest.TestCase):
                 self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0 and self.lp()[7] == self.s(7) + 1, 6), self.last("LP "))
                 pg.wait_for_function("!document.querySelectorAll('button.bigpad')[1].disabled")       # OVERDUB now
                 pg.locator("button.bigpad:has-text('UNDO TAKE')").click()
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0 and self.lp()[8] == self.s(7) + 1, 5), self.last("LP "))
+                pg.locator("button.bigpad:has-text('REDO TAKE')").click()               # the same pad
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[8] == 0 and self.lp()[7] == self.s(7) + 1, 5), self.last("LP "))
+                pg.locator("button.bigpad:has-text('UNDO TAKE')").click()
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0, 5))
                 self.do("stop", "lrec len 0")
                 # quantise on the System view
@@ -1902,6 +1911,11 @@ class PageControlTest(unittest.TestCase):
                 pg.wait_for_function("document.querySelector('.qrow .qc:nth-child(1) span.on').textContent === 'step'")
                 pg.click(".qrow .qc:nth-child(1) span:text-is('bar')")
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[3] == 0, 5))
+                pg.wait_for_function("document.querySelector('.qrow .qc:nth-child(4) span.on').textContent === 'step'")
+                pg.click(".qrow .qc:nth-child(4) span:text-is('beat')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[9] == 2, 5))
+                pg.click(".qrow .qc:nth-child(4) span:text-is('step')")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[9] == 1, 5))
                 # trim view: drag both markers in, send
                 pg.goto("http://127.0.0.1:%d/apcbox?v=samples&sm=lib" % self.http)
                 pg.wait_for_selector(".li.file")
