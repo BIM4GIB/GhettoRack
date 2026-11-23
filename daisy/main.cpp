@@ -626,6 +626,12 @@ class DaisyPlatform : public Platform
         return f_close(&save_file) == FR_OK;
     }
     bool Remove(const char* path) override { return f_unlink(Full(path)) == FR_OK; }
+    bool Rename(const char* from, const char* to) override
+    {
+        char a[256];
+        snprintf(a, sizeof(a), "%s", Full(from));
+        return f_rename(a, Full(to)) == FR_OK;
+    }
     int16_t* Staging(uint32_t* samples) override
     {
         *samples = kStageCap;
@@ -862,7 +868,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.13 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.14 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

@@ -38,7 +38,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete. Tap a file: trim view (two markers on a big waveform, normalise, hear the result, send) | built |
 | 5 Samples | Looper | - | the Daisy's own input into the selected track: input meter, level pot, monitor, count-in, take length (free/1/2/4/8 bars), start on bar or beat; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE, CLEAR; the track's waveform | built (v13.13) |
 | 5 Samples | Mic | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built |
-| 5 Samples | Kits | - | every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.10) |
+| 5 Samples | Kits | - | the 8 tracks of a page as slots with waveforms (tap: select and hear); SAVE AS KIT / SAVE OVER (asks), RENAME, DELETE (asks), UNDO KIT; every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.14) |
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
 | 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
@@ -99,6 +99,9 @@ live, with markers and bar lines), pad, list row with waveform.
   file, BANK left/right = folder, the encoder), so a sample changed by
   accident comes back, also when it was a recorded loop. Stepping on through
   files still undoes to the original.
+- v13.14 (control protocol 9, report 15): kits made on the box (`daisy/kits.h`):
+  sounds plus settings, 303 tracks as 303 state, rename, delete; a kit loaded
+  by accident is undone with the same undo (APC40: the left device arrow).
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

@@ -331,3 +331,14 @@ body.short .lset{gap:6px;grid-template-columns:1.1fr .7fr 1.5fr 1fr}body.short .
 body.short .qrow{gap:6px}body.short .qc{padding:3px 8px;gap:4px}
 .b.r.on{color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1f99, inset 0 0 8px #ff9a1f44}
 body.short .qrow .lbl{font-size:9px}body.short .qc{flex-direction:column;justify-content:center}
+
+/* kits view: the 8 tracks of a page as slots */
+.kslots{display:grid;grid-template-columns:repeat(8,1fr);gap:10px;min-height:0}
+.kslot{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-rows:auto 1fr;gap:4px;padding:8px;min-width:0;min-height:0;cursor:pointer}
+.kslot.on{border-color:var(--amber)}.kslot.dim{opacity:.55}
+.kslot .n{font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kslot .wave{min-height:0;border:0;background:none}
+.li.sel{background:#1d2126;box-shadow:inset 3px 0 0 var(--amber)}
+body.phone .kslots{grid-template-columns:repeat(4,1fr);gap:6px}body.phone .kslot{padding:5px}body.phone .kslot .n{font-size:10px}
+body.short .kslots{gap:6px}body.short .kslot{padding:4px;gap:2px}body.short .kslot .n{font-size:9px}
+.kslot .wave .tag{display:none}

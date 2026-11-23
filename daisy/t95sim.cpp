@@ -89,6 +89,7 @@ class SimPlat : public Platform
         return ok;
     }
     bool Remove(const char* p) override { return !root.empty() && ::remove(Full(p).c_str()) == 0; }
+    bool Rename(const char* a, const char* b) override { return !root.empty() && ::rename(Full(a).c_str(), Full(b).c_str()) == 0; }
     uint8_t* Scratch(uint32_t* s) override
     {
         *s = sizeof(scratch);

@@ -792,6 +792,7 @@ V.fx = {
 
 /* Samples: the T95's library and SD card (waveform per file, hear it here, send to the
    selected track), record with this device's microphone, and the kits on the Daisy */
+let kitEdPg = -1, kitSel = -1, kitSure = "";   /* kits view: which 8 tracks, the kit picked in the list, the button waiting for a second press */
 let smpMode = Q.get("sm") || "lib", smpPage = 0, smpEdit = null;   /* smpEdit: the file open in the trim view */
 const smpPath = { lib: "", sd: "" }, peakCache = new Map();
 let pvCtx = null, pvSrc = null, pvKey = "";
@@ -828,7 +829,7 @@ function smpSub() {
 }
 V.samples = {
   build() {
-    this.X = this.K = this.P = this.H = this.Z = this.T = null; pvStop();
+    this.X = this.K = this.P = this.H = this.Z = this.T = this.J = this.slots = null; pvStop();
     this.S = this.S1; this.N = this.S1;
     if (smpMode === "loop") return this.buildLoop();
     if (smpEdit && smpEdit.src === smpMode) return this.buildEdit();
@@ -1103,30 +1104,92 @@ V.samples = {
   X2() { const x = st.xfer; if (x) this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track : x.name + " → track " + x.track + ": " + x.state, x.state === "failed"); },
 
   /* kits on the Daisy (built in, and folders on its card): load one into tracks 1-8 or 9-16 */
+  /* kits: the 8 tracks of a page as slots, save them as a kit, load / rename / delete kits */
   buildKits() {
-    view.className = "v"; view.style.gridTemplateRows = "auto 1fr auto";
-    const hdr = el("div", "hdr"); this.to = null; this.msg = null;
-    hdr.append(smpSub(), el("span", "lbl", PHONE ? "" : "a kit fills 8 tracks: pick which 8"), el("span", "sp"));
-    this.rowsN = sz(10, 9, 4);
+    view.className = "v"; view.style.gridTemplateRows = sz("auto 150px auto 1fr auto", "auto 124px auto auto 1fr auto", "auto 58px auto 1fr");
+    const hdr = el("div", "hdr"); this.to = null; this.msg = el("span", "lbl msg");
+    if (kitEdPg < 0) kitEdPg = st.sel >> 3;
+    this.pgSeg = Seg([[0, PHONE ? "1-8" : "tracks 1-8"], [1, PHONE ? "9-16" : "tracks 9-16"]], () => kitEdPg, v => { kitEdPg = v; kitSure = ""; this.KS(); });
+    hdr.append(smpSub(), this.pgSeg.el, this.msg, el("span", "sp"));
+    const slots = el("div", "kslots"); this.slots = [];
+    for (let c = 0; c < 8; c++) {
+      const d = el("div", "kslot"), n = el("span", "n"), w = Wave(); d.append(n, w.el);
+      d.onclick = () => { const t = kitEdPg * 8 + c; act(`track ${t + 1}`); act(`audition ${t + 1}`); };
+      slots.appendChild(d); this.slots.push({ d, n, w });
+    }
+    this.name = el("input"); this.name.type = "text"; this.name.maxLength = 16; this.name.placeholder = "kit name (a-z, 0-9)"; this.name.autocapitalize = "off"; this.name.autocomplete = "off"; this.name.spellcheck = false;
+    this.name.addEventListener("blur", () => setTimeout(refit, 300)); this.name.addEventListener("input", () => { kitSure = ""; this.KS(); });
+    const nmrow = el("div", "hdr"); nmrow.append(el("span", "lbl", SHORT ? "" : "name"), this.name);
+    const ops = el("div", "pg"); ops.style.cssText = `grid-template-columns:repeat(4,1fr);grid-auto-rows:${sz(52, 42, 30)}px`;
+    this.btn = {};
+    [["save", "SAVE AS KIT"], ["name", "RENAME"], ["delete", "DELETE"], ["undo", "UNDO KIT"]].forEach(([k, n]) => { const b = el("button", "bigpad", n); b.onclick = () => this.kitOp(k); ops.appendChild(b); this.btn[k] = b; });
+    this.rowsN = sz(8, 4, 3);
     this.list = el("div", "list"); this.list.style.gridTemplateRows = `repeat(${this.rowsN},1fr)`;
     const foot = el("div", "hdr"); this.prev = el("button", "b", "◀"); this.next = el("button", "b", "▶"); this.pageEl = el("span", "lbl");
-    for (const b of [this.prev, this.next]) b.style.cssText = "width:54px;height:34px;font-size:15px";
+    for (const b of [this.prev, this.next]) b.style.cssText = SHORT ? "width:38px;height:26px" : "width:54px;height:34px;font-size:15px";
     this.prev.onclick = () => { smpPage--; this.K(); }; this.next.onclick = () => { smpPage++; this.K(); };
     foot.append(this.prev, this.pageEl, this.next, el("span", "sp"));
-    view.append(hdr, this.list, foot);
-    this.K = this.K1;
+    if (SHORT) { nmrow.append(ops, foot); ops.style.flex = "1"; foot.style.flex = "0 0 auto"; view.append(hdr, slots, nmrow, this.list); }
+    else if (PHONE) view.append(hdr, slots, nmrow, ops, this.list, foot);
+    else { nmrow.appendChild(ops); ops.style.flex = "1"; view.append(hdr, slots, nmrow, this.list, foot); }
+    this.K = this.K1; this.S = this.KS; this.N = this.KS; this.Z = this.KS; this.T = this.KS; this.P = this.KS; this.J = this.KS;
+    this.KS();
+  },
+  kitName() { return this.name.value.trim().toLowerCase().replace(/[^a-z0-9 -]/g, " ").replace(/ +/g, " ").trim(); },
+  kitFind(n) { return st.kits.findIndex(k => (k || "").toLowerCase() === n); },
+  kitOp(k) {
+    const n = this.kitName(), nb = st.kitNb, sure = kitSure === k; kitSure = "";
+    if (nb == null) return this.say("the Daisy's firmware is too old for this (needs v13.14+)", true);
+    if (k === "undo") { act(st.lp.undo >= 101 ? "lrec undo" : "lrec redo"); return; }
+    if (k === "save") {
+      if (!n) return this.say("type a name for the kit first", true);
+      const ex = this.kitFind(n);
+      if (ex >= 0 && ex < nb) return this.say(st.kits[ex] + " is built in: pick another name", true);
+      if (ex >= 0 && !sure) { kitSure = k; this.KS(); return this.say("replace the kit " + st.kits[ex] + "? press again"); }
+      act(`kit ${ex >= 0 ? "over" : "save"} ${kitEdPg} ${n}`); this.say("saving tracks " + (kitEdPg ? "9-16" : "1-8") + " as " + n + " ...");
+    } else {
+      if (kitSel < nb || kitSel >= st.kits.length) return this.say(kitSel >= 0 && kitSel < nb ? "built-in kits can't be changed" : "tap a kit in the list first", true);
+      if (k === "delete") {
+        if (!sure) { kitSure = k; this.KS(); return this.say("delete the kit " + st.kits[kitSel] + " from the card? press again"); }
+        act("kit delete " + (kitSel + 1)); kitSel = -1;
+      } else {
+        if (!n || n === (st.kits[kitSel] || "").toLowerCase()) return this.say("type the new name first", true);
+        if (this.kitFind(n) >= 0) return this.say("there is a kit called " + n + " already", true);
+        act(`kit rename ${kitSel + 1} ${n}`); kitSel = -1;
+      }
+    }
+    this.KS();
+  },
+  KS() {
+    if (!this.slots) return;
+    this.pgSeg.upd();
+    for (let c = 0; c < 8; c++) {
+      const t = kitEdPg * 8 + c, o = this.slots[c], ty = typeOf(t), nm = (t + 1) + " " + (ty === "303" ? "303" : ty === "loop" ? "loop (not in kits)" : trackName(t));
+      if (o.n.textContent !== nm) o.n.textContent = nm;
+      o.d.classList.toggle("on", st.sel === t); o.d.classList.toggle("dim", ty === "loop");
+      o.w.draw(ty === "303" ? null : st.tr[t].wave, [], ty === "loop" ? "#5a5f66" : GR, "");
+    }
+    const n = this.kitName(), ex = n ? this.kitFind(n) : -1, B = this.btn, nb = st.kitNb == null ? 0 : st.kitNb, sd = kitSel >= nb && kitSel < st.kits.length;
+    B.save.firstChild.textContent = kitSure === "save" ? "SURE?" : ex >= nb ? "SAVE OVER" : "SAVE AS KIT"; B.save.classList.toggle("warn", kitSure === "save");
+    B.delete.firstChild.textContent = kitSure === "delete" ? "SURE?" : "DELETE"; B.delete.classList.toggle("warn", kitSure === "delete");
+    B.save.disabled = !!st.setOp; B.name.disabled = !sd || !!st.setOp; B.delete.disabled = !sd || !!st.setOp;
+    const u = st.lp.undo >= 101, r = st.lp.redo >= 101; B.undo.disabled = !u && !r; B.undo.firstChild.textContent = r && !u ? "REDO KIT" : "UNDO KIT";
+    if (st.setOp === 3) this.say("saving the kit ...");
+    else if (this.msg.textContent.startsWith("saving")) this.say("");
   },
   K1() {
-    const pages = Math.max(1, Math.ceil(st.kits.length / this.rowsN));
+    const pages = Math.max(1, Math.ceil(st.kits.length / this.rowsN)), nb = st.kitNb == null ? 0 : st.kitNb;
     smpPage = Math.max(0, Math.min(pages - 1, smpPage));
     this.pageEl.textContent = (smpPage + 1) + " / " + pages; this.prev.disabled = smpPage === 0; this.next.disabled = smpPage >= pages - 1;
     this.list.textContent = "";
     for (let k = smpPage * this.rowsN; k < Math.min(st.kits.length, (smpPage + 1) * this.rowsN); k++) {
-      const row = el("div", "li kit"), nm = el("span", "nm2", st.kits[k] || "?"), acts = el("div", "act");
-      for (const pg of [0, 1]) { const b = el("button", "b act" + (st.kitPg[pg] === k ? " on" : ""), pg ? "9-16" : "1-8"); b.onclick = () => act(`kit ${k + 1} ${pg}`); acts.appendChild(b); }
-      row.append(nm, el("span"), el("span", "d", st.kitPg[0] === k && st.kitPg[1] === k ? "on all 16" : st.kitPg[0] === k ? "on 1-8" : st.kitPg[1] === k ? "on 9-16" : ""), acts);
+      const row = el("div", "li kit file" + (kitSel === k ? " sel" : "")), nm = el("span", "nm2", st.kits[k] || "?"), acts = el("div", "act");
+      for (const pg of [0, 1]) { const b = el("button", "b act" + (st.kitPg[pg] === k ? " on" : ""), pg ? "9-16" : "1-8"); b.onclick = e => { e.stopPropagation(); act(`kit ${k + 1} ${pg}`); }; acts.appendChild(b); }
+      row.onclick = () => { kitSel = kitSel === k ? -1 : k; kitSure = ""; if (kitSel >= nb) this.name.value = (st.kits[k] || "").toLowerCase().slice(0, 16); this.K(); this.KS(); };
+      row.append(nm, el("span"), el("span", "d", (k < nb ? "built in" : "") + (st.kitPg[0] === k && st.kitPg[1] === k ? " · on all 16" : st.kitPg[0] === k ? " · on 1-8" : st.kitPg[1] === k ? " · on 9-16" : "")), acts);
       this.list.appendChild(row);
     }
+    this.KS();
   },
 };
 
@@ -1207,7 +1270,7 @@ function line(l) {
       st.sets[i] = f[1] === "1" ? { exists: true, bpm: +f[2] / 10, samples: +f[3], loops: +f[4], synths: +f[5], name: f.slice(6).join(" ") } : { exists: false }; call("J"); break; }
     case "JT": { const i = rest.indexOf(" "); st.trans = +rest.slice(0, i); st.transName = rest.slice(i + 1); call("J"); break; }
     case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
-    case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
+    case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; st.kitNb = f.length > 3 ? f[3] : null; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
     case "CK": st.ext = rest[0] === "1"; topStatus(); break;
     case "LP": { const f = rest.split(" ").map(Number); if (f.length < 8) break;
       const o = { len: f[0], count: f[1], qrec: f[2], qpat: f[3], qmute: f[4], gain: f[5], mode: f[6], undo: f[7], redo: f[8] || 0, qfx: f.length > 9 ? f[9] : 0 };
@@ -1216,7 +1279,7 @@ function line(l) {
     case "V": st.ver = +rest; topStatus(); call("B"); break;
   }
 }
-const REPORT_VERSION = 14;
+const REPORT_VERSION = 15;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

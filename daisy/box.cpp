@@ -523,7 +523,7 @@ void QueueLoad(int track, const char* path, bool audition)
 {
     if(set_op)
     {
-        Popup(set_op == 1 ? "busy saving the set" : "busy loading a set");
+        Popup(set_op == 1 ? "busy saving the set" : set_op == 3 ? "busy saving the kit" : "busy loading a set");
         return;
     }
     QueueJob(track, path, audition); // replaces a queued one for the same track
@@ -784,6 +784,14 @@ void LoaderStep(uint32_t now)
     }
 }
 
+/* kits.h (further down): settings of a saved kit, undo of a kit load */
+bool KitSettingsLoad(const char* dir, char kind[8], TrackParams par[8]);
+void KitBackup(int pg);
+void KitUndoForget();
+void KitListChanged();
+bool KitTrackKept(int t);
+const char* const kKitRoles[8] = {"kick", "snare", "hat", "open hat", "clap", "tom", "rim", "perc"};
+
 /** Kits 0..n-1 are the built-in ones; the rest are folders in /kits */
 /** keep_synth: 303 tracks stay 303s (a drum kit shouldn't eat the bass) */
 /** Loads into the 8 tracks of one page (the current one by default) */
@@ -797,6 +805,11 @@ void LoadKit(int k, bool keep_synth = true, int pg = -1)
     char      assigned[8][kPathLen]; // index = strip, track = base + strip
     for(int t = 0; t < 8; t++)
         assigned[t][0] = 0;
+    char               kind[8]  = {};
+    static TrackParams par[8];
+    bool               settings = false;
+    if(keep_synth && !set_op)
+        KitBackup(pg); // picked by hand: undo gives the 8 tracks back
 
     const int nb = Engine::NumBuiltInKits();
     if(k < nb)
@@ -809,6 +822,7 @@ void LoadKit(int k, bool keep_synth = true, int pg = -1)
     {
         char dir[kPathLen];
         snprintf(dir, kPathLen, "kits/%s", kit_names[k]);
+        settings = KitSettingsLoad(dir, kind, par); // a kit saved on the box (v13.14)
 
         /* The browser's file list stays as it is, so use a small local list */
         static char names[48][kNameLen + 32];
@@ -858,6 +872,29 @@ void LoadKit(int k, bool keep_synth = true, int pg = -1)
     for(int c = 0; c < 8; c++)
     {
         int t = base + c;
+        if(settings)
+        {
+            /* the kit says what each track is; a track it doesn't mention stays,
+               and so does a recording (it exists nowhere else) */
+            if(!kind[c] || (keep_synth && KitTrackKept(t) && !TrackLoading(t)))
+                continue;
+            TrackParams p = par[c];
+            p.mute        = eng->track[t].mute;
+            p.solo        = eng->track[t].solo;
+            eng->track[t] = p;
+            if(pg == track_page)
+                fader_live[c] = false; // the fader no longer matches
+            if(kind[c] == 'a')
+            {
+                if(!eng->IsSynth(t) || TrackLoading(t))
+                    QueueLoad(t, kSynthPath, false);
+                continue;
+            }
+            if(assigned[c][0] == 0)
+                snprintf(assigned[c], kPathLen, "@k%d", builtin_kit_pg[pg]);
+            QueueLoad(t, assigned[c], false);
+            continue;
+        }
         if(assigned[c][0] == 0) // nothing for this track: built-in sound
             snprintf(assigned[c], kPathLen, "@k%d", builtin_kit_pg[pg]);
         if(keep_synth && (IsSynthPath(slot_path[t]) || IsRecPath(slot_path[t])) && !TrackLoading(t))
@@ -1010,6 +1047,7 @@ void LooperBackup(int t, int mode)
     uint32_t cap = 0;
     int16_t* mem = plat->UndoMem(&cap);
     LooperDescribe(t, lundo, true);
+    KitUndoForget(); // one step of undo: from here it's this track
     lundo.valid = lundo.redo = lundo.await = false;
     lundo.mode  = mode;
     if(lundo.data)
@@ -1161,6 +1199,9 @@ void LooperCancel()
     Popup("rec cancelled");
 }
 
+bool KitUndoCan(bool redo); // kits.h
+void KitUndoDo(bool redo);
+
 bool LooperCan(bool redo)
 {
     return lundo.valid && !lundo.await && lundo.track >= 0 && lundo.redo == redo
@@ -1177,9 +1218,14 @@ void LooperUndoTake(bool redo = false)
             LooperCancel();
         return;
     }
+    if(KitUndoCan(redo))
+    {
+        KitUndoDo(redo);
+        return;
+    }
     if(!LooperCan(redo))
     {
-        Popup(redo ? "no take to redo" : "no take to undo");
+        Popup(redo ? "nothing to redo" : "nothing to undo");
         return;
     }
     int t = lundo.track;
@@ -1300,6 +1346,7 @@ void ReleaseAllHeld()
 
 #include "xfer.h"
 #include "sets.h"
+#include "kits.h"
 
 /** Knobs of one track back to default; fader, mute and solo stay */
 void ResetTrackKnobs(int t)
@@ -2646,7 +2693,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 14; // 13: LP (looper and quantise settings), N "[recorded]"; 14: LP has redo and FX quantise
+constexpr int kReportVersion = 15; // 14: LP has redo and FX quantise; 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2669,6 +2716,11 @@ uint32_t rep_cl_n = 0;
 int      rep_trans = -1;
 int      rep_kitpg[3] = {-9, -9, -9};
 bool     rep_kits_force = true;
+void     KitListChanged()
+{
+    rep_kits_force = true;
+    rep_kitpg[0]   = -9;
+}
 uint8_t  rep_track[kTracks][13];
 uint8_t  rep_global[10];
 char     rep_notes[kTracks][2 * kSteps + 1];
@@ -3091,7 +3143,8 @@ void Report(uint32_t now)
         }
         snprintf(lp, sizeof(lp), "LP %d %d %d %d %d %d %d %d %d %d", eng->lr_len_bars, eng->lr_countin ? 1 : 0,
                  eng->quant_rec, eng->quant_pat, eng->quant_mute, in_gain_ui, eng->LiveRecMode(),
-                 LooperCan(false) ? lundo.track + 1 : 0, LooperCan(true) ? lundo.track + 1 : 0, eng->quant_fx);
+                 KitCan(false) ? 101 + kundo.pg : LooperCan(false) ? lundo.track + 1 : 0,
+                 KitCan(true) ? 101 + kundo.pg : LooperCan(true) ? lundo.track + 1 : 0, eng->quant_fx);
         if(strcmp(lp, rep_lp))
         {
             strcpy(rep_lp, lp);
@@ -3140,7 +3193,7 @@ void Report(uint32_t now)
         {
             bool list = kp[2] != rep_kitpg[2];
             memcpy(rep_kitpg, kp, sizeof(kp));
-            Out("KP %d %d %d", kp[0], kp[1], kp[2]);
+            Out("KP %d %d %d %d", kp[0], kp[1], kp[2], Engine::NumBuiltInKits());
             if(list || rep_kits_force)
             {
                 rep_kits_force = false;
@@ -3450,6 +3503,9 @@ void BoxPoll(uint32_t now)
     LoaderStep(now);
     XferPoll(now);
     SetsPoll(now);
+    if(set_op == 3)
+        KitSaveStep();
+    KitUndoPoll();
     BrowseStep(now);
     UpdateLeds(now);
     static uint32_t last = 0;
@@ -3575,7 +3631,7 @@ static bool Flag(bool cur, int v) { return v == 2 ? !cur : v == 1; }
 bool BoxUiCommand(const char* c, uint32_t now)
 {
     g_now = now;
-    int n = 0, a = 0, b = 0, d = 0, e = 0;
+    int n = 0, a = 0, b = 0, d = 0, e = 0, len9 = 0;
     char w[12];
     if(sscanf(c, "turn %d", &n) == 1 && n >= -16 && n <= 16)
         BoxUiTurn(n, now);
@@ -3761,6 +3817,16 @@ bool BoxUiCommand(const char* c, uint32_t now)
     }
     else if(sscanf(c, "kit %d %d", &n, &a) == 2 && n >= 1 && n <= num_kits && a >= 0 && a <= 1)
         LoadKit(n - 1, true, a); // a: track page (0 = tracks 1-8, 1 = 9-16)
+    /* ---- control protocol 9: kits made on the box. The page asks before
+       "over" and "delete" ---- */
+    else if((len9 = 0, sscanf(c, "kit save %d %n", &a, &len9) == 1) && len9 && (a == 0 || a == 1))
+        KitSaveBegin(a, c + len9, false);
+    else if((len9 = 0, sscanf(c, "kit over %d %n", &a, &len9) == 1) && len9 && (a == 0 || a == 1))
+        KitSaveBegin(a, c + len9, true);
+    else if((len9 = 0, sscanf(c, "kit rename %d %n", &n, &len9) == 1) && len9 && n >= 1 && n <= num_kits)
+        KitRename(n - 1, c + len9);
+    else if(sscanf(c, "kit delete %d", &n) == 1 && n >= 1 && n <= num_kits)
+        KitDelete(n - 1);
     else if(sscanf(c, "audition %d", &n) == 1 && n >= 1 && n <= kTracks)
         eng->Audition(n - 1);
     /* ---- control protocol 5: sets from the T95 pages. Slots count from 1.

@@ -84,8 +84,9 @@ UI_ACTIONS = {"play": 2, "stop": 2, "track": 2, "turn": 2, "push": 2, "back": 2,
               "quant": 7, "ingain": 7, "roll": 7}
 # actions whose second word needs a newer Daisy than the first says
 UI_ACTIONS2 = {"lrec over": 7, "lrec shot": 7, "lrec undo": 7, "lrec len": 7, "lrec count": 7,
-               "lrec redo": 8, "quant fx": 8}
-UI_FIRMWARE = {4: "v13.9", 5: "v13.10", 6: "v13.11", 7: "v13.12", 8: "v13.13"}   # control version -> firmware
+               "lrec redo": 8, "quant fx": 8,
+               "kit save": 9, "kit over": 9, "kit rename": 9, "kit delete": 9}
+UI_FIRMWARE = {4: "v13.9", 5: "v13.10", 6: "v13.11", 7: "v13.12", 8: "v13.13", 9: "v13.14"}   # control version -> firmware
 UI_ACTION_MAX = 31        # HostCmd::kMaxText on the Daisy is 32
 DAISY_UI = {"play": "play", "stop": "stop", "left": "turn -1", "right": "turn 1",
             "ok": "push", "back": "back", "0": "track 10",

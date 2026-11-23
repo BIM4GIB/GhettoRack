@@ -4,9 +4,9 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## In the firmware to flash (v13.13, built, desktop-tested, NOT flashed)
+## In the firmware to flash (v13.14, built, desktop-tested, NOT flashed)
 
-`daisy/release/ApcBox.bin`. Control protocol 8, report 14.
+`daisy/release/ApcBox.bin`. Control protocol 9, report 15.
 
 - Clock: the Daisy follows the T95's clock, the T95 can follow the Daisy.
 - Looper (Samples > looper, or the loop page under Sound): take length
@@ -20,7 +20,12 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   the two device arrows = undo / redo, SHIFT + them = previous / next sample
   in the folder (BANK left/right = folder, as before).
 - Undo also takes back a sample changed from the APC40 by accident (one
-  press goes back to what the track held before the browsing started).
+  press goes back to what the track held before the browsing started), and
+  a kit loaded by accident (all 8 tracks).
+- Kits made on the box (Samples > kits): the 8 tracks of a page saved as a
+  kit on the card, sounds plus settings, 303 tracks as 303 state (knobs, no
+  steps), loops left out. Save over and delete ask first. Rename. A track
+  holding a recording is never replaced by a kit.
 - ROLL (hold) on the Perform strips.
 - Keyboard knobs, pitch bend and pads (channel 10) on the selected track.
 - T95 side, no flash needed: trim and normalise before sending (tap a file
@@ -52,11 +57,13 @@ loop; it follows the take length and beat settings).
 - Boot straight into the last mode. The remote after relearning (OK button).
 - Daisy: the screen's 7-9 ms per loop, the one-off 52 ms ping spike.
 - Mac build of the shared code (`daisy/mac/build.sh`) since v13.9.
-- v13.13 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
+- v13.14 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
   slot, at the top of the memory nothing used before). Watch the boot log and
   try an undo of a long take. Overdub and one-shot levels with the real
   input; the one-shot start threshold with real noise on the line.
 - Clock follow on the Seed (v13.11 part): error figure on the Clock page.
+- Kit save on the real card: how long 8 sounds take, a rename and a delete
+  (FatFs rename of a folder is untested on the Seed).
 - ROLL and the trim markers with a thumb; keyboard knobs through the T95
   (which CCs the MPK249 actually sends).
 
@@ -81,7 +88,10 @@ loop; it follows the take length and beat settings).
 - The Daisy's own SD card browsed from the T95; sets copied to and from the
   T95 (backup); a whole kit sent from the T95 library in one go.
 - 303 cutoff shown in Hz (a percentage today).
-- Undo for a kit loaded by accident, and for a sample sent from the T95.
+- Undo for a sample sent from the T95.
+- Kit save on an APC40 button (comes with the button map).
+- Kit names from a page are 16 characters, lower case (the command line to
+  the Daisy is 31 characters).
 - Looper: settings saved with the project; more than one undo; one-shot on
   an APC40 button; learn for keyboard knobs.
 

@@ -115,6 +115,7 @@ class TestPlat : public Platform
         return ok;
     }
     bool Remove(const char* p) override { return ::remove(Full(p).c_str()) == 0; }
+    bool Rename(const char* a, const char* b) override { return ::rename(Full(a).c_str(), Full(b).c_str()) == 0; }
     int16_t* UndoMem(uint32_t* n) override
     {
         static std::vector<int16_t> u(1536 * 1024);
@@ -640,7 +641,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 8 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 9 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -713,7 +714,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 8 03 01 02 1") >= 1);
+        CHECK(T95Count("P 9 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -732,7 +733,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 8 ") >= 1);
+        CHECK(T95Count("P 9 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1121,7 +1122,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 8 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 9 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1589,6 +1590,181 @@ int main()
         WaitIdle();
         SelectTrack(0);
         printf("looper, quantise, roll, keyboard controls ok\n");
+    }
+
+    /* ---------- kits made on the box: save, settings, 303s, undo, rename, delete ---------- */
+    {
+        auto U    = [](const char* a) {
+            CHECK(BoxUiCommand(a, now_ms));
+            Tick(2);
+        };
+        auto done = [] {
+            int n = 0;
+            while(set_op && n++ < 20000)
+                Tick();
+            Tick(60);
+            return set_op == 0;
+        };
+        auto lp = [](int i) {
+            int f[10] = {};
+            sscanf(rep_lp, "LP %d %d %d %d %d %d %d %d %d %d", f, f + 1, f + 2, f + 3, f + 4, f + 5, f + 6, f + 7, f + 8, f + 9);
+            return f[i];
+        };
+        const int nb = Engine::NumBuiltInKits();
+        e.Stop();
+        WaitIdle();
+        U("tempo 1200");
+        U("kit 1 0"); // a known start: the first built-in kit on tracks 1-8
+        WaitIdle();
+        e.track[0].vol = 0.3f;
+        e.track[1].pan = 0.9f;
+        QueueLoad(1, "samples/test/tone a.wav", false);
+        QueueLoad(2, kSynthPath, false);
+        WaitIdle();
+        e.track[2].acid.cutoff = 0.9f;
+        e.track[2].rev         = 0.4f;
+        e.track[2].xfade       = 2;
+        U("lrec len 1");
+        U("lrec arm 4"); // a live loop on track 4: not part of a kit
+        int w = 0;
+        while((e.LiveRecState() != 0 || !e.IsLoop(3)) && w++ < 5000)
+            Tick();
+        CHECK(e.IsLoop(3));
+        e.Stop();
+        Tick(20);
+        U("lrec len 0");
+
+        const int n0 = num_kits;
+        U("kit save 0   my first kit!  ");
+        CHECK(set_op == 3);
+        CHECK(done());
+        int k = FindKit("my first kit_");
+        CHECK(num_kits == n0 + 1 && k >= nb);
+        CHECK(Exists("kits/my first kit_/1 kick.wav") && Exists("kits/my first kit_/2 tone a.wav"));
+        CHECK(Exists("kits/my first kit_/kit.txt") && Exists("kits/my first kit_/8 perc.wav"));
+        CHECK(!Exists("kits/my first kit_/3 hat.wav") && !Exists("kits/my first kit_/4 open hat.wav"));
+        CHECK(loaded_kit_pg[0] != k); // a loop among the tracks: they aren't quite this kit
+        Tick(60);
+        CHECK(rep_kitpg[2] == num_kits);
+
+        /* other sounds and settings on the page, then the saved kit back */
+        e.ClearLoop(3);
+        QueueLoad(3, "@k0", false);
+        QueueLoad(2, "@k0", false);
+        QueueLoad(1, "@k0", false);
+        WaitIdle();
+        e.track[0].vol = 0.8f;
+        e.track[1].pan = 0.5f;
+        e.track[2]     = TrackParams();
+        Tick(60);
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "kit %d 0", k + 1);
+        U(cmd);
+        WaitIdle();
+        Tick(60);
+        CHECK(fabsf(e.track[0].vol - 0.3f) < 0.001f && fabsf(e.track[1].pan - 0.9f) < 0.001f);
+        CHECK(!strcmp(slot_path[1], "kits/my first kit_/2 tone a.wav") && !strcmp(slot_path[0], "kits/my first kit_/1 kick.wav"));
+        CHECK(e.IsSynth(2) && fabsf(e.track[2].acid.cutoff - 0.9f) < 0.001f && fabsf(e.track[2].rev - 0.4f) < 0.001f
+              && e.track[2].xfade == 2);
+        CHECK(!strcmp(slot_path[3], "@k0")); // not in the kit: left alone
+        CHECK(lp(7) == 101 && lp(8) == 0);  // the kit load can be undone
+
+        /* undo: the 8 tracks as before the kit; redo: the kit again */
+        U("lrec undo");
+        WaitIdle();
+        Tick(60);
+        CHECK(!e.IsSynth(2) && !strcmp(slot_path[1], "@k0") && fabsf(e.track[0].vol - 0.8f) < 0.001f
+              && fabsf(e.track[1].pan - 0.5f) < 0.001f);
+        CHECK(lp(7) == 0 && lp(8) == 101);
+        Btn(apc::kDevRight, 0, true); // the APC40's arrow
+        Btn(apc::kDevRight, 0, false);
+        WaitIdle();
+        Tick(60);
+        CHECK(e.IsSynth(2) && !strcmp(slot_path[1], "kits/my first kit_/2 tone a.wav") && fabsf(e.track[0].vol - 0.3f) < 0.001f);
+        CHECK(loaded_kit_pg[0] == k);
+
+        /* a recording on a track is never replaced by a kit */
+        U("lrec len 1");
+        U("lrec arm 6");
+        w = 0;
+        while((e.LiveRecState() != 0 || !e.IsLoop(5)) && w++ < 5000)
+            Tick();
+        e.Stop();
+        Tick(20);
+        U("lrec len 0");
+        U(cmd);
+        WaitIdle();
+        CHECK(e.IsLoop(5) && IsRecPath(slot_path[5]));
+        e.ClearLoop(5);
+        QueueLoad(5, "@k0", false);
+        WaitIdle();
+
+        /* the same name again: only with "over"; other sound on track 2: its old file goes */
+        U("kit save 0 MY FIRST KIT_");
+        CHECK(set_op == 0 && num_kits == n0 + 1);
+        QueueLoad(1, "samples/test/tone b.wav", false);
+        WaitIdle();
+        U("kit over 0 my first kit_");
+        CHECK(set_op == 3 && done());
+        CHECK(num_kits == n0 + 1 && Exists("kits/my first kit_/2 tone b.wav") && !Exists("kits/my first kit_/2 tone a.wav"));
+        CHECK(Exists("kits/my first kit_/1 kick.wav") && Exists("kits/my first kit_/6 tom.wav"));
+        k = FindKit("my first kit_");
+        CHECK(loaded_kit_pg[0] == k); // all 8 tracks are in it now
+
+        /* built-in kits can't be replaced, renamed or deleted */
+        snprintf(cmd, sizeof(cmd), "kit save 0 %s", kit_names[0]);
+        U(cmd);
+        CHECK(set_op == 0);
+        U("kit over 0 808");
+        U("kit delete 1");
+        U("kit rename 1 mine");
+        CHECK(set_op == 0 && num_kits == n0 + 1 && !strcmp(kit_names[0], Engine::BuiltInKitName(0)));
+
+        /* rename: the folder moves, what's loaded follows */
+        snprintf(cmd, sizeof(cmd), "kit %d 0", k + 1);
+        U(cmd);
+        WaitIdle();
+        snprintf(cmd, sizeof(cmd), "kit rename %d second/kit", k + 1);
+        U(cmd);
+        int k2 = FindKit("second_kit");
+        CHECK(k2 >= nb && FindKit("my first kit_") < 0 && num_kits == n0 + 1);
+        CHECK(Exists("kits/second_kit/kit.txt") && !Exists("kits/my first kit_/kit.txt"));
+        CHECK(loaded_kit_pg[0] == k2 && !strcmp(slot_path[1], "kits/second_kit/2 tone b.wav"));
+
+        /* delete: the folder is gone, the sounds stay in the tracks */
+        snprintf(cmd, sizeof(cmd), "kit delete %d", k2 + 1);
+        U(cmd);
+        CHECK(num_kits == n0 && FindKit("second_kit") < 0 && !Exists("kits/second_kit"));
+        CHECK(loaded_kit_pg[0] == -1 && e.GetSlot(1).length > 0);
+
+        /* a kit.txt with a broken line: that track loads with its sound only */
+        mkdir((root + "/kits/hand made").c_str(), 0755);
+        WriteSine("kits/hand made/1 kick.wav", 4800, 80.f);
+        WriteSine("kits/hand made/2 snare.wav", 4800, 200.f);
+        {
+            FILE* f = fopen((root + "/kits/hand made/kit.txt").c_str(), "w");
+            fprintf(f, "APK1\n1 s 2500 5000 0 0 5000 10000 5000 2000 0 0 0 10000 0\n2 s 9000 banana\n");
+            fclose(f);
+        }
+        KitsRescan();
+        int kh = FindKit("hand made");
+        CHECK(kh >= nb);
+        e.track[1].vol = 0.66f;
+        snprintf(cmd, sizeof(cmd), "kit %d 0", kh + 1);
+        U(cmd);
+        WaitIdle();
+        CHECK(fabsf(e.track[0].vol - 0.25f) < 0.001f && !strcmp(slot_path[0], "kits/hand made/1 kick.wav"));
+        CHECK(fabsf(e.track[1].vol - 0.66f) < 0.001f && strcmp(slot_path[1], "kits/hand made/2 snare.wav"));
+        snprintf(cmd, sizeof(cmd), "kit delete %d", kh + 1);
+        U(cmd);
+        CHECK(!Exists("kits/hand made"));
+
+        for(int t = 0; t < 8; t++)
+            e.track[t] = TrackParams();
+        LoadKit(0, false, 0);
+        WaitIdle();
+        SelectTrack(0);
+        printf("kits: save, settings, 303 state, undo, rename, delete ok\n");
     }
 
     /* A performance FX held from a page lets go when the T95 goes quiet,

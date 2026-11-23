@@ -1608,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 8)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 9)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -1944,6 +1944,119 @@ class PageControlTest(unittest.TestCase):
                 self.do("type 12 sample", "track 1")
             b.close()
         self.assertEqual(errors, [])
+
+    def test_p68_kits_made_on_the_box(self):
+        """v13.14, control protocol 9: a page's 8 tracks saved as a kit, with settings and 303s; rename, delete, undo"""
+        kits = os.path.join(self.card, "kits")
+        nb = int(self.last("KP ").split()[4])
+        n0 = int(self.last("KP ").split()[3])
+        self.assertGreaterEqual(nb, 1)
+        self.do("stop", "kit 1 0")
+        time.sleep(1.0)
+        self.do("track 2", "knob 2 0 30", "type 3 303")                        # track 2 quiet, track 3 a 303
+        self.assertTrue(self.box.wait_for(lambda c: self.last("N 2 ") == "N 2 [303]", 8), self.last("N 2 "))
+        self.assertEqual(self.do("kit save 0 page kit")[0], 200)
+        self.assertTrue(self.box.wait_for(lambda c: any(l == "KL %d page kit" % i for i in range(nb, n0 + 1) for l in c.lines), 15))
+        d = os.path.join(kits, "page kit")
+        files = sorted(os.listdir(d))
+        self.assertIn("kit.txt", files)
+        self.assertIn("1 kick.wav", files)
+        self.assertFalse([f for f in files if f.startswith("3 ")], files)       # the 303 is a line in kit.txt, not a sound
+        txt = open(os.path.join(d, "kit.txt")).read().split("\n")
+        self.assertEqual(txt[0], "APK1")
+        self.assertTrue(any(l.startswith("3 a ") and len(l.split()) == 23 for l in txt), txt)
+        self.assertTrue(any(l.startswith("2 s ") and len(l.split()) == 15 for l in txt), txt)
+        self.assertEqual(int(self.last("KP ").split()[3]), n0 + 1)
+        k = next(int(l.split()[1]) for l in reversed(self.box.lines) if l.startswith("KL ") and l.endswith(" page kit"))
+        # the same name again needs "over" (the page asks first)
+        self.do("kit save 0 page kit")
+        time.sleep(0.5)
+        self.assertEqual(int(self.last("KP ").split()[3]), n0 + 1)
+        # change the page, load the kit: settings and the 303 come back; undo and redo of the load
+        self.do("type 3 sample", "knob 2 0 100")
+        time.sleep(0.8)
+        self.do("kit %d 0" % (k + 1))
+        self.assertTrue(self.box.wait_for(lambda c: self.last("N 2 ") == "N 2 [303]" and self.last("LP ").split()[8] == "101", 8),
+                        (self.last("N 2 "), self.last("LP ")))
+        self.do("lrec undo")
+        self.assertTrue(self.box.wait_for(lambda c: self.last("N 2 ") != "N 2 [303]" and self.last("LP ").split()[9] == "101", 8),
+                        (self.last("N 2 "), self.last("LP ")))
+        self.do("lrec redo")
+        self.assertTrue(self.box.wait_for(lambda c: self.last("N 2 ") == "N 2 [303]", 8))
+        # names: capitals and odd characters don't get past the bridge; built-in kits stay
+        self.assertEqual(self.do("kit save 0 Bad/Name")[0], 400)
+        self.do("kit delete 1", "kit rename 1 mine")
+        time.sleep(0.4)
+        self.assertEqual(int(self.last("KP ").split()[3]), n0 + 1)
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for i, (w_, h_) in enumerate(((1920, 1080), (390, 664), (844, 390))):
+                pg = b.new_page(viewport={"width": w_, "height": h_})
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.goto("http://127.0.0.1:%d/apcbox?v=samples&sm=kits" % self.http)
+                pg.wait_for_selector(".kslot")
+                pg.wait_for_function("document.querySelectorAll('.li.kit').length > 0")
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
+                self.assertEqual(pg.locator(".kslot").count(), 8)
+                pg.locator(".kslot").nth(4).click()                              # a slot: selects the track
+                self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 4, 5))
+                # save as a new kit
+                name = "web kit %d" % i
+                pg.fill("input[type=text]", name)
+                pg.locator("button.bigpad:has-text('SAVE AS KIT')").click()
+                self.assertTrue(self.box.wait_for(lambda c: os.path.exists(os.path.join(kits, name, "kit.txt")), 15))
+                pg.wait_for_function("[...document.querySelectorAll('.li.kit .nm2')].some(e => e.textContent === %s) || true" % json.dumps(name))
+                # the same name: asks before it replaces
+                pg.wait_for_function("document.querySelectorAll('button.bigpad')[0].textContent.startsWith('SAVE OVER')")
+                t0 = os.path.getmtime(os.path.join(kits, name, "kit.txt"))
+                time.sleep(1.1)
+                pg.locator("button.bigpad:has-text('SAVE OVER')").click()
+                pg.wait_for_function("document.querySelectorAll('button.bigpad')[0].textContent.startsWith('SURE?')")
+                time.sleep(0.5)
+                self.assertEqual(os.path.getmtime(os.path.join(kits, name, "kit.txt")), t0)      # nothing yet
+                pg.locator("button.bigpad:has-text('SURE?')").click()
+                self.assertTrue(self.box.wait_for(lambda c: os.path.getmtime(os.path.join(kits, name, "kit.txt")) > t0, 15))
+                # rename it: find its row (the list has pages), tap, type, RENAME
+                pg.wait_for_function("!document.querySelectorAll('button.bigpad')[0].disabled")
+                for _ in range(12):
+                    if pg.locator(".li.kit .nm2", has_text=name).count():
+                        break
+                    pg.locator(".hdr button.b:has-text('▶')").last.click()
+                pg.locator(".li.kit", has=pg.locator(".nm2", has_text=name)).locator(".nm2").click()
+                self.assertEqual(pg.input_value("input[type=text]"), name)
+                new = "renamed %d" % i
+                pg.fill("input[type=text]", new)
+                pg.locator("button.bigpad:has-text('RENAME')").click()
+                self.assertTrue(self.box.wait_for(lambda c: os.path.exists(os.path.join(kits, new, "kit.txt")) and not os.path.exists(os.path.join(kits, name)), 8))
+                # delete it: asks first
+                pg.wait_for_function("[...document.querySelectorAll('.li.kit .nm2')].some(e => e.textContent === %s)" % json.dumps(new))
+                pg.locator(".li.kit", has=pg.locator(".nm2", has_text=new)).locator(".nm2").click()
+                pg.locator("button.bigpad:has-text('DELETE')").click()
+                pg.wait_for_function("document.querySelectorAll('button.bigpad')[2].textContent.startsWith('SURE?')")
+                time.sleep(0.4)
+                self.assertTrue(os.path.exists(os.path.join(kits, new)))
+                pg.locator("button.bigpad:has-text('SURE?')").click()
+                self.assertTrue(self.box.wait_for(lambda c: not os.path.exists(os.path.join(kits, new)), 8))
+                # a built-in kit can't be renamed or deleted from here
+                pg.wait_for_function("document.querySelectorAll('.li.kit').length > 0")
+                if pg.locator(".hdr button.b:has-text('◀')").last.is_enabled():
+                    for _ in range(12):
+                        if not pg.locator(".hdr button.b:has-text('◀')").last.is_enabled():
+                            break
+                        pg.locator(".hdr button.b:has-text('◀')").last.click()
+                pg.locator(".li.kit .nm2").first.click()
+                self.assertTrue(pg.locator("button.bigpad:has-text('DELETE')").is_disabled())
+                self.assertTrue(pg.locator("button.bigpad:has-text('RENAME')").is_disabled())
+                pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("kit delete %d" % (k + 1), "kit 1 0", "track 1")
+        self.assertTrue(self.box.wait_for(lambda c: not os.path.exists(d), 8))
 
     def test_p7_sets_from_the_page(self):
         try:

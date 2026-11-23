@@ -54,6 +54,8 @@ class Platform
     virtual bool    FileWriteClose() { return false; }
     /** Deletes a file or an empty folder */
     virtual bool    Remove(const char* path) { return false; }
+    /** Renames a file or a folder */
+    virtual bool    Rename(const char* from, const char* to) { return false; }
     /** Spare memory where a set's sounds load while the old set plays
      *  (samples; nullptr = none, sounds then load after the switch) */
     virtual int16_t* Staging(uint32_t* samples)
