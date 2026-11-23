@@ -2,18 +2,22 @@
 Description=Bluetooth on the T95's UWE5622: attaches the chip, once per boot
 ConditionPathExists=/usr/local/bin/hciattach_opi
 After=sys-subsystem-net-devices-wlan0.device
+# so that at shutdown the Bluetooth stack stops first, then this
+Before=bluetooth.service
 
 [Service]
 # As found by hand on the rig 2026-11-23 (t95/README.md). Enabled by turning
 # Bluetooth on in Settings. A script, not shell on this line: systemd swallows
 # "$r" and "$(...)" in ExecStart.
 ExecStart=/opt/apcbox-bridge/ghettorack-bt.sh
-# Never restart it and never kill it: a killed attach tool hangs in the kernel
-# and blocks every later attach until a reboot (see the script).
+# Never restart it, and systemd never kills it (KillMode=none): a plainly killed
+# attach tool hangs in the kernel and stalls the shutdown. The stop is the
+# script's ordered one: controller off, stack stopped, then SIGTERM (see there).
 Restart=no
 RemainAfterExit=yes
+ExecStop=/opt/apcbox-bridge/ghettorack-bt.sh stop
 KillMode=none
-TimeoutStopSec=5
+TimeoutStopSec=20
 # the attach tool prints the chip's whole settings table: keep that out of the journal, errors stay
 StandardOutput=null
 StandardError=journal
