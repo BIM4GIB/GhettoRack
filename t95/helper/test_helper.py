@@ -195,6 +195,9 @@ class HelperTest(unittest.TestCase):
     def join(self, ssid, key):
         return self.ask(**{"cmd": "join", "pin": "4711", "ssid": ssid, "psk": key})
 
+    def hot_set(self, pin, key, **more):
+        return self.ask(**dict({"cmd": "hotspot_set", "pin": pin, "psk": key}, **more))
+
     def calls(self):
         return open(self.log).read().splitlines() if os.path.exists(self.log) else []
 
@@ -384,8 +387,8 @@ class HelperTest(unittest.TestCase):
         self.assertIsNone(w.ap())
         w.air = ["Home Net"]
         w.settle()
-        self.assertIn("8 to 63", self.ask(cmd="hotspot_set", pin=P, psk="short")["error"])
-        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, psk=key, auto=False), {"ok": True})
+        self.assertIn("8 to 63", self.hot_set(P, "short")["error"])
+        self.assertEqual(self.hot_set(P, key, auto=False), {"ok": True})
         self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.dir, "state", "hotspot")).st_mode), 0o600)
         self.assertEqual((hot()["set"], hot()["auto"]), (True, False))
         # by hand: WPA2 only, named like the box, an address, an address server; nobody joins: back to the Wi-Fi
