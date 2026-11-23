@@ -6,9 +6,11 @@ helper over a local socket, and this helper does only what is on its list:
 
     status              Wi-Fi, address, name, Bluetooth, trial in progress
     scan                Wi-Fi networks in range
-    join ssid psk       add a network and try it; it is kept only if
-    confirm               "confirm" arrives within the trial time, else the
-                          box goes back to how it was (no lockout)
+    join ssid psk       try a network; it is saved only if the box gets
+    confirm               onto it and "confirm" arrives within the trial
+                          time, else the box goes back to the network it
+                          had (no lockout). A wrong password is back within
+                          seconds
     forget ssid         remove a network this helper added
     hostname name       the box's name on the network
     bt on|off           Bluetooth on the UWE5622 (needs the attach tool): the
@@ -23,9 +25,14 @@ Everything that changes the box needs the PIN; five wrong ones lock for a
 minute. Passwords are written only to the box's own network config (mode
 600) and never logged.
 
-Wi-Fi: this box runs Netplan + systemd-networkd + wpa_supplicant. Networks
-joined here go into one extra Netplan file (JSON, which is YAML) next to the
-ones from the install; Netplan merges them. Nothing else is rewritten.
+Wi-Fi: this box runs Netplan + systemd-networkd + wpa_supplicant. A network
+is tried in the running wpa_supplicant only (over its control socket, so the
+password is never on a command line): the saved config isn't touched and
+nothing restarts, so a failed try costs seconds. Once confirmed it goes into
+one extra Netplan file (JSON, which is YAML) next to the ones from the
+install; Netplan merges them at the next start. "netplan apply" is never run
+here: on the rig it took the Wi-Fi down for most of a minute, twice per
+failed try (2026-11-23). Nothing else is rewritten.
 
 Stdlib only. Paths and the trial time can be changed for tests.
 """
@@ -58,7 +65,9 @@ class Helper:
         self.file = os.path.join(a.netplan_dir, "40-ghettorack-wifi.yaml")
         self.pin_file = os.path.join(a.state_dir, "pin")
         self.lock = threading.Lock()
-        self.trial = None           # (deadline, previous file content or None, ssid)
+        self.trial = None           # {id, ssid, psk, phase: connecting|connected, deadline}
+        self.last = None            # how the last try ended: {ssid, ok, why}
+        self.ctl_n = 0
         self.fails, self.locked_until = 0, 0.0
 
     # ---- running things ----
@@ -72,6 +81,30 @@ class Helper:
 
     def wpa(self, *args):
         return self.run(self.a.wpa_cli, "-i", self.a.iface, *args)
+
+    def ctl(self, cmd, timeout=5):
+        """One command straight to wpa_supplicant's control socket; the reply, or "" if
+        it doesn't answer. Passwords go this way: never on a command line."""
+        self.ctl_n += 1
+        mine = os.path.join(os.path.dirname(self.a.socket), "wpa-%d-%d" % (os.getpid(), self.ctl_n))
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        try:
+            s.bind(mine)
+            s.settimeout(timeout)
+            s.connect(os.path.join(self.a.wpa_ctrl, self.a.iface))
+            s.send(cmd.encode())
+            while True:
+                r = s.recv(16384).decode(errors="replace")
+                if not r.startswith("<"):                    # "<3>CTRL-EVENT..." is an event, not our reply
+                    return r.strip()
+        except OSError:
+            return ""
+        finally:
+            s.close()
+            try:
+                os.unlink(mine)
+            except OSError:
+                pass
 
     # ---- the PIN ----
     def pin_set_p(self):
@@ -157,13 +190,19 @@ class Helper:
             with open(os.open(self.file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
                 f.write(content)
 
-    def apply(self):
-        """None = applied, else what netplan said"""
+    def generate(self):
+        """None = Netplan takes the files as they are, else what it said. Changes nothing that runs."""
         rc, out = self.run(self.a.netplan, "generate")
-        if rc:
-            return "netplan refused it: " + out.strip()[-200:]
-        rc, out = self.run(self.a.netplan, "apply", timeout=60)
-        return None if rc == 0 else "netplan apply failed: " + out.strip()[-200:]
+        return None if rc == 0 else "netplan refused it: " + out.strip()[-200:]
+
+    def nets(self):
+        """[(id, ssid, flags)] of the running wpa_supplicant"""
+        out = []
+        for l in self.ctl("LIST_NETWORKS").splitlines()[1:]:
+            f = l.split("\t")
+            if len(f) >= 2 and f[0].isdigit():
+                out.append((f[0], f[1], f[3] if len(f) > 3 else ""))
+        return out
 
     def wifi_now(self):
         st = dict(l.split("=", 1) for l in self.wpa("status")[1].splitlines() if "=" in l)
@@ -204,57 +243,102 @@ class Helper:
         with self.lock:
             if self.trial:
                 return {"error": "another network is being tried: wait for it"}
-            before = self.raw_file()
-            aps = self.saved()
-            aps[ssid] = {"password": psk} if psk else {}
-            self.write_saved(aps)
-            why = self.apply()
-            if why:
-                self.restore(before)
-                self.apply()
-                return {"error": why}
-            self.trial = (time.monotonic() + self.a.trial_s, before, ssid)
+            nid = self.ctl("ADD_NETWORK")
+            if not nid.isdigit():
+                return {"error": "the Wi-Fi isn't answering"}
+            # name and key as hex: no quoting to get wrong. The key is the network's own derived one.
+            sets = [("ssid", ssid.encode().hex())]
+            sets.append(("psk", hashlib.pbkdf2_hmac("sha1", psk.encode(), ssid.encode(), 4096, 32).hex()) if psk
+                        else ("key_mgmt", "NONE"))
+            for k, v in sets:
+                if self.ctl("SET_NETWORK %s %s %s" % (nid, k, v)) != "OK":
+                    self.ctl("REMOVE_NETWORK " + nid)
+                    return {"error": "the Wi-Fi didn't take that network"}
+            if self.ctl("SELECT_NETWORK " + nid) != "OK":                # the others wait until it is settled
+                self.back_locked(nid)
+                return {"error": "the Wi-Fi didn't take that network"}
+            self.last = None
+            self.trial = {"id": nid, "ssid": ssid, "psk": psk, "phase": "connecting",
+                          "deadline": time.monotonic() + self.a.connect_s}
         threading.Thread(target=self.trial_watch, daemon=True).start()
-        log.info("trying a Wi-Fi network for %d s", self.a.trial_s)     # no name, no password
-        return {"ok": True, "trial_s": self.a.trial_s}
+        log.info("trying a Wi-Fi network")                              # no name, no password
+        return {"ok": True, "trial_s": self.a.trial_s, "connect_s": self.a.connect_s}
+
+    def back_locked(self, nid):
+        """drop the tried network and let the ones from before connect again"""
+        self.ctl("REMOVE_NETWORK " + nid)
+        self.ctl("ENABLE_NETWORK all")
+        self.ctl("REASSOCIATE")
+
+    def fail_locked(self, why):
+        t, self.trial = self.trial, None
+        self.back_locked(t["id"])
+        self.last = {"ssid": t["ssid"], "ok": False, "why": why}
+        log.warning("the new Wi-Fi wasn't kept (%s): back to the one before", why)
 
     def trial_watch(self):
         while True:
-            time.sleep(0.2)
+            time.sleep(self.a.watch_s)
             with self.lock:
-                if not self.trial:
+                t = self.trial
+                if not t:
                     return
-                if time.monotonic() < self.trial[0]:
+                late = time.monotonic() >= t["deadline"]
+                if t["phase"] == "connected":
+                    if late:
+                        self.fail_locked("nobody confirmed it: this device has to reach the box on the new network")
+                        return
                     continue
-                _, before, _ = self.trial
-                self.trial = None
-                self.restore(before)
-                why = self.apply()
-            log.warning("nobody confirmed the new Wi-Fi: back to how it was%s", " (%s)" % why if why else "")
-            return
+                st = dict(l.split("=", 1) for l in self.ctl("STATUS").splitlines() if "=" in l)
+                if st.get("wpa_state") == "COMPLETED" and st.get("id") == t["id"]:
+                    t["phase"], t["deadline"] = "connected", time.monotonic() + self.a.trial_s
+                elif any(i == t["id"] and "TEMP-DISABLED" in fl for i, _, fl in self.nets()):
+                    self.fail_locked("wrong password")
+                    return
+                elif late:
+                    self.fail_locked("no connection: wrong password, or the network is too weak here")
+                    return
 
     def cmd_confirm(self, d):
         with self.lock:
-            if not self.trial:
+            t = self.trial
+            if not t or t["phase"] != "connected":
                 return {"ok": True, "kept": False}
-            self.trial = None
+            before = self.raw_file()
+            aps = self.saved()
+            aps[t["ssid"]] = {"password": t["psk"]} if t["psk"] else {}
+            self.write_saved(aps)
+            why = self.generate()
+            if why:
+                self.restore(before)
+                self.fail_locked("it connected but couldn't be saved")
+                return {"error": why}
+            self.ctl("ENABLE_NETWORK all")                               # the older ones stay as a way back
+            self.trial, self.last = None, {"ssid": t["ssid"], "ok": True, "why": ""}
         log.info("new Wi-Fi confirmed: kept")
         return {"ok": True, "kept": True}
 
     def cmd_forget(self, d):
         ssid = d.get("ssid")
         with self.lock:
+            if self.trial:
+                return {"error": "a network is being tried: wait for it"}
             aps = self.saved()
             if ssid not in aps:
-                return {"error": "that network was set when the box was installed (or isn't saved): it can't be removed here"}
+                return {"error": "only networks added on this page can be removed here (that one came with the install, or isn't saved)"}
+            cur, state, _ = self.wifi_now()
+            if cur == ssid and state == "COMPLETED":
+                return {"error": "the box is on that network right now: join another one first"}
             before = self.raw_file()
             del aps[ssid]
             self.write_saved(aps)
-            why = self.apply()
+            why = self.generate()
             if why:
                 self.restore(before)
-                self.apply()
                 return {"error": why}
+            for i, name, _ in self.nets():                               # and out of the running Wi-Fi
+                if name == ssid:
+                    self.ctl("REMOVE_NETWORK " + i)
         return {"ok": True}
 
     # ---- the rest ----
@@ -355,11 +439,13 @@ class Helper:
     def cmd_status(self, d):
         ssid, state, ip = self.wifi_now()
         with self.lock:
-            left = max(0, int(self.trial[0] - time.monotonic())) if self.trial else 0
-            trying = self.trial[2] if self.trial else ""
+            t = self.trial
+            left = max(0, int(t["deadline"] - time.monotonic()) + 1) if t else 0
+            trial = {"ssid": t["ssid"], "phase": t["phase"], "left_s": left} if t else None
+            last = self.last
         return {"ok": True, "wifi": {"ssid": ssid, "state": state, "ip": ip, "iface": self.a.iface},
                 "saved": sorted(self.saved()), "hostname": socket.gethostname(),
-                "trial_s": left, "trying": trying, "pin_set": self.pin_set_p(), "bt": self.bt()}
+                "trial": trial, "last": last, "pin_set": self.pin_set_p(), "bt": self.bt()}
 
     def handle(self, d):
         cmd = d.get("cmd") if isinstance(d, dict) else None
@@ -420,7 +506,10 @@ def main():
     ap.add_argument("--state-dir", default="/var/lib/ghettorack")
     ap.add_argument("--netplan-dir", default="/etc/netplan")
     ap.add_argument("--iface", default="wlan0")
-    ap.add_argument("--trial-s", type=float, default=60)
+    ap.add_argument("--trial-s", type=float, default=60, help="time to confirm once the box is on the new network")
+    ap.add_argument("--connect-s", type=float, default=25, help="time the box gets to connect to it")
+    ap.add_argument("--watch-s", type=float, default=0.5)
+    ap.add_argument("--wpa-ctrl", default="/run/wpa_supplicant", help="directory of wpa_supplicant's control sockets")
     ap.add_argument("--scan-s", type=float, default=3)
     ap.add_argument("--lock-s", type=float, default=60)
     ap.add_argument("--attach", default=ATTACH)

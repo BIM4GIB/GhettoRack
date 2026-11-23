@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import warnings
@@ -32,6 +33,84 @@ exit 0
 """
 
 
+class FakeWpa(threading.Thread):
+    """wpa_supplicant's control socket, as far as the helper uses it. mode: what a
+    tried network does: "ok" connects, "wrong" gets temp-disabled, "never" keeps scanning."""
+
+    def __init__(self, ctrl_dir, iface="wlan0"):
+        super().__init__(daemon=True)
+        os.makedirs(ctrl_dir, exist_ok=True)
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.s.bind(os.path.join(ctrl_dir, iface))
+        self.mode, self.log = "ok", []
+        self.nets = {"0": {"ssid": "Home Net", "off": False}}
+        self.cur, self.next = "0", 1
+        self.start()
+
+    def flags(self, i):
+        n = self.nets[i]
+        if i == self.cur:
+            return "[CURRENT]"
+        if n.get("wrong"):
+            return "[TEMP-DISABLED]"
+        return "[DISABLED]" if n["off"] else ""
+
+    def settle(self):
+        """connect to what is allowed, as the real one would"""
+        for i, n in self.nets.items():
+            if not n["off"] and not n.get("wrong") and not n.get("never"):
+                self.cur = i
+                return
+        self.cur = None
+
+    def answer(self, c):
+        w = c.split(" ")
+        if c == "ADD_NETWORK":
+            i, self.next = str(self.next), self.next + 1
+            self.nets[i] = {"ssid": "", "off": True}
+            return i
+        if w[0] == "SET_NETWORK" and w[1] in self.nets:
+            if w[2] == "ssid":
+                self.nets[w[1]]["ssid"] = bytes.fromhex(w[3]).decode()
+            return "OK"
+        if w[0] == "SELECT_NETWORK" and w[1] in self.nets:
+            for i, n in self.nets.items():
+                n["off"] = i != w[1]
+            self.nets[w[1]]["wrong"], self.nets[w[1]]["never"] = self.mode == "wrong", self.mode == "never"
+            self.settle()
+            return "OK"
+        if w[0] == "REMOVE_NETWORK" and w[1] in self.nets:
+            del self.nets[w[1]]
+            self.settle()
+            return "OK"
+        if c == "ENABLE_NETWORK all":
+            for n in self.nets.values():
+                n["off"] = False
+            if self.cur is None:
+                self.settle()
+            return "OK"
+        if c == "REASSOCIATE":
+            return "OK"
+        if c == "STATUS":
+            if self.cur is None:
+                return "wpa_state=SCANNING"
+            return "id=%s\nssid=%s\nwpa_state=COMPLETED" % (self.cur, self.nets[self.cur]["ssid"])
+        if c == "LIST_NETWORKS":
+            return "network id / ssid / bssid / flags\n" + "\n".join(
+                "%s\t%s\tany\t%s" % (i, n["ssid"], self.flags(i)) for i, n in self.nets.items())
+        return "FAIL"
+
+    def run(self):
+        while True:
+            data, addr = self.s.recvfrom(4096)
+            c = data.decode()
+            self.log.append(c)
+            self.s.sendto(self.answer(c).encode(), addr)
+
+    def names(self):
+        return sorted(n["ssid"] for n in self.nets.values())
+
+
 class HelperTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -54,10 +133,12 @@ class HelperTest(unittest.TestCase):
         cls.log = os.path.join(cls.dir, "calls.log")
         cls.sock = os.path.join(cls.dir, "h.sock")
         cls.attach = os.path.join(cls.dir, "hciattach_opi")
+        cls.wpa = FakeWpa(os.path.join(cls.dir, "wpa"))
         env = dict(os.environ, FAKELOG=cls.log, FAKEDIR=cls.dir)
         cls.proc = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
-             "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
+             "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--connect-s", "1.5", "--watch-s", "0.05",
+             "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
              "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
              "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
@@ -97,7 +178,7 @@ class HelperTest(unittest.TestCase):
     def test_1_status_scan_need_no_pin(self):
         st = self.ask(cmd="status")
         self.assertEqual(st["wifi"], {"ssid": "Home Net", "state": "COMPLETED", "ip": "198.51.100.7", "iface": "wlan0"})
-        self.assertEqual((st["saved"], st["trial_s"], st["pin_set"]), ([], 0, False))
+        self.assertEqual((st["saved"], st["trial"], st["last"], st["pin_set"]), ([], None, None, False))
         self.assertEqual(st["bt"], {"tool": False, "attached": False, "on": False, "powered": False})
         n = self.ask(cmd="scan")["networks"]
         self.assertEqual([(x["ssid"], x["signal"], x["secure"], x["current"]) for x in n],
@@ -134,46 +215,81 @@ class HelperTest(unittest.TestCase):
         self.assertIn("can't be used", self.join("", "longenough")["error"])
         self.assertIn("can't be used", self.join("a\nb", "longenough")["error"])
         self.assertFalse(os.path.exists(self.ours()))
-        # nobody confirms: it goes back
-        r = self.join('Studio "5G": x', "pass word 123")
-        self.assertEqual(r, {"ok": True, "trial_s": 1.5})
-        self.assertEqual(stat.S_IMODE(os.stat(self.ours()).st_mode), 0o600)
-        doc = json.load(open(self.ours()))
-        self.assertEqual(doc["network"]["wifis"]["wlan0"]["access-points"], {'Studio "5G": x': {"password": "pass word 123"}})
-        st = self.ask(cmd="status")
-        self.assertTrue(0 < st["trial_s"] <= 2 and st["trying"] == 'Studio "5G": x')
-        self.assertIn("being tried", self.join("Other", "12345678")["error"])
-        time.sleep(2.0)
+        def trial():
+            return self.ask(cmd="status")["trial"]
+
+        def ended(t=3):
+            end = time.time() + t
+            while trial() and time.time() < end:
+                time.sleep(0.05)
+            self.assertIsNone(trial())
+            return self.ask(cmd="status")["last"]
+        name = 'Studio "5G": x'
+        # wrong password: back at once (not after the whole trial time), nothing saved, the old network is back
+        self.wpa.mode = "wrong"
+        t0 = time.time()
+        r = self.join(name, "pass word 123")
+        self.assertEqual(r, {"ok": True, "trial_s": 1.5, "connect_s": 1.5})
+        self.assertEqual(ended(), {"ssid": name, "ok": False, "why": "wrong password"})
+        self.assertLess(time.time() - t0, 1.0)
+        self.assertEqual((self.wpa.names(), self.wpa.cur), (["Home Net"], "0"))
         self.assertFalse(os.path.exists(self.ours()))
-        self.assertEqual(self.ask(cmd="status")["trial_s"], 0)
-        self.assertGreaterEqual(self.calls().count("netplan apply"), 2)                               # there and back
+        # it never connects: back after the connect time
+        self.wpa.mode = "never"
+        self.assertTrue(self.join(name, "pass word 123")["ok"])
+        self.assertEqual((trial()["ssid"], trial()["phase"]), (name, "connecting"))
+        self.assertIn("being tried", self.join("Other", "12345678")["error"])
+        self.assertIn("being tried", self.ask(cmd="forget", pin=P, ssid="Other")["error"])
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": False})                        # not on it: nothing to keep
+        self.assertIn("no connection", ended()["why"])
+        self.assertEqual((self.wpa.names(), self.wpa.cur), (["Home Net"], "0"))
+        # it connects but nobody confirms: back after the trial time
+        self.wpa.mode = "ok"
+        self.assertTrue(self.join(name, "pass word 123")["ok"])
+        time.sleep(0.3)
+        self.assertEqual((trial()["phase"], self.wpa.nets[self.wpa.cur]["ssid"]), ("connected", name))
+        self.assertFalse(os.path.exists(self.ours()))                                                 # saved only once confirmed
+        self.assertIn("nobody confirmed", ended()["why"])
+        self.assertEqual((self.wpa.names(), self.wpa.cur), (["Home Net"], "0"))
         # confirmed: it stays; an open network; a second one keeps the first
         self.assertTrue(self.join("Studio", "pass word 123")["ok"])
+        time.sleep(0.3)
         self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": True})
+        self.assertEqual(self.ask(cmd="status")["last"], {"ssid": "Studio", "ok": True, "why": ""})
+        self.assertEqual(stat.S_IMODE(os.stat(self.ours()).st_mode), 0o600)
         time.sleep(1.9)
         self.assertTrue(os.path.exists(self.ours()))
+        self.assertEqual(self.wpa.names(), ["Home Net", "Studio"])
+        self.assertFalse(any(n["off"] for n in self.wpa.nets.values()))                              # the old one stays a way back
         self.assertTrue(self.join("Cafe Open", "")["ok"])
+        time.sleep(0.3)
         self.ask(cmd="confirm")
         self.assertEqual(json.load(open(self.ours()))["network"]["wifis"]["wlan0"]["access-points"],
                          {"Studio": {"password": "pass word 123"}, "Cafe Open": {}})
         self.assertEqual(self.ask(cmd="status")["saved"], ["Cafe Open", "Studio"])
         self.assertTrue([n for n in self.ask(cmd="scan")["networks"] if n["ssid"] == "Cafe Open"][0]["saved"])
-        # netplan says no: nothing changes
+        # netplan says no at the confirm: not saved, and the box goes back
         open(os.path.join(self.dir, "netplan-broken"), "w").close()
         before = open(self.ours()).read()
-        self.assertIn("netplan refused", self.join("Third", "12345678")["error"])
+        self.assertTrue(self.join("Third", "12345678")["ok"])
+        time.sleep(0.3)
+        self.assertIn("netplan refused", self.ask(cmd="confirm")["error"])
         os.unlink(os.path.join(self.dir, "netplan-broken"))
         self.assertEqual(open(self.ours()).read(), before)
-        self.assertEqual(self.ask(cmd="status")["trial_s"], 0)
-        # forget: only what was added here
-        self.assertIn("can't be removed", self.ask(cmd="forget", pin=P, ssid="Home Net")["error"])
+        self.assertIsNone(trial())
+        self.assertNotIn("Third", self.wpa.names())
+        # forget: only what was added here, and out of the running Wi-Fi too
+        self.assertIn("came with the install", self.ask(cmd="forget", pin=P, ssid="Home Net")["error"])
         self.assertEqual(self.ask(cmd="forget", pin=P, ssid="Studio"), {"ok": True})
         self.assertEqual(self.ask(cmd="forget", pin=P, ssid="Cafe Open"), {"ok": True})
         self.assertFalse(os.path.exists(self.ours()))
+        self.assertEqual(self.wpa.names(), ["Home Net"])
         self.assertEqual(open(os.path.join(self.netplan, "30-t95-wifi.yaml")).read(), "# from the install: never touched\n")
+        self.assertNotIn("netplan apply", self.calls())                                               # it takes the Wi-Fi down: never
         # passwords never reach the log or a command line
         self.assertNotIn("pass word 123", open(os.path.join(self.dir, "helper.log")).read())
         self.assertNotIn("pass word 123", "\n".join(self.calls()))
+        self.assertNotIn("pass word 123", "\n".join(self.wpa.log))
 
     def test_4_name_bluetooth_power(self):
         P = "4711"

@@ -118,11 +118,13 @@ let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
 
 function banner(id, text, cls) { const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : ""); }
-async function get(u) { try { return await (await fetch(u, { cache: "no-store" })).json(); } catch (e) { return null; } }
+/* every request gives up after a while: a box that is changing networks must not leave the page stuck */
+function tmo(ms) { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; }
+async function get(u) { try { return await (await fetch(u, { cache: "no-store", signal: tmo(4000) })).json(); } catch (e) { return null; } }
 /* risky: sends the PIN along. Returns the helper's answer ({error} on failure) */
 async function sys(cmd, extra, risky) {
   const d = Object.assign({ cmd }, extra || {}); if (risky) d.pin = $("pin").value;
-  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }); return await r.json(); }
+  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d), signal: tmo(cmd === "scan" ? 25000 : 12000) }); return await r.json(); }
   catch (e) { return { error: "the box isn't answering", gone: true }; }
 }
 function needPin(id) {
@@ -150,8 +152,8 @@ function drawNets() {
     const r = el("div", "net" + (n.current ? " cur" : "")), nm = el("span", "nm", n.ssid), bars = el("span", "bars"), acts = el("span", "acts");
     nm.appendChild(el("span", "tag", (n.current ? "connected" : n.saved ? "saved" : "") + (n.secure ? "" : " open")));
     for (let i = 0; i < 4; i++) { const b = el("i", n.signal > i * 25 ? "on" : ""); b.style.height = (4 + i * 4) + "px"; bars.appendChild(b); }
-    if (!n.current) { const j = el("button", "act", n.saved ? "RETRY" : "JOIN"); j.onclick = () => { joining = n; $("n-psk").value = ""; drawJoin(); if (n.secure) $("n-psk").focus(); }; acts.appendChild(j); }
-    if (n.saved) { const f = el("button", sure === "f:" + n.ssid ? "warn" : "", sure === "f:" + n.ssid ? "SURE?" : "FORGET");
+    if (!n.current) { const j = el("button", "act", n.saved ? "RETRY" : "JOIN"); j.disabled = !!trial; j.onclick = () => { joining = n; $("n-psk").value = ""; drawJoin(); if (n.secure) $("n-psk").focus(); }; acts.appendChild(j); }
+    if (n.saved && !n.current && !trial) { const f = el("button", sure === "f:" + n.ssid ? "warn" : "", sure === "f:" + n.ssid ? "SURE?" : "FORGET");
       f.onclick = async () => { if (sure !== "f:" + n.ssid) { sure = "f:" + n.ssid; return drawNets(); } sure = ""; if (!needPin("n-banner")) return drawNets();
         const o = await sys("forget", { ssid: n.ssid }, true); banner("n-banner", o.error || "Forgot " + n.ssid + ".", o.error ? "bad" : "good"); if (!o.error) scan(); else drawNets(); };
       acts.appendChild(f); }
@@ -174,21 +176,37 @@ async function join() {
   const n = joining; if (!n || !needPin("n-banner")) return;
   const psk = n.secure ? $("n-psk").value : "";
   if (n.secure && (psk.length < 8 || psk.length > 63)) return banner("n-banner", "A Wi-Fi password is 8 to 63 characters.", "bad");
+  $("n-go").disabled = true;
   const o = await sys("join", { ssid: n.ssid, psk }, true);
+  $("n-go").disabled = false;
   if (o.error) return banner("n-banner", o.error, "bad");
   joining = null; drawJoin(); $("n-psk").value = "";
-  trial = { ssid: n.ssid, until: Date.now() + o.trial_s * 1000 };
-  banner("n-banner", "Trying " + n.ssid + ". This page confirms by itself as soon as it reaches the box on it; if it can't within " + Math.round(o.trial_s) + " s the box goes back to the network it had.");
+  trial = { ssid: n.ssid, lost: 0 }; drawNets();
+  banner("n-banner", "Connecting to " + n.ssid + "...");
 }
-/* while a network is on trial: confirm it once the box is on it and we can still reach the box */
+/* a network on trial. The box tries it without touching what it has saved; a wrong password is back in seconds.
+   Once the box is on it, this page confirms as soon as it can still reach the box; else the box goes back. */
 async function trialTick() {
-  if (!trial || !st) return;
-  if (st.wifi.ssid === trial.ssid && st.wifi.state === "COMPLETED" && st.trial_s > 0) {
-    const o = await sys("confirm"); if (o.ok) { banner("n-banner", trial.ssid + " works and is saved.", "good"); trial = null; scan(); }
-  } else if (st.trial_s === 0) {
-    banner("n-banner", st.wifi.ssid === trial.ssid ? trial.ssid + " is connected." : "Couldn't reach the box on " + trial.ssid + " in time, so it went back to " + (st.wifi.ssid || "the network it had")
-      + ". Wrong password, or this device isn't on that network.", st.wifi.ssid === trial.ssid ? "good" : "bad");
-    trial = null;
+  if (st && st.trial && !trial) trial = { ssid: st.trial.ssid, lost: 0 };       // the page was reloaded meanwhile
+  if (!trial) return;
+  if (!st || st.error || st.helper === false) {
+    if (++trial.lost >= 2) banner("n-banner", "Can't reach the box right now. If it got onto " + trial.ssid + ", put this device on " + trial.ssid
+      + " too; if not, the box is back on its old network within a minute.", "bad");
+    return;
+  }
+  trial.lost = 0;
+  const t = st.trial;
+  if (t && t.phase === "connected") {
+    const o = await sys("confirm");
+    if (o.kept) { banner("n-banner", trial.ssid + " works and is saved.", "good"); trial = null; drawNets(); scan(); }
+    else if (o.error) { banner("n-banner", o.error, "bad"); trial = null; drawNets(); scan(); }
+  } else if (t) {
+    banner("n-banner", "Connecting to " + t.ssid + "... (" + t.left_s + " s)");
+  } else {
+    const l = st.last && st.last.ssid === trial.ssid ? st.last : null;
+    if (l && l.ok) banner("n-banner", trial.ssid + " works and is saved.", "good");
+    else banner("n-banner", trial.ssid + ": " + (l ? l.why : "not joined") + ". The box went back to " + (st.wifi.ssid || "the network it had") + ".", "bad");
+    trial = null; drawNets(); scan();
   }
 }
 

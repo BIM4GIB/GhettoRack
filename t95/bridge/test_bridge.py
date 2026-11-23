@@ -17,6 +17,7 @@ reading while a controller floods, ping round trips.
 import errno
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -2821,9 +2822,11 @@ class SettingsTest(unittest.TestCase):
             os.chmod(tools[t], 0o755)
         cls.sock = os.path.join(cls.dir, "h.sock")
         cls.calls = os.path.join(cls.dir, "calls.log")
+        cls.wpa = test_helper.FakeWpa(os.path.join(cls.dir, "wpa"))
         cls.helper = subprocess.Popen(
             [sys.executable, os.path.join(REPO, "t95", "helper", "ghettorack_helper.py"), "--socket", cls.sock,
-             "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--scan-s", "0.05",
+             "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--connect-s", "6", "--scan-s", "0.05",
+             "--wpa-ctrl", os.path.join(cls.dir, "wpa"),
              "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
              "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],
              "--bluetoothctl", tools["bluetoothctl"]],
@@ -2922,12 +2925,38 @@ class SettingsTest(unittest.TestCase):
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 pg.fill("#pin", "2468")
                 pg.wait_for_function("document.getElementById('c-pin').textContent === 'unlocked'")
+                # the box can't get onto it (as with a wrong password): back within seconds, said plainly, nothing saved,
+                # no stale "saved" row with a FORGET that can't work, and JOIN works again at once
+                self.wpa.mode = "wrong"
+                t0 = time.time()
                 pg.click("#n-go")
-                pg.wait_for_function("document.getElementById('n-banner').textContent.startsWith('Trying Cafe Open')")
-                self.assertTrue(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
-                # the fake box never moves to it and nobody confirms: it goes back, and the page says so
-                pg.wait_for_function("document.getElementById('n-banner').textContent.includes('went back')", timeout=15000)
+                pg.wait_for_function("document.getElementById('n-banner').textContent.includes('wrong password')", timeout=8000)
+                self.assertLess(time.time() - t0, 5)
+                self.assertIn("went back to Home Net", pg.inner_text("#n-banner"))
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                self.assertEqual(self.wpa.names(), ["Home Net"])
+                pg.wait_for_selector(".net.cur")
+                while not pg.locator(".net", has_text="Cafe Open").count():
+                    pg.click("#n-next")
+                row = pg.locator(".net", has_text="Cafe Open")
+                self.assertEqual((row.locator("button:has-text('FORGET')").count(), row.locator("button:has-text('JOIN')").is_enabled()), (0, True))
+                # second try gets on: the page confirms by itself and it is saved; then FORGET takes it out again
+                self.wpa.mode = "ok"
+                row.locator("button:has-text('JOIN')").click()
+                pg.click("#n-go")
+                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Cafe Open works and is saved.'", timeout=8000)
+                self.assertTrue(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                self.assertEqual(self.state()["trial"], None)
+                while not pg.locator(".net", has_text="Cafe Open").locator("button:has-text('FORGET')").count():
+                    if pg.locator("#n-next").is_enabled():
+                        pg.click("#n-next")
+                    time.sleep(0.1)
+                f = pg.locator(".net", has_text="Cafe Open").locator("button", has_text=re.compile("FORGET|SURE"))
+                f.click()
+                f.click()
+                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Forgot Cafe Open.'")
+                self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                self.assertEqual(self.wpa.names(), ["Home Net"])
                 # Bluetooth: not set up, said how; System: reboot asks twice
                 pg.click("nav button:has-text('Bluetooth')")
                 pg.wait_for_function("document.getElementById('b-text').textContent.includes('get-bt-tool.sh')")

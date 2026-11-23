@@ -90,7 +90,7 @@ them one on the map (REC still arms a loop).
 
 - **Settings** (start screen, top right): first slice built 2026-11-23,
   NOT yet run on the T95 (`t95/helper/README.md`). In it: Wi-Fi status, scan,
-  join as a 60 s trial that goes back by itself, forget, box name; Bluetooth
+  join as a trial that goes back by itself (seconds on a wrong password), forget, box name; Bluetooth
   on/off (needs `sudo t95/helper/get-bt-tool.sh` once); restart bridge,
   reboot, shut down, start-up delay; a PIN for everything that changes the
   box; devices (Daisy, controllers). Still to build: the box's own hotspot
