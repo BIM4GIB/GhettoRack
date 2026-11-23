@@ -117,7 +117,14 @@ const TABS = [["net", "Network"], ["bt", "Bluetooth"], ["sys", "System"], ["dev"
 let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null, trial = null, sure = "", pinOk = false;
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
 
-function banner(id, text, cls) { const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : ""); }
+/* a result (good / bad) goes away by itself after a while, or at a tap; a plain one stays until replaced */
+const btimer = {};
+function banner(id, text, cls) {
+  const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : "");
+  clearTimeout(btimer[id]); b.onclick = () => banner(id, "");
+  if (text && cls) btimer[id] = setTimeout(() => banner(id, ""), cls === "good" ? 8000 : 20000);
+}
+let down = false;       // the "box / helper isn't answering" banners are up
 /* every request gives up after a while: a box that is changing networks must not leave the page stuck */
 function tmo(ms) { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; }
 async function get(u) { try { return await (await fetch(u, { cache: "no-store", signal: tmo(4000) })).json(); } catch (e) { return null; } }
@@ -179,19 +186,20 @@ async function join() {
   $("n-go").disabled = true;
   const o = await sys("join", { ssid: n.ssid, psk }, true);
   $("n-go").disabled = false;
-  if (o.error) return banner("n-banner", o.error, "bad");
+  // no answer at all: the box may have left this network for the try already. Wait for what it reports.
+  if (o.error && !o.gone) return banner("n-banner", o.error, "bad");
   joining = null; drawJoin(); $("n-psk").value = "";
-  trial = { ssid: n.ssid, lost: 0 }; drawNets();
+  trial = { ssid: n.ssid, lost: 0, seen: false }; drawNets();
   banner("n-banner", "Connecting to " + n.ssid + "...");
 }
 /* a network on trial. The box tries it without touching what it has saved; a wrong password is back in seconds.
    Once the box is on it, this page confirms as soon as it can still reach the box; else the box goes back. */
 async function trialTick() {
-  if (st && st.trial && !trial) trial = { ssid: st.trial.ssid, lost: 0 };       // the page was reloaded meanwhile
+  if (st && st.trial && !trial) trial = { ssid: st.trial.ssid, lost: 0, seen: true };       // the page was reloaded meanwhile
   if (!trial) return;
   if (!st || st.error || st.helper === false) {
-    if (++trial.lost >= 2) banner("n-banner", "Can't reach the box right now. If it got onto " + trial.ssid + ", put this device on " + trial.ssid
-      + " too; if not, the box is back on its old network within a minute.", "bad");
+    if (++trial.lost >= 2) banner("n-banner", "The box has left this network to try " + trial.ssid + ", so this page can't see it for a moment. "
+      + (trial.lost < 16 ? "If the password was wrong it is back in a few seconds." : "If it got onto " + trial.ssid + ", put this device on " + trial.ssid + " too; otherwise it comes back by itself."));
     return;
   }
   trial.lost = 0;
@@ -216,7 +224,8 @@ function draw() {
   $("c-helper").textContent = st ? (h ? "helper: running" : "helper: not running") : "box: not answering"; $("c-helper").className = "chip " + (h ? "ok" : "warn");
   $("c-pin").textContent = !h ? "?" : !st.pin_set ? "no PIN set" : pinOk ? "unlocked" : "locked"; $("c-pin").className = "chip " + (pinOk ? "ok" : "warn");
   if (!st) return;
-  if (!h) { for (const b of ["n-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95.", "bad"); }
+  if (!h && !trial) { if (!down) for (const b of ["n-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95."); down = true; }
+  else if (h && down) { down = false; for (const b of ["n-banner", "b-banner", "y-banner"]) if (!trial || b !== "n-banner") banner(b, ""); }
   const w = st.wifi || {};
   $("n-now").textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?";
   $("n-ip").textContent = h && w.ip ? w.ip : "";

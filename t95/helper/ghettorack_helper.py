@@ -254,12 +254,9 @@ class Helper:
                 if self.ctl("SET_NETWORK %s %s %s" % (nid, k, v)) != "OK":
                     self.ctl("REMOVE_NETWORK " + nid)
                     return {"error": "the Wi-Fi didn't take that network"}
-            if self.ctl("SELECT_NETWORK " + nid) != "OK":                # the others wait until it is settled
-                self.back_locked(nid)
-                return {"error": "the Wi-Fi didn't take that network"}
             self.last = None
-            self.trial = {"id": nid, "ssid": ssid, "psk": psk, "phase": "connecting",
-                          "deadline": time.monotonic() + self.a.connect_s}
+            self.trial = {"id": nid, "ssid": ssid, "psk": psk, "phase": "connecting", "selected": False,
+                          "deadline": time.monotonic() + self.a.select_s + self.a.connect_s}
         threading.Thread(target=self.trial_watch, daemon=True).start()
         log.info("trying a Wi-Fi network")                              # no name, no password
         return {"ok": True, "trial_s": self.a.trial_s, "connect_s": self.a.connect_s}
@@ -277,6 +274,18 @@ class Helper:
         log.warning("the new Wi-Fi wasn't kept (%s): back to the one before", why)
 
     def trial_watch(self):
+        # The box has one radio: trying a network means leaving the current one. Wait a moment
+        # first, so the answer to "join" still reaches a page that came in over that Wi-Fi
+        # (on the rig the answer was lost and the page said "the box isn't answering", 2026-11-23).
+        time.sleep(self.a.select_s)
+        with self.lock:
+            t = self.trial
+            if not t:
+                return
+            if self.ctl("SELECT_NETWORK " + t["id"]) != "OK":            # the others wait until it is settled
+                self.fail_locked("the Wi-Fi didn't take that network")
+                return
+            t["selected"] = True
         while True:
             time.sleep(self.a.watch_s)
             with self.lock:
@@ -509,6 +518,7 @@ def main():
     ap.add_argument("--trial-s", type=float, default=60, help="time to confirm once the box is on the new network")
     ap.add_argument("--connect-s", type=float, default=25, help="time the box gets to connect to it")
     ap.add_argument("--watch-s", type=float, default=0.5)
+    ap.add_argument("--select-s", type=float, default=1.0, help="pause between answering 'join' and leaving the current network")
     ap.add_argument("--wpa-ctrl", default="/run/wpa_supplicant", help="directory of wpa_supplicant's control sockets")
     ap.add_argument("--scan-s", type=float, default=3)
     ap.add_argument("--lock-s", type=float, default=60)

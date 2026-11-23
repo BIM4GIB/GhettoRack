@@ -2825,7 +2825,7 @@ class SettingsTest(unittest.TestCase):
         cls.wpa = test_helper.FakeWpa(os.path.join(cls.dir, "wpa"))
         cls.helper = subprocess.Popen(
             [sys.executable, os.path.join(REPO, "t95", "helper", "ghettorack_helper.py"), "--socket", cls.sock,
-             "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--connect-s", "6", "--scan-s", "0.05",
+             "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--select-s", "0.05", "--connect-s", "6", "--scan-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"),
              "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
              "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],

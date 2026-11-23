@@ -21,9 +21,13 @@ Tests: `python3 t95/helper/test_helper.py` (fake `wpa_cli`, `netplan`,
 `t95/bridge/test_bridge.py` (`SettingsTest`).
 
 Seen on the T95 (2026-11-23): PIN, box name, scan, Bluetooth at boot and at
-shutdown. Not seen there yet: the join trial in its current form (a wrong
-password coming back as "wrong password" within seconds depends on
-wpa_supplicant marking the network TEMP-DISABLED, known only from its
-documentation; the 25 s limit catches it otherwise), confirm and forget.
+shutdown. A wrong password in the join trial: the box left its network, got
+"wrong password" from wpa_supplicant (TEMP-DISABLED, reason WRONG_KEY) and was
+back on the old network 4 s after it left (journal, same day). The page lost
+the answer to "join" in that gap (one radio: the box has to leave the network
+the page came in on) and showed a stale "not answering"; the helper now
+answers first and leaves a second later, and the page waits for the result.
+Not seen there yet: that page fix, a join with the right password, confirm
+and forget.
 Not built yet: the box's own hotspot, pairing, sound cards and SD cards under
 Devices, the remote's buttons (still on the start screen).

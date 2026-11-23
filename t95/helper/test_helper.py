@@ -137,7 +137,7 @@ class HelperTest(unittest.TestCase):
         env = dict(os.environ, FAKELOG=cls.log, FAKEDIR=cls.dir)
         cls.proc = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
-             "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--connect-s", "1.5", "--watch-s", "0.05",
+             "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--select-s", "0.05", "--connect-s", "1.5", "--watch-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
              "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
