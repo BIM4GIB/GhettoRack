@@ -21,6 +21,11 @@ Environment=XDG_SESSION_TYPE=wayland
 # Wait for the bridge's page, then show the selector; it starts the last
 # module after its countdown
 ExecStartPre=/bin/sh -c 'for i in $(seq 60); do wget -q -O /dev/null http://127.0.0.1:8040/caps && exit 0; sleep 1; done; exit 0'
+# Chromium locks its profile with the box's name in the lock. After the box is
+# renamed (Settings) or loses power, the old lock looks like "another computer"
+# and Chromium shows a dialog instead of the page (seen on the T95, 2026-11-23).
+# Only this unit uses the profile, and it isn't running yet: the lock is stale.
+ExecStartPre=/bin/sh -c 'rm -f /var/lib/kiosk/chromium/SingletonLock /var/lib/kiosk/chromium/SingletonSocket /var/lib/kiosk/chromium/SingletonCookie'
 # Extra Chromium flags to try without editing this file, e.g.
 #   echo 'CHROMIUM_FLAGS=--ignore-gpu-blocklist --enable-gpu-rasterization' | sudo tee /etc/default/kiosk
 #   sudo systemctl restart kiosk
