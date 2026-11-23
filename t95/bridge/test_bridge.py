@@ -219,7 +219,10 @@ class BridgeTest(unittest.TestCase):
         code, ctype, body = self.get("/")
         self.assertEqual(code, 200)
         self.assertIn(b"GHETTORACK", body)          # the module selector
-        code, ctype, body = self.get("/apcbox")
+        code, ctype, body = self.get("/apcbox")      # the T95's own page
+        self.assertEqual(code, 200)
+        self.assertIn(b"<title>ApcBox</title>", body)
+        code, ctype, body = self.get("/classic")     # the monitor page (also Web Serial, the Mac build)
         self.assertEqual(code, 200)
         self.assertIn(b"APCBOX", body)
         caps = json.loads(self.get("/caps")[2])
@@ -1488,7 +1491,7 @@ class EndToEndTest(unittest.TestCase):
             pg = b.new_page()
             errors = []
             pg.on("pageerror", lambda e: errors.append(str(e)))
-            pg.goto("http://127.0.0.1:%d/apcbox" % self.http)   # localhost counts as secure
+            pg.goto("http://127.0.0.1:%d/classic" % self.http)   # localhost counts as secure
             pg.wait_for_timeout(1500)
             self.assertFalse(pg.is_visible("#smp-rec-hint"), "localhost can record: no hint")
             pg.click("#smp-rec")
@@ -1524,7 +1527,7 @@ class EndToEndTest(unittest.TestCase):
             errors = []
             pg.on("pageerror", lambda e: errors.append(str(e)))
             pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-            pg.goto("http://127.0.0.1:%d/apcbox" % self.http)
+            pg.goto("http://127.0.0.1:%d/classic" % self.http)
             pg.wait_for_timeout(2500)
             chips = pg.eval_on_selector_all("header .chip:not(.hidden)", "es => es.map(e => e.textContent)")
             panel_hidden = pg.eval_on_selector("#tftpanel", "e => e.classList.contains('hidden')")
@@ -1640,6 +1643,86 @@ class PageControlTest(unittest.TestCase):
         self.assertTrue(self.box.wait_for(hit, 3), "no meter movement after a hit on track 1")
         quiet = lambda c: self.last("H ") == "H " + "0" * 36
         self.assertTrue(self.box.wait_for(quiet, 6))
+
+    def test_p5_the_page_in_a_browser(self):
+        """The T95's ApcBox page against the firmware control code: TV and phone, no scrolling, controls work"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.assertEqual(subprocess.run([sys.executable, os.path.join(HERE, "..", "ui", "build.py"), "--check"]).returncode, 0,
+                         "t95/ui/apcbox.html is out of date: run t95/ui/build.py")
+        shots = os.environ.get("APCBOX_SHOTS")
+        url = "http://127.0.0.1:%d/apcbox" % self.http
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for name, vp in (("tv", {"width": 1920, "height": 1080}), ("phone", {"width": 390, "height": 844})):
+                pg = b.new_page(viewport=vp)
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+                for v in ("perform", "steps", "mixer", "sound", "samples", "patterns", "fx", "system"):
+                    pg.goto(url + "?v=" + v + ("&tv=1" if name == "tv" else ""))
+                    pg.wait_for_selector(".tab.on")
+                    pg.wait_for_timeout(500)
+                    size = pg.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight]")
+                    self.assertEqual(size, [vp["width"], vp["height"]], "%s %s scrolls" % (name, v))
+                    if shots:
+                        pg.screenshot(path=os.path.join(shots, "%s-%s.png" % (name, v)))
+                pg.close()
+            pg = b.new_page(viewport={"width": 1920, "height": 1080})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto(url + "?v=perform")
+            pg.wait_for_selector(".strips .st")
+            self.assertEqual(pg.locator(".strips .st").count(), 16)
+            pg.wait_for_function("document.querySelector('.strips .st .nm').textContent.length > 2")
+            # mute on strip 3, from the page to the firmware and back to the LED
+            pg.locator(".strips .st").nth(2).locator(".b.m").click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4))
+            pg.wait_for_function("document.querySelectorAll('.strips .st')[2].querySelector('.b.m').classList.contains('on')")
+            pg.locator(".strips .st").nth(2).locator(".b.m").click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(19) == 0))
+            # drag the pan pot of strip 2 up: the Daisy's T line follows
+            pot = pg.locator(".strips .st").nth(1).locator(".pot").first
+            bx = pot.bounding_box()
+            pan0 = int(self.last("T 1 ").split()[3])
+            pg.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] + bx["height"] / 2)
+            pg.mouse.down()
+            pg.mouse.move(bx["x"] + bx["width"] / 2, bx["y"] + bx["height"] / 2 - 40, steps=5)
+            pg.mouse.up()
+            self.assertTrue(self.box.wait_for(lambda c: int(self.last("T 1 ").split()[3]) > pan0 + 15))
+            self.do("knob 2 1 %d" % pan0)
+            # play from the top bar
+            pg.click(".top .tb >> nth=1")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 1))
+            pg.wait_for_function("document.querySelector('.top .tb.play') !== null")
+            pg.click(".top .tb >> nth=0")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0))
+            # steps: tap a cell twice = accent, in the firmware's pattern
+            pg.keyboard.press("2")
+            pg.wait_for_selector(".grid .sc")
+            cell = pg.locator(".grid .sc").nth(15 * 16 + 14)      # track 16, step 15
+            g0 = self.last("G ").split()[2][254]
+            cell.click()
+            cell.click()
+            want = str((int(g0) + 2) % 3)
+            self.assertTrue(self.box.wait_for(lambda c: self.last("G ").split()[2][254] == want))
+            self.do("step %d 16 15 %s" % (self.s(2) + 1, g0))
+            # patterns: tap B3, it's queued (or playing at once when stopped)
+            pg.keyboard.press("6")
+            pg.locator(".bigpad").nth(10).click()
+            self.assertTrue(self.box.wait_for(lambda c: 10 in (self.s(2), self.s(3))))
+            self.do("pat 1")
+            # sound: the selected track's waveform is drawn
+            pg.keyboard.press("4")
+            pg.wait_for_selector(".wave canvas")
+            pg.wait_for_timeout(600)
+            drawn = pg.evaluate("""() => { const c = document.querySelector('.wave canvas'), d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+                let n = 0; for (let i = 1; i < d.length; i += 4) if (d[i] > 150) n++; return n; }""")
+            self.assertGreater(drawn, 500, "no waveform on the Sound view")
+            b.close()
+        self.assertEqual(errors, [])
+
 
 class IrTest(unittest.TestCase):
     """The remote: a FIFO stands in for the input device; frames are real
@@ -1816,7 +1899,7 @@ class IrTest(unittest.TestCase):
             pg.wait_for_timeout(2500)
             self.assertTrue(pg.url.endswith("/apcbox?tv=1"), pg.url)
             self.assertTrue(pg.eval_on_selector("body", "e => e.classList.contains('tv')"))
-            self.assertTrue(pg.is_visible("#modules"))
+            self.assertTrue(pg.is_visible("#tabs"))
             # home on the remote (apcbox profile) goes back to the selector
             self.press(0x2FE0C)
             pg.wait_for_timeout(1200)
@@ -2098,7 +2181,7 @@ class HttpsTest(unittest.TestCase):
             if os.path.exists(os.path.join(d, "tls.crt")):
                 try:
                     ctx = _ssl.create_default_context(cafile=os.path.join(d, "tls.crt"))
-                    with urllib.request.urlopen("https://127.0.0.1:%d/apcbox" % https, context=ctx, timeout=5) as r:
+                    with urllib.request.urlopen("https://127.0.0.1:%d/classic" % https, context=ctx, timeout=5) as r:
                         body = r.read()
                     break
                 except (OSError, _ssl.SSLError):

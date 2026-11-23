@@ -39,6 +39,7 @@ install -m 644 "$REPO/daisy/ui/apcbox-ui.html" "$DEST/apcbox-ui.html"
 install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
 install -m 644 "$REPO/t95/ui/midihub.html" "$DEST/midihub.html"
 install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
+install -m 644 "$REPO/t95/ui/apcbox.html" "$DEST/apcbox.html"
 # Ableton Link for the clock module (optional): a venv that also sees the system
 # packages, with aalink (a wheel of Ableton's Link library). Without it Link is off.
 if [ ! -x "$DEST/venv/bin/python3" ]; then

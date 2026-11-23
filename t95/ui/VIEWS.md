@@ -7,8 +7,10 @@ Controls look like hardware: pots with LED rings, faders, LED meters, buttons
 that are dark until active and glow in their colour. Waveforms wherever a
 sample or loop is involved.
 
-Status: **mock** = drawn in `mock/` only, **built** = works, **later** =
-planned, needs new firmware features.
+Status: **built** = works in `apcbox.html` (the page at `/apcbox`, made from
+`apcbox.css` + `apcbox.js` by `build.py`; desktop-tested against the firmware
+control code, not yet tried on the rig), **mock** = drawn in `mock/` only,
+**later** = planned, needs new firmware features.
 
 Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 (static, made-up values). Names in the table.
@@ -25,21 +27,21 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 
 | Tab | View | Mock | Content | Status |
 |---|---|---|---|---|
-| 1 Perform | Perform | `perform` | 16 strips: pan and send pots, fader, meters, step LEDs, on/mute/solo/arm; patterns, FX, master pots | mock |
-| 2 Steps | Drum grid | `grid` | 16 tracks x 16 steps; tap = on, again = accent, again = off; mute/solo per row | mock |
-| 2 Steps | One track | `track` | big steps, waveform, the track's main pots | mock |
-| 2 Steps | 303 | `acid` | note grid (piano roll), accent, slide, big steps with note names | mock |
-| 3 Mixer | Mixer | `mixer` | per track: pan, reverb, delay, send C, fader, meters, mute/solo, crossfader side; master strip | mock |
-| 4 Sound | Sample track | `sound` | waveform with start and playhead; 8 device pots, 8 track pots | mock |
-| 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | mock |
-| 4 Sound | Live loop | `loop` | loop waveform with bar lines, arm, input level, stop at bar, cancel, clear | mock |
-| 5 Samples | Library / SD | `samples` | browser with a waveform per file, audition, send to track, upload, import | mock |
+| 1 Perform | Perform | `perform` | 16 strips: pan and send pots, fader, meters, step LEDs, on/mute/solo/arm; patterns, FX, master pots | built |
+| 2 Steps | Drum grid | `grid` | 16 tracks x 16 steps; tap = on, again = accent, again = off; mute/solo per row | built |
+| 2 Steps | One track | `track` | big steps, waveform, the track's main pots | built |
+| 2 Steps | 303 | `acid` | note grid (piano roll), accent, slide, big steps with note names | built |
+| 3 Mixer | Mixer | `mixer` | per track: pan, reverb, delay, send C, fader, meters, mute/solo, crossfader side; master strip | built |
+| 4 Sound | Sample track | `sound` | waveform with start and playhead; 8 device pots, 8 track pots | built |
+| 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | built |
+| 4 Sound | Live loop | `loop` | loop waveform with bar lines, arm, stop at bar, cancel, back to a sample | built (no input level yet) |
+| 5 Samples | Library / SD | `samples` | browser with a waveform per file, audition, send to track, upload, import | mock (the tab links to the classic page for now) |
 | 5 Samples | Record | `sampler` | record from the Daisy input or the phone mic, live waveform, trim, normalise, save, send | mock (trim, normalise: later) |
 | 5 Samples | Kits | - | kit list, load, what's in each | to draw |
-| 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | mock |
-| 6 Patterns | Sets | (in `patterns`) | sets on the card, save, load, switch on the bar | mock |
-| 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | mock |
-| 8 System | System | `system` | links, ping, OLED mirror, APC40 LED mirror, log, settings | mock |
+| 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
+| 6 Patterns | Sets | (in `patterns`) | sets on the card, save, load, switch on the bar | mock (needs set commands in the firmware) |
+| 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
+| 8 System | System | `system` | links, ping, OLED mirror, APC40 LED mirror, log, settings | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
 | - | Slice | - | chop a sample or loop across steps | later (new firmware feature) |
 | - | Keys | - | on-screen keyboard and pads for the selected track, scale lock | later |

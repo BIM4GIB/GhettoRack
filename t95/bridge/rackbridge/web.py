@@ -220,7 +220,9 @@ class WebMixin:
                 await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
             elif path == "/midihub":
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.hub)
-            elif path in ("/apcbox", "/apcbox-ui.html"):
+            elif path == "/apcbox" and self.args.apcbox_page:
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["apcbox"])
+            elif path in ("/apcbox", "/classic", "/apcbox-ui.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.page)
             elif path == "/ui":
                 # The page's encoder buttons (same URLs as the Mac build)

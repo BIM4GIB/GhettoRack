@@ -2746,6 +2746,8 @@ void Report(uint32_t now)
                 rep_wave[t] = key;
                 static const char hx[] = "0123456789abcdef";
                 char              z[2 * kWavePoints + 1];
+                int               pk[kWavePoints];
+                int               top = 1;
                 for(int i = 0; i < kWavePoints; i++)
                 {
                     int peak = 0;
@@ -2763,7 +2765,13 @@ void Report(uint32_t now)
                                 peak = v;
                         }
                     }
-                    int v      = peak >> 7; // 0..255
+                    pk[i] = peak;
+                    if(peak > top)
+                        top = peak;
+                }
+                for(int i = 0; i < kWavePoints; i++)
+                {
+                    int v        = pk[i] * 255 / top; // its own loudest point = ff: the shape, not the level
                     z[2 * i]     = hx[(v >> 4) & 15];
                     z[2 * i + 1] = hx[v & 15];
                 }

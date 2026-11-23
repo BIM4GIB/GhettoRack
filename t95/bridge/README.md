@@ -227,7 +227,9 @@ The clock module (`/clock`): one tempo for everything.
 | Path | What |
 |---|---|
 | `/` | The module selector (`t95/ui/selector.html`) |
-| `/apcbox` | `daisy/ui/apcbox-ui.html`. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
+| `/apcbox` | The T95's ApcBox page (`t95/ui/apcbox.html`): full-screen views, works with no APC40, needs firmware v13.9 |
+| `POST /do` | `{"a": "mute 3 2"}` or a list of up to 32: page actions for the Daisy (`ESC U`), checked against a list before they go on the wire |
+| `/classic` | `daisy/ui/apcbox-ui.html`, the monitor page. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |
 | `/health` | JSON: `daisy`, `port`, `serial`, `data_age_s`, `lines`, `bad_lines`, `connects`, `clients`, `client_resyncs`, `rejected_clients`, `control`, `serial_out_bytes`, `serial_dropped`, `controllers` (port, name, kind, counters), `ping_ms` |
 | `/caps` | `{"source": "daisy-bridge", "midi": true, "ir": true, "selector": "/", "control": false, "ui": false, "tft": false}` |

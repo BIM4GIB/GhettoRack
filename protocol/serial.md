@@ -94,7 +94,7 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `FL id ok\|err` | The loader finished with it: in the track, or not a playable WAV |
 | `H hex` | Level meters, v13.9: 36 hex digits = 16 tracks (post-fader) then master left, right; peak since the last line, 00-ff (ff = full scale), held and falling. Sent when it changes (every 33 ms while there is sound) |
 | `O hex` | v13.9: which of the 64 patterns have steps, 16 hex digits (pattern 1 = lowest bit) |
-| `Z t len rate hex` | v13.9: waveform outline of track `t`'s sound: length in samples at `rate`, then 96 peaks as 2 hex digits each (`-` and length 0 for a 303 track or an empty slot). Sent when the sound changes and after `ESC R`, one track per report pass; not in the once-a-second repeat |
+| `Z t len rate hex` | v13.9: waveform outline of track `t`'s sound: length in samples at `rate`, then 96 peaks as 2 hex digits each, scaled so the loudest is ff (`-` and length 0 for a 303 track or an empty slot). Sent when the sound changes and after `ESC R`, one track per report pass; not in the once-a-second repeat |
 | `V n` | Report version (10). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields

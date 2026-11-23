@@ -53,7 +53,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         except (OSError, TypeError):
             log.warning("no selector page at %s", args.selector)
         self.pages = {}
-        for name, path in (("clock", args.clock_page),):
+        for name, path in (("clock", args.clock_page), ("apcbox", args.apcbox_page)):
             try:
                 with open(path, "rb") as f:
                     self.pages[name] = f.read()
@@ -149,6 +149,9 @@ def main(argv=None):
                     os.path.join(here, "..", "ui", "selector.html")) if os.path.exists(p)), None))
     ap.add_argument("--hub", default=next((p for p in (os.path.join(here, "midihub.html"),
                     os.path.join(here, "..", "ui", "midihub.html")) if os.path.exists(p)), None))
+    ap.add_argument("--apcbox-page", default=next((p for p in (os.path.join(here, "apcbox.html"),
+                    os.path.join(here, "..", "ui", "apcbox.html")) if os.path.exists(p)), None),
+                    help="the T95's ApcBox page (/apcbox); --ui is the classic monitor page (/classic)")
     ap.add_argument("--clock-page", default=next((p for p in (os.path.join(here, "clock.html"),
                     os.path.join(here, "..", "ui", "clock.html")) if os.path.exists(p)), None))
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
