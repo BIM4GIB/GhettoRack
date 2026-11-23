@@ -2399,7 +2399,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 10; // 10: H (meters), O (patterns with steps), Z (waveform outline)
+constexpr int kReportVersion = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
 constexpr int kWavePoints = 96;
@@ -2408,6 +2408,10 @@ char     rep_meter[2 * (kTracks + 2) + 1] = "";
 uint64_t rep_patmask = 0;
 bool     rep_patmask_force = true;
 uint32_t rep_wave[kTracks] = {};
+char     rep_sets[8][64];
+int      rep_trans = -1;
+int      rep_kitpg[3] = {-9, -9, -9};
+bool     rep_kits_force = true;
 uint8_t  rep_track[kTracks][13];
 uint8_t  rep_global[10];
 char     rep_notes[kTracks][2 * kSteps + 1];
@@ -2439,6 +2443,10 @@ void ForceFullReport()
     rep_leds[0][0] = rep_leds[1][0] = 0;
     rep_meter[0]      = 0;
     rep_patmask_force = true;
+    for(int i = 0; i < 8; i++)
+        rep_sets[i][0] = 0;
+    rep_trans    = -1;
+    rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
 
 const char* BaseName(const char* path)
@@ -2783,6 +2791,44 @@ void Report(uint32_t now)
         }
     }
 
+    /* Sets on the card (one line per slot) and the transition; every kit by
+       name, and which kit each track page has. For the T95 pages. */
+    for(int i = 0; i < kSetSlots; i++)
+    {
+        char j[64];
+        const SetInfo& in = set_list[i];
+        if(set_exists[i])
+            snprintf(j, sizeof(j), "J %d 1 %d %d %d %d %s", i, (int)(in.bpm * 10.f + 0.5f), in.samples, in.loops,
+                     in.synths, in.name);
+        else
+            snprintf(j, sizeof(j), "J %d 0", i);
+        if(strcmp(j, rep_sets[i]))
+        {
+            strcpy(rep_sets[i], j);
+            Out("%s", j);
+        }
+    }
+    if(set_trans != rep_trans)
+    {
+        rep_trans = set_trans;
+        Out("JT %d %s", set_trans, kTransNames[set_trans]);
+    }
+    {
+        int kp[3] = {loaded_kit_pg[0], loaded_kit_pg[1], num_kits};
+        if(memcmp(kp, rep_kitpg, sizeof(kp)))
+        {
+            bool list = kp[2] != rep_kitpg[2];
+            memcpy(rep_kitpg, kp, sizeof(kp));
+            Out("KP %d %d %d", kp[0], kp[1], kp[2]);
+            if(list || rep_kits_force)
+            {
+                rep_kits_force = false;
+                for(int k = 0; k < num_kits; k++)
+                    Out("KL %d %s", k, kit_names[k]);
+            }
+        }
+    }
+
     /* Grid + track button LEDs: what the firmware wants vs what the
        APC40 has confirmed. A mismatch that sticks = a lost message. */
     char want[81], sent[81];
@@ -3029,6 +3075,7 @@ void BoxResync()
 {
     ForceFullReport();
     memset(rep_wave, 0, sizeof(rep_wave)); // waveform outlines again too (16 lines over 16 passes)
+    rep_kits_force = true;                 // and the kit names
 }
 
 const uint8_t* BoxScreen(uint32_t* version)
@@ -3295,6 +3342,82 @@ bool BoxUiCommand(const char* c, uint32_t now)
         LoadKit(n - 1, true, a); // a: track page (0 = tracks 1-8, 1 = 9-16)
     else if(sscanf(c, "audition %d", &n) == 1 && n >= 1 && n <= kTracks)
         eng->Audition(n - 1);
+    /* ---- control protocol 5: sets from the T95 pages. Slots count from 1.
+       Names: what the Daisy's own screen allows; anything else becomes "_" ---- */
+    else if(strncmp(c, "set ", 4) == 0)
+    {
+        const char* a2 = c + 4;
+        char        name[kSetNameLen + 4] = "";
+        int         slot = 0, len = 0;
+        auto        take_name = [&](const char* s) {
+            while(*s == ' ')
+                s++;
+            if(*s)
+                SafeName(name, kSetNameLen + 1, s);
+        };
+        if(set_op && strncmp(a2, "trans ", 6) != 0)
+        {
+            Popup("busy");
+            return true;
+        }
+        if(!sd_ok)
+        {
+            Popup("no SD card");
+            return true;
+        }
+        if(sscanf(a2, "load %d", &slot) == 1 && slot >= 1 && slot <= kSetSlots)
+        {
+            if(set_exists[slot - 1])
+                LoadSetBegin(slot - 1);
+            else
+                Popup("%02d is empty", slot);
+        }
+        else if(sscanf(a2, "save %d%n", &slot, &len) == 1 && slot >= 1 && slot <= kSetSlots)
+        {
+            take_name(a2 + len);
+            if(!name[0])
+            {
+                if(set_exists[slot - 1])
+                    snprintf(name, sizeof(name), "%s", set_list[slot - 1].name);
+                else if(open_set >= 0 && open_name[0])
+                    snprintf(name, sizeof(name), "%s", open_name);
+                else
+                    DefaultName(slot - 1, name, sizeof(name));
+            }
+            SaveSetBegin(slot - 1, name);
+        }
+        else if(strncmp(a2, "new", 3) == 0 && (a2[3] == 0 || a2[3] == ' '))
+        {
+            int s = FirstFreeSlot();
+            if(s < 0)
+            {
+                Popup("no free slot");
+                return true;
+            }
+            take_name(a2 + 3);
+            if(!name[0])
+                DefaultName(s, name, sizeof(name));
+            SaveSetBegin(s, name);
+        }
+        else if(sscanf(a2, "delete %d", &slot) == 1 && slot >= 1 && slot <= kSetSlots)
+        {
+            if(set_exists[slot - 1])
+                DeleteSet(slot - 1);
+        }
+        else if(sscanf(a2, "name %d%n", &slot, &len) == 1 && slot >= 1 && slot <= kSetSlots)
+        {
+            take_name(a2 + len);
+            if(name[0] && set_exists[slot - 1])
+                RenameSet(slot - 1, name);
+        }
+        else if(sscanf(a2, "trans %d", &slot) == 1 && slot >= 0 && slot < kNumTransitions)
+        {
+            set_trans = (uint8_t)slot;
+            WriteLast();
+        }
+        else
+            return false;
+    }
     else
         return false;
     return true;

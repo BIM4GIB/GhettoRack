@@ -238,6 +238,91 @@ body.phone button.tab{font-size:10px;font-weight:700;height:44px;padding:0 1px;l
 .tb.sm.listen.connecting{color:var(--amber);border-color:var(--amber)}
 .tb.sm.listen.error{color:var(--red);border-color:var(--red)}
 body.phone .leds .led:nth-child(n+3){display:none}
+
+/* ---- lists: samples, kits, sets ---- */
+.li{grid-template-columns:minmax(140px,320px) minmax(0,1fr) 76px auto;gap:14px}
+.li canvas{width:100%;height:68%;min-width:0}
+.li.dir{cursor:pointer}.li.dir .nm2{color:var(--amber)}
+.li .act .b{padding:0 12px;height:32px;min-width:44px}
+.li.kit{grid-template-columns:minmax(140px,1fr) 0 120px auto}
+.b.warn,.bigpad.warn{color:var(--red);border-color:var(--red);box-shadow:0 0 9px #ff4b3e77}
+.msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.msg.bad{color:var(--red)}
+.xbar{flex:1;height:8px;border-radius:4px;background:var(--off);overflow:hidden;visibility:hidden;min-width:40px}
+.xbar.on{visibility:visible}.xbar i{display:block;height:100%;width:0;background:var(--green);box-shadow:0 0 8px var(--green)}
+input[type=text]{background:#0b0c0d;color:var(--text);border:1px solid #3a3f45;border-radius:6px;padding:8px 10px;font:inherit;font-family:var(--mono);font-size:16px;
+  -webkit-user-select:text;user-select:text;min-width:0;flex:1;max-width:340px}
+input[type=text]:focus{outline:2px solid var(--yellow)}
+.setrow{display:grid;grid-template-columns:44px minmax(0,1fr) auto;grid-template-rows:1fr 1fr;align-items:center;column-gap:10px;text-align:left;padding:0 14px;
+  border-radius:10px;background:#1d2024;border:1px solid #33373c;color:#5d646b;min-height:0;appearance:none}
+.setrow .num{grid-row:1 / span 2;font-family:var(--mono);font-size:22px}
+.setrow .nm2{font-size:18px;align-self:end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.setrow .d{grid-column:2;grid-row:2;font-family:var(--mono);font-size:12px;align-self:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.setrow .tag2{grid-column:3;grid-row:1 / span 2;font-size:12px;color:var(--green)}
+.setrow.has{color:var(--text);border-color:#7a4d12}.setrow.has .num{color:var(--amber)}
+.setrow.open{border-color:var(--green);box-shadow:inset 0 0 18px #35d05a33}
+.setrow.sel{outline:2px solid var(--yellow);outline-offset:1px}
+button.recbtn{background:none;font-family:inherit;cursor:pointer}
+.recbtn.idle{box-shadow:none;border-color:#7a2a25;color:#c05048}
+button.bigpad:disabled{opacity:.35}
+body.phone .li{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 1fr;gap:0 8px;padding:4px 8px}
+body.phone .li .nm2{grid-column:1;grid-row:1}
+body.phone .li canvas{grid-column:1;grid-row:2;height:20px}
+body.phone .li .act{grid-column:2;grid-row:1 / span 2}
+body.phone .li .act .b{padding:0 8px;min-width:34px;height:30px}
+body.phone .li.kit{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:1fr}
+body.phone .li.kit .act{grid-row:1}
+body.phone .setrow{grid-template-columns:30px minmax(0,1fr) auto;padding:0 8px}
+body.phone .setrow .num{font-size:16px}body.phone .setrow .nm2{font-size:14px}body.phone .setrow .d{font-size:10px}
+body.phone .msg{max-width:none;flex:1;font-size:10px}
+body.phone input[type=text]{font-size:16px;padding:6px 8px}
+
+/* ---- a phone on its side: view buttons in a rail on the left, one compact top row ---- */
+body.short .app{grid-template-columns:78px minmax(0,1fr);grid-template-rows:44px minmax(0,1fr)}
+body.short .top{grid-column:1 / -1;grid-row:1;padding:0 8px;gap:7px}
+body.short .tabs{grid-column:1;grid-row:2;flex-direction:column;align-items:stretch;padding:5px;gap:4px;border-top:none;border-right:1px solid var(--line)}
+body.short #view{grid-column:2;grid-row:2}
+body.short button.tab{flex:1;height:auto;font-size:11px;padding:0;justify-content:center;border-radius:6px}
+body.short .tb{height:32px;min-width:38px;font-size:14px}
+body.short .tb.sm{height:30px;min-width:34px;font-size:10px;padding:0 6px}
+body.short .top .big{font-size:19px}
+body.short .beats i{width:11px;height:11px}
+body.short .leds{gap:8px}body.short .led{font-size:10px}body.short .leds .led:nth-child(n+3){display:none}
+body.short .v{padding:6px;gap:6px}
+body.short .strips{gap:3px}
+body.short .st{padding:3px 2px;gap:3px;border-radius:6px}
+body.short .nm{font-size:9px}body.short .nm b{font-size:9px}
+body.short .kn{font-size:8px}
+body.short .b{height:24px;font-size:10px}
+body.short .cap{width:24px;height:14px}
+body.short .mt i{width:5px}
+body.short .fd{grid-template-columns:1fr 8px 1fr}
+body.short .hdr{min-height:26px;gap:8px}body.short .hdr .big{font-size:15px;white-space:nowrap}
+body.short .sub span{padding:4px 9px;font-size:11px;white-space:nowrap}
+body.short .grid{grid-template-columns:74px repeat(16,1fr);gap:2px}
+body.short .grid .tn{font-size:10px;padding-left:4px;gap:4px;white-space:nowrap;overflow:hidden}
+body.short .grid .tn b{width:13px;font-size:9px}
+body.short .sc{border-radius:3px}
+body.short .colh{font-size:9px}
+body.short .bigsteps{gap:4px}
+body.short .bs{padding:3px;font-size:10px;border-radius:6px;gap:2px}body.short .bs .nt{font-size:12px}body.short .bs .sl{font-size:7px;padding:0 2px}
+body.short .roll{grid-template-columns:30px repeat(16,1fr);padding:3px;gap:1px}
+body.short .roll .k{font-size:8px;padding-right:2px}body.short .roll .c.s{border-right-width:4px}
+body.short .row8{gap:5px}
+body.short .cell{gap:1px;border-radius:7px}
+body.short .cell .val{font-size:12px}body.short .cell .n{font-size:8px;letter-spacing:.03em;text-align:center}
+body.short .bigpad{font-size:11px;border-radius:6px}body.short .bigpad small{font-size:8px}
+body.short .pg{gap:4px}
+body.short .kv{font-size:11px;gap:3px 10px}body.short .log{font-size:9px}
+body.short .box{padding:6px}body.short .box h3{margin-bottom:4px;font-size:9px}
+body.short .wave .tag{font-size:9px;top:3px}
+body.short .li{gap:8px;padding:0 8px}body.short .li .nm2{font-size:12px}body.short .li .act .b{height:26px;padding:0 8px}
+body.short .setrow{padding:0 8px;grid-template-columns:30px minmax(0,1fr) auto}
+body.short .setrow .num{font-size:15px}body.short .setrow .nm2{font-size:13px}body.short .setrow .d{font-size:9px}
+body.short input[type=text]{font-size:16px;padding:3px 8px;max-width:200px}
+body.short .recbtn{width:66px;height:66px;font-size:13px}
+body.short .hint{font-size:11px}
+body.short .msg{font-size:10px}
 </style>
 </head>
 <body>
@@ -263,20 +348,23 @@ const tv = Q.has("tv");
    fits is scaled to the window, so nothing is ever cut off and the view bar is
    always on screen. The height comes from the visible area, which on iOS is
    smaller than "100vh" while Safari's bars show. */
-const WIDE_W = 1920, WIDE_MIN_H = 900, TALL_W = 390, TALL_MIN_H = 700;
-let PHONE = false, SCALE = 1;
+const WIDE_W = 1920, WIDE_MIN_H = 900, TALL_W = 390, TALL_MIN_H = 700, SHORT_W = 844, SHORT_MIN_H = 330;
+let PHONE = false, SHORT = false, SCALE = 1;   /* PHONE: upright; SHORT: a phone on its side; neither: wide */
+const sz = (wide, tall, short) => SHORT ? short : PHONE ? tall : wide;
 function fit() {
   const vv = window.visualViewport, w = Math.round(vv ? vv.width : innerWidth), h = Math.round(vv ? vv.height : innerHeight);
-  const tall = h > w * 1.1;
-  let s = w / (tall ? TALL_W : WIDE_W);
-  if (h / s < (tall ? TALL_MIN_H : WIDE_MIN_H)) s = h / (tall ? TALL_MIN_H : WIDE_MIN_H);
+  const tall = h > w * 1.1, short = !tall && h < 520 && !tv;
+  const dw = tall ? TALL_W : short ? SHORT_W : WIDE_W, dh = tall ? TALL_MIN_H : short ? SHORT_MIN_H : WIDE_MIN_H;
+  let s = w / dw;
+  if (h / s < dh) s = h / dh;
   const app = document.querySelector(".app");
   app.style.width = (w / s) + "px"; app.style.height = (h / s) + "px"; app.style.transform = "scale(" + s + ")";
   SCALE = s;
-  const was = PHONE;
-  PHONE = tall;
+  const was = (PHONE ? 1 : 0) + (SHORT ? 2 : 0);
+  PHONE = tall; SHORT = short;
   document.body.classList.toggle("phone", PHONE);
-  return was !== PHONE;
+  document.body.classList.toggle("short", SHORT);
+  return was !== (PHONE ? 1 : 0) + (SHORT ? 2 : 0);
 }
 fit();
 document.body.classList.toggle("tv", tv);
@@ -288,6 +376,7 @@ const st = {
   grid: "0".repeat(256), gridPat: -1, patmask: 0n, meters: new Uint8Array(18), glob: new Uint8Array(10),
   tr: Array.from({ length: 16 }, () => ({ v: new Uint8Array(13), name: "", acid: new Uint8Array(8), notes: null, notesPat: -1, wave: null })),
   log: [], daisy: false, ctl: 0, bridge: null, ver: 0,
+  sets: Array.from({ length: 8 }, () => ({ exists: false })), trans: 0, transName: "", setOp: 0, kits: [], kitPg: [-1, -1], xfer: null, caps: {},
 };
 const patName = p => "ABCDEFGH"[p >> 3] + (1 + (p & 7));
 const typeOf = t => (st.synth >> t & 1) ? "303" : st.tr[t].name.startsWith("[loop") ? "loop" : "sample";
@@ -554,7 +643,8 @@ function buildTop() {
   T.listen = el("button", "tb sm listen", "LISTEN"); T.listen.onclick = () => Listen.toggle();
   T.leds = el("span", "leds");
   const stat = (l, e) => { const s = el("div", "stat"); if (l) s.appendChild(el("span", "lbl", l)); s.appendChild(e); return s; };
-  if (PHONE) {
+  if (SHORT) top.append(T.stop, T.play, T.rec, stat("", T.bpm), T.minus, T.plus, T.tap, T.listen, T.beats, T.pat, el("span", "sp"), T.leds);
+  else if (PHONE) {
     top.append(T.stop, T.play, T.rec, stat("", T.bpm), T.beats);
     const r2 = el("div", "r2"); r2.append(T.minus, T.plus, T.tap, T.listen, T.pat, T.leds); top.appendChild(r2);
   } else {
@@ -589,7 +679,7 @@ function topStatus() {
   if (key === statusKey) return;
   statusKey = key;
   T.leds.textContent = "";
-  for (const [t, c, tip] of parts) { const l = el("span", "led " + c, tip && !PHONE ? t + ": " + tip : t); l.title = tip; T.leds.appendChild(l); }
+  for (const [t, c, tip] of parts) { const l = el("span", "led " + c, tip && !PHONE && !SHORT ? t + ": " + tip : t); l.title = tip; T.leds.appendChild(l); }
 }
 
 /* ---------- views ---------- */
@@ -612,7 +702,7 @@ function Strip(t, pots, opt) {
   let leds = null;
   if (opt.steps) { const d = el("div", "steps"); leds = []; for (let i = 0; i < 16; i++) { const x = el("i"); d.appendChild(x); leds.push(x); } s.appendChild(d); }
   const bt = el("div", "btns");
-  const m = Btn("m", PHONE ? "M" : "MUTE", () => act(`mute ${t + 1} 2`)), so = Btn("s", PHONE ? "S" : "SOLO", () => act(`solo ${t + 1} 2`));
+  const m = Btn("m", PHONE || SHORT ? "M" : "MUTE", () => act(`mute ${t + 1} 2`)), so = Btn("s", PHONE || SHORT ? "S" : "SOLO", () => act(`solo ${t + 1} 2`));
   bt.append(m.el, so.el);
   let arm = null, side = null;
   if (opt.arm) { arm = Btn("a", "ARM", () => act(st.lrec && st.lrecT === t ? (st.lrec === 2 ? "lrec stop" : "lrec cancel") : `lrec arm ${t + 1}`)); arm.el.style.gridColumn = "span 2"; arm.el.title = "record a live loop into this track from the Daisy's input"; bt.appendChild(arm.el); }
@@ -661,8 +751,9 @@ const globUpd = pots => { for (const p of pots) if (!p.dragging && !isBusy("g" +
 V.perform = {
   build() {
     const tracks = PHONE ? [...Array(8).keys()].map(i => i + page8 * 8) : [...Array(16).keys()];
-    this.strips = tracks.map(t => Strip(t, PHONE ? [["pan", 1, "pan", AM]] : [["pan", 1, "pan", AM], ["reverb", 2, "vol", GR]], { pot: PHONE ? 36 : 54, steps: !PHONE, arm: true }));
+    this.strips = tracks.map(t => Strip(t, sz([["pan", 1, "pan", AM], ["reverb", 2, "vol", GR]], [["pan", 1, "pan", AM]], [["", 1, "pan", AM]]), { pot: sz(54, 36, 30), steps: !PHONE && !SHORT, arm: !SHORT }));
     const box = el("div", PHONE ? "pst" : "strips"); this.strips.forEach(s => box.appendChild(s.el));
+    if (SHORT) { view.className = "v"; view.style.gridTemplateRows = "1fr"; view.append(box); this.gp = []; this.pp = this.fxp = null; return; }
     this.pp = patPads(8); this.fxp = FxPads();
     this.pp.pads.forEach((p, i) => p.onclick = () => act("pat " + ((st.pat >> 3) * 8 + i + 1)));
     const pbox = el("div", "box"); const h3 = el("h3"); this.bankLbl = h3; pbox.append(h3, this.pp.el);
@@ -681,7 +772,7 @@ V.perform = {
       view.append(box, side);
     }
   },
-  S() { this.strips.forEach(s => s.S()); this.fxp.S(); const bank = st.pat >> 3;
+  S() { this.strips.forEach(s => s.S()); if (!this.fxp) return; this.fxp.S(); const bank = st.pat >> 3;
     this.bankLbl.textContent = "Patterns · bank " + "ABCDEFGH"[bank];
     this.pp.pads.forEach((p, i) => { const n = bank * 8 + i; p.textContent = patName(n); p.className = "pad " + (n === st.pat ? "cur" : n === st.qpat ? "next" : (st.patmask >> BigInt(n) & 1n) ? "has" : ""); }); },
   T(t) { this.strips.forEach(s => s.T()); }, N() { this.strips.forEach(s => s.N()); }, G() { this.strips.forEach(s => s.G()); },
@@ -692,11 +783,12 @@ V.mixer = {
   build() {
     view.className = "v"; view.style.gridTemplateRows = PHONE ? "auto 1fr" : "1fr";
     const tracks = PHONE ? (page8 === 2 ? [] : [...Array(8).keys()].map(i => i + page8 * 8)) : [...Array(16).keys()];
-    this.strips = tracks.map(t => Strip(t, [["pan", 1, "pan", AM], [PHONE ? "rev" : "reverb", 2, "vol", GR], [PHONE ? "dly" : "delay", 3, "vol", GR]], { pot: PHONE ? 36 : 58, side: true }));
+    this.strips = tracks.map(t => Strip(t, [[sz("pan", "pan", ""), 1, "pan", AM], [sz("reverb", "rev", ""), 2, "vol", GR], [sz("delay", "dly", ""), 3, "vol", GR]], { pot: sz(58, 36, 28), side: !SHORT }));
     const box = el("div", PHONE ? "pst" : "mx");
     this.strips.forEach(s => box.appendChild(s.el));
     this.gp = [];
-    if (!PHONE || page8 === 2) {
+    if (SHORT) { box.className = "strips"; }
+    else if (!PHONE || page8 === 2) {
       const m = el("div", "st master"); m.appendChild(el("div", "nm", "MASTER"));
       this.gp = ["filter", "revsize", "dlyfb", "drive", "fxret"].slice(0, PHONE ? 5 : 3).map(id => globPot(id, PHONE ? 60 : 58));
       this.gp.forEach(p => m.appendChild(p.el));
@@ -733,16 +825,17 @@ V.steps = {
   build() { (stepsMode === "all" ? this.buildAll : this.buildOne).call(this); },
   buildAll() {
     view.className = "v"; view.style.gridTemplateRows = "auto 1fr";
-    const { hdr, pat } = stepsHdr(PHONE ? null : [el("span", "lbl", "tap: on · accent · off")]); this.patEl = pat;
-    const g = el("div", "grid"); g.style.gridTemplateRows = (PHONE ? "14px" : "18px") + " repeat(16,1fr)";
-    g.appendChild(el("div")); if (!PHONE) g.appendChild(el("div"));
+    const { hdr, pat } = stepsHdr(PHONE || SHORT ? null : [el("span", "lbl", "tap: on · accent · off")]); this.patEl = pat;
+    const NOMS = PHONE || SHORT;
+    const g = el("div", "grid"); g.style.gridTemplateRows = (NOMS ? "12px" : "18px") + " repeat(16,1fr)";
+    g.appendChild(el("div")); if (!NOMS) g.appendChild(el("div"));
     for (let k = 0; k < 16; k++) g.appendChild(el("div", "colh", String(k + 1)));
     this.rows = []; this.cells = [];
     for (let t = 0; t < 16; t++) {
       const tn = el("div", "tn"), b = el("b", "", String(t + 1)), nm = document.createTextNode("");
       tn.append(b, nm); tn.onclick = () => sel(t); g.appendChild(tn);
       let m = null, s = null;
-      if (!PHONE) { const ms = el("div", "ms"); m = Btn("m", "M", () => act(`mute ${t + 1} 2`)); s = Btn("s", "S", () => act(`solo ${t + 1} 2`)); ms.append(m.el, s.el); g.appendChild(ms); }
+      if (!NOMS) { const ms = el("div", "ms"); m = Btn("m", "M", () => act(`mute ${t + 1} 2`)); s = Btn("s", "S", () => act(`solo ${t + 1} 2`)); ms.append(m.el, s.el); g.appendChild(ms); }
       this.rows.push({ tn, nm, m, s, name: null });
       for (let k = 0; k < 16; k++) { const c = el("button", "sc" + ((k >> 2) % 2 ? "" : " q")); c.onclick = () => stepTap(t, k); g.appendChild(c); this.cells.push(c); }
     }
@@ -757,6 +850,7 @@ V.steps = {
     if (ty === "303") { const sub = el("div", "sub"); [["oct −", -1], ["oct +", 1]].forEach(([n, d]) => { const b = el("span", "", n); b.onclick = () => { acidOct = Math.max(-1, Math.min(3, acidOct + d)); show("steps"); }; sub.appendChild(b); }); octs.push(sub); }
     const { hdr, pat } = stepsHdr([el("span", "big", (t + 1) + " · " + trackName(t))].concat(octs)); this.patEl = pat;
     const big = el("div", "bigsteps"); if (PHONE) big.style.gridTemplateRows = "1fr 1fr";
+    if (SHORT) big.style.gridTemplateColumns = "repeat(16,1fr)";
     this.bs = [];
     for (let k = 0; k < 16; k++) {
       const b = el("button", "bs" + ((k >> 2) % 2 ? "" : " q")), sl = el("span", "sl", "slide"), nt = el("span", "nt"), lb = el("span", "", ""), num = el("span", "", String(k + 1));
@@ -766,7 +860,7 @@ V.steps = {
       big.appendChild(b); this.bs.push({ b, sl, nt, lb, key: "" });
     }
     if (ty === "303") {
-      view.style.gridTemplateRows = PHONE ? "auto 1.5fr 1fr" : "auto 1fr 150px";
+      view.style.gridTemplateRows = sz("auto 1fr 150px", "auto 1.5fr 1fr", "auto 1fr 54px");
       const roll = el("div", "roll"); this.rc = [];
       const base = 36 + acidOct * 12;
       for (let n = base + 12; n >= base; n--) {
@@ -776,7 +870,7 @@ V.steps = {
       }
       view.append(hdr, roll, big);
     } else {
-      view.style.gridTemplateRows = PHONE ? "auto 90px 1.3fr" : "auto 170px 1fr";
+      view.style.gridTemplateRows = sz("auto 170px 1fr", "auto 90px 1.3fr", "auto 70px 1fr");
       this.wave = Wave();
       view.append(hdr, this.wave.el, big);
     }
@@ -836,7 +930,7 @@ function trackHdr(t, ty) {
   [["sample", "sample"], ["303", "303"]].forEach(([k, n]) => { const b = el("span", ty === k ? "on" : "", n); b.onclick = () => act(`type ${t + 1} ${k}`); sub.appendChild(b); });
   if (ty === "loop") sub.appendChild(el("span", "on", "loop"));
   hdr.append(sub, el("span", "sp"));
-  const bt = el("div", "btns"); bt.style.cssText = "grid-template-columns:repeat(4,1fr);width:" + (PHONE ? 190 : 360) + "px";
+  const bt = el("div", "btns"); bt.style.cssText = "grid-template-columns:repeat(4,1fr);width:" + sz(360, 190, 220) + "px";
   const m = Btn("m", PHONE ? "M" : "MUTE", () => act(`mute ${t + 1} 2`)), s = Btn("s", PHONE ? "S" : "SOLO", () => act(`solo ${t + 1} 2`));
   const a = Btn("a", "ARM", () => act(st.lrec && st.lrecT === t ? (st.lrec === 2 ? "lrec stop" : "lrec cancel") : `lrec arm ${t + 1}`));
   const au = Btn("act", "▶", () => act(`audition ${t + 1}`)); au.el.title = "play it once";
@@ -849,7 +943,7 @@ V.sound = {
     view.className = "v";
     this.h = trackHdr(t, ty);
     this.wave = Wave();
-    const size = PHONE ? 64 : 150, row = n => { const r = el("div", PHONE ? "row4" : "row8"); if (PHONE) r.style.gridTemplateRows = `repeat(${n},1fr)`; return r; };
+    const size = sz(150, 64, 50), row = n => { const r = el("div", PHONE ? "row4" : "row8"); if (PHONE) r.style.gridTemplateRows = `repeat(${n},1fr)`; return r; };
     this.dev = []; this.trk = [];
     const r1 = row(ty === "loop" ? 1 : PHONE ? 3 : 1), r2 = PHONE ? r1 : row(1);
     if (ty === "303") ACID_POTS.forEach(p => { const k = Pot({ size, cell: true, mode: p[1] === 5 ? "pan" : "vol", color: AM, label: p[0], fmt: p[2], reset: p[1] === 5 ? 64 : undefined, onChange: v => acidAct(t, p[1], v) }); k.i = p[1]; this.dev.push(k); r1.appendChild(k.el); });
@@ -861,10 +955,10 @@ V.sound = {
       const pg = el("div", "pg"); pg.style.gridTemplateColumns = PHONE ? "1fr 1fr" : "repeat(4,1fr)";
       [["ARM / RE-RECORD", `lrec arm ${t + 1}`], ["STOP AT BAR", "lrec stop"], ["CANCEL", "lrec cancel"], ["BACK TO A SAMPLE", `type ${t + 1} sample`]].forEach(([n, c]) => { const b = el("button", "bigpad", n); b.onclick = () => act(c); pg.appendChild(b); });
       this.state = el("div", "hdr");
-      view.style.gridTemplateRows = PHONE ? "auto auto 1fr 110px 120px" : "auto auto 1fr 110px 190px";
+      view.style.gridTemplateRows = sz("auto auto 1fr 110px 190px", "auto auto 1fr 110px 120px", "auto auto 1fr 44px 92px");
       view.append(this.h.hdr, this.state, this.wave.el, pg, r2);
     } else if (PHONE) { view.style.gridTemplateRows = "auto 96px 1fr"; view.append(this.h.hdr, this.wave.el, r1); }
-    else { view.style.gridTemplateRows = "auto 230px 1fr 1fr"; view.append(this.h.hdr, this.wave.el, r1, r2); }
+    else { view.style.gridTemplateRows = sz("auto 230px 1fr 1fr", "", "auto 56px 1fr 1fr"); view.append(this.h.hdr, this.wave.el, r1, r2); }
   },
   S() { if (st.sel !== this.t || typeOf(st.sel) !== this.ty) return show("sound"); this.h.upd();
     if (this.state) this.state.textContent = st.lrec && st.lrecT === this.t ? (st.lrec === 1 ? "armed: starts on the next bar" : "recording: " + st.lrecBars + " bars") : st.tr[this.t].name.replace(/[\[\]]/g, ""); this.Z(); },
@@ -884,13 +978,80 @@ V.sound = {
 };
 function filterCurve(fc, q) { const pts = []; fc = 0.08 + fc * 0.8; for (let i = 0; i < 96; i++) { const r = (i / 96) / fc; pts.push(Math.min(255, 100 / Math.sqrt((1 - r * r) ** 2 + (r / (1 + q * 6)) ** 2))); } return pts; }
 
-/* Patterns: all 64 */
+/* Patterns: all 64; Sets: the 8 slots on the Daisy's card */
 let patMode = "";   // "", "copy", "clear"
+let patTab = Q.get("pt") || "patterns", setSel = -1, setConfirm = "";
+const cleanName = t => t.toLowerCase().replace(/[^a-z0-9 -]/g, "-").replace(/\s+/g, " ").trim().slice(0, 16);
+function patSub() {
+  const sub = el("div", "sub");
+  [["patterns", "patterns"], ["sets", "sets"]].forEach(([m, n]) => { const b = el("span", patTab === m ? "on" : "", n); b.onclick = () => { patTab = m; show("patterns"); }; sub.appendChild(b); });
+  return sub;
+}
+const Sets = {
+  build() {
+    view.className = "v"; view.style.gridTemplateRows = sz("auto 1fr auto auto", "auto 1fr auto auto auto", "auto 1fr auto");
+    const hdr = el("div", "hdr"); this.state = el("span", "lbl");
+    hdr.append(patSub(), el("span", "sp"));
+    if (!PHONE) hdr.insertBefore(this.state, hdr.lastChild);
+    this.trans = el("button", "b act"); this.trans.style.cssText = "padding:0 12px;height:32px"; this.trans.title = "how the switch to another set sounds";
+    this.trans.onclick = () => act("set trans " + (st.trans + 1) % 4);
+    hdr.appendChild(this.trans);
+    const list = el("div", "pg"); list.style.cssText = `grid-template-columns:${PHONE ? "1fr" : "1fr 1fr"};grid-template-rows:repeat(${PHONE ? 8 : 4},1fr);grid-auto-flow:${PHONE ? "row" : "column"}`;
+    this.rows = [];
+    for (let i = 0; i < 8; i++) {
+      const r = el("button", "setrow"), num = el("span", "num", String(i + 1).padStart(2, "0")), nm = el("span", "nm2"), d = el("span", "d"), tag = el("span", "tag2");
+      r.append(num, nm, d, tag); r.onclick = () => { setSel = i; setConfirm = ""; if (st.sets[i].exists) this.name.value = st.sets[i].name; this.J(); };
+      list.appendChild(r); this.rows.push({ r, nm, d, tag });
+    }
+    this.name = el("input"); this.name.type = "text"; this.name.maxLength = 16; this.name.placeholder = "name (a-z, 0-9)"; this.name.autocapitalize = "off"; this.name.autocomplete = "off"; this.name.spellcheck = false;
+    this.name.addEventListener("blur", () => setTimeout(refit, 300));
+    const nmrow = el("div", "hdr"); nmrow.append(el("span", "lbl", "name"), this.name);
+    const ops = el("div", "pg"); ops.style.cssText = `grid-template-columns:repeat(${PHONE ? 3 : 5},1fr);grid-auto-rows:${sz(56, 46, 36)}px`;
+    this.btn = {};
+    [["load", "LOAD"], ["save", "SAVE HERE"], ["new", "SAVE AS NEW"], ["name", "RENAME"], ["delete", "DELETE"]].forEach(([k, n]) => { const b = el("button", "bigpad", n); b.onclick = () => this.op(k); ops.appendChild(b); this.btn[k] = b; });
+    if (SHORT) { nmrow.appendChild(ops); ops.style.flex = "1"; view.append(hdr, list, nmrow); }
+    else if (PHONE) { view.style.gridTemplateRows = "auto auto 1fr auto auto"; view.append(hdr, this.state, list, nmrow, ops); }
+    else view.append(hdr, list, nmrow, ops);
+    if (setSel < 0) setSel = st.set >= 0 ? st.set : 0;
+  },
+  op(k) {
+    const i = setSel, nm = cleanName(this.name.value), ex = st.sets[i] && st.sets[i].exists;
+    if ((k === "delete" || (k === "save" && ex && i !== st.set) || (k === "load" && st.dirty)) && setConfirm !== k) { setConfirm = k; return this.J(); }
+    setConfirm = "";
+    if (k === "load") { if (ex) act("set load " + (i + 1)); }
+    else if (k === "save") act(("set save " + (i + 1) + " " + nm).trim());
+    else if (k === "new") act(("set new " + nm).trim());
+    else if (k === "name") { if (ex && nm) act("set name " + (i + 1) + " " + nm); }
+    else if (k === "delete") { if (ex) act("set delete " + (i + 1)); }
+    this.J();
+  },
+  J() {
+    this.rows.forEach((x, i) => {
+      const s = st.sets[i];
+      x.r.className = "setrow" + (i === setSel ? " sel" : "") + (s.exists ? " has" : "") + (i === st.set ? " open" : "");
+      x.nm.textContent = s.exists ? s.name : "empty";
+      x.d.textContent = s.exists ? s.bpm.toFixed(0) + " bpm · " + s.samples + " samples" + (s.loops ? " · " + s.loops + " loops" : "") + (s.synths ? " · " + s.synths + " 303" : "") : "";
+      x.tag.textContent = i === st.set ? (st.dirty ? "open, changed" : "open") : "";
+    });
+    const ex = st.sets[setSel] && st.sets[setSel].exists;
+    this.btn.load.disabled = !ex || !!st.setOp; this.btn.name.disabled = !ex || !!st.setOp; this.btn.delete.disabled = !ex || !!st.setOp;
+    this.btn.save.disabled = this.btn.new.disabled = !!st.setOp;
+    this.btn.load.textContent = setConfirm === "load" ? "DROP CHANGES? TAP AGAIN" : "LOAD";
+    this.btn.save.textContent = setConfirm === "save" ? "OVERWRITE? TAP AGAIN" : "SAVE HERE";
+    this.btn.delete.textContent = setConfirm === "delete" ? "DELETE? TAP AGAIN" : "DELETE";
+    for (const k of ["load", "save", "delete"]) this.btn[k].classList.toggle("warn", setConfirm === k);
+    this.trans.textContent = "switch: " + (st.transName || "-").toLowerCase();
+    this.state.textContent = !st.sd ? "no SD card in the Daisy: sets need one" : st.setOp === 1 ? "saving…" : st.setOp === 2 ? "loading: switches on the bar" : "sets are saved on the Daisy's card, with their sounds";
+  },
+  S() { this.J(); },
+};
 V.patterns = {
   build() {
+    if (patTab === "sets") { for (const k of ["J", "S", "O"]) this[k] = Sets[k] ? Sets[k].bind(Sets) : () => { }; return Sets.build(); }
+    this.S = this.S0; this.O = this.O0; this.J = null;
     view.className = "v"; view.style.gridTemplateRows = "auto 1fr";
     const hdr = el("div", "hdr"); this.now = el("span", "big"); this.hint = el("span", "lbl");
-    hdr.append(el("span", "lbl", "playing"), this.now, this.hint, el("span", "sp"));
+    hdr.append(patSub(), el("span", "lbl", PHONE ? "" : "playing"), this.now, this.hint, el("span", "sp"));
     const ops = el("div", "sub"); this.ops = {};
     [["copy", "copy"], ["clear", "clear"]].forEach(([m, n]) => { const b = el("span", "", n); b.onclick = () => { patMode = patMode === m ? "" : m; this.src = -1; this.S(); }; ops.appendChild(b); this.ops[m] = b; });
     const u = el("span", "", "undo"); u.onclick = () => act("undo"); ops.appendChild(u);
@@ -907,24 +1068,25 @@ V.patterns = {
     else act("pat " + (p + 1));
     this.S();
   },
-  S() {
+  S() { }, O() { },
+  S0() {
     this.now.textContent = patName(st.pat) + (st.qpat >= 0 && st.qpat !== st.pat ? " → " + patName(st.qpat) : "");
     this.hint.textContent = patMode === "copy" ? (this.src < 0 ? "copy: tap the source" : "copy " + patName(this.src) + ": tap where it goes") : patMode === "clear" ? "clear: tap a pattern" : "";
     for (const m in this.ops) this.ops[m].classList.toggle("on", patMode === m);
     this.pads.forEach((b, p) => { b.className = "bigpad " + (p === st.pat ? "cur" : p === st.qpat ? "next" : (st.patmask >> BigInt(p) & 1n) ? "has" : "") + (p === this.src ? " src" : ""); });
   },
-  O() { this.S(); },
+  O0() { this.S(); },
 };
 
 V.fx = {
   build() {
-    view.className = "v"; view.style.gridTemplateRows = PHONE ? "1.1fr 1.6fr 1fr" : "1fr 1fr 1fr";
+    view.className = "v"; view.style.gridTemplateRows = sz("1fr 1fr 1fr", "1.1fr 1.6fr 1fr", "0.8fr 1.2fr 1fr");
     this.fxp = FxPads("pg"); this.fxp.el.style.gridTemplateColumns = PHONE ? "repeat(4,1fr)" : "repeat(8,1fr)"; if (PHONE) this.fxp.el.style.gridTemplateRows = "1fr 1fr";
     const row = el("div", PHONE ? "row4" : "row8"); if (PHONE) row.style.gridTemplateRows = "1fr 1fr";
-    this.gp = ["revsize", "revtone", "dlytime", "dlyfb", "fxret", "filter", "drive", "swing"].map(id => globPot(id, PHONE ? 72 : 150, true));
+    this.gp = ["revsize", "revtone", "dlytime", "dlyfb", "fxret", "filter", "drive", "swing"].map(id => globPot(id, sz(150, 72, 46), true));
     this.gp.forEach(p => row.appendChild(p.el));
     const m = el("div", "cell"); m.style.cssText = "flex-direction:row;gap:" + (PHONE ? 16 : 40) + "px";
-    const a = globPot("master", PHONE ? 84 : 130), b = globPot("xfade", PHONE ? 84 : 130); this.gp.push(a, b);
+    const a = globPot("master", sz(130, 84, 50)), b = globPot("xfade", sz(130, 84, 50)); this.gp.push(a, b);
     this.ml = Meter(); this.mr = Meter(); const mm = el("div"); mm.style.cssText = "display:flex;gap:6px;height:70%"; mm.append(this.ml.el, this.mr.el);
     m.append(a.el, b.el, mm);
     view.append(this.fxp.el, row, m);
@@ -932,14 +1094,230 @@ V.fx = {
   S() { this.fxp.S(); }, M() { globUpd(this.gp); }, H() { this.ml.set(st.meters[16]); this.mr.set(st.meters[17]); },
 };
 
+/* Samples: the T95's library and SD card (waveform per file, hear it here, send to the
+   selected track), record with this device's microphone, and the kits on the Daisy */
+let smpMode = Q.get("sm") || "lib", smpPage = 0;
+const smpPath = { lib: "", sd: "" }, peakCache = new Map();
+let pvCtx = null, pvSrc = null, pvKey = "";
+function pvStop() { try { if (pvSrc) pvSrc.stop(); } catch (e) { } pvSrc = null; pvKey = ""; }
+async function pvPlay(src, path, done) {
+  const key = src + ":" + path;
+  if (pvKey === key) { pvStop(); return done(); }
+  pvStop(); pvKey = key;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!pvCtx) pvCtx = new AC();
+    await pvCtx.resume();
+    const r = await fetch("/samples/preview?src=" + src + "&path=" + encodeURIComponent(path));
+    if (!r.ok) throw new Error((await r.json()).error || "can't play it");
+    const ab = await r.arrayBuffer();
+    const buf = await new Promise((ok, no) => pvCtx.decodeAudioData(ab, ok, no));
+    if (pvKey !== key) return;
+    pvSrc = pvCtx.createBufferSource(); pvSrc.buffer = buf; pvSrc.connect(pvCtx.destination);
+    pvSrc.onended = () => { if (pvKey === key) { pvKey = ""; pvSrc = null; } done(); };
+    pvSrc.start();
+  } catch (e) { pvKey = ""; done(String(e.message || e)); }
+}
+function drawPeaks(cv, pk, color) {
+  const W = cv.width = Math.max(40, cv.clientWidth * 2), H = cv.height = Math.max(16, cv.clientHeight * 2), g = cv.getContext("2d");
+  g.clearRect(0, 0, W, H);
+  if (!pk) return;
+  const bw = W / pk.length; g.fillStyle = color || "#2f9e4f";
+  for (let i = 0; i < pk.length; i++) { const h = Math.max(1, Math.pow(pk[i] / 255, 0.6) * H * 0.48); g.fillRect(i * bw, H / 2 - h, Math.max(1, bw * 0.7), 2 * h); }
+}
+function smpSub() {
+  const sub = el("div", "sub");
+  [["lib", "library"], ["sd", PHONE ? "SD" : "SD card"], ["rec", "record"], ["kits", "kits"]].forEach(([m, n]) => { const b = el("span", smpMode === m ? "on" : "", n); b.onclick = () => { smpMode = m; smpPage = 0; show("samples"); }; sub.appendChild(b); });
+  return sub;
+}
 V.samples = {
   build() {
-    view.className = "v"; view.style.gridTemplateRows = "1fr";
-    const b = el("div", "box"); b.style.cssText = "display:flex;flex-direction:column;gap:14px;align-items:flex-start;justify-content:center;padding:30px";
-    b.appendChild(el("div", "big", "Samples"));
-    b.appendChild(el("div", "hint", "The library, SD card, upload and record are still on the classic page. They move here next, with a waveform per file."));
-    const a = el("button", "bigpad", "Open samples on the classic page"); a.style.cssText = "padding:18px 26px;font-size:16px"; a.onclick = () => { location.href = "/classic" + (tv ? "?tv=1" : ""); };
-    b.appendChild(a); view.appendChild(b);
+    this.X = this.K = null; pvStop();
+    if (smpMode === "rec") return this.buildRec();
+    if (smpMode === "kits") return this.buildKits();
+    view.className = "v"; view.style.gridTemplateRows = PHONE ? "auto auto 1fr auto" : "auto 1fr auto";
+    const hdr = el("div", "hdr"), hdr2 = PHONE ? el("div", "hdr") : hdr;
+    this.crumb = el("span", "lbl"); this.to = el("span", "big");
+    hdr.append(smpSub()); hdr2.append(this.crumb, el("span", "sp"), el("span", "lbl", "sends to"), this.to);
+    if (smpMode === "lib") {
+      const up = el("button", "b act", "upload"); up.style.cssText = "padding:0 12px;height:32px"; const inp = el("input"); inp.type = "file"; inp.multiple = true; inp.accept = "audio/*,.wav,.aif,.aiff,.flac,.mp3,.ogg"; inp.style.display = "none";
+      up.onclick = () => inp.click(); inp.onchange = () => this.upload([...inp.files]);
+      hdr2.append(up, inp);
+    }
+    this.rowsN = sz(9, 7, 4);
+    this.list = el("div", "list"); this.list.style.gridTemplateRows = `repeat(${this.rowsN},1fr)`;
+    const foot = el("div", "hdr"); this.prev = el("button", "b", "◀"); this.next = el("button", "b", "▶"); this.pageEl = el("span", "lbl"); this.msg = el("span", "lbl msg");
+    for (const b of [this.prev, this.next]) b.style.cssText = "width:54px;height:34px;font-size:15px";
+    this.prev.onclick = () => { smpPage--; this.render(); }; this.next.onclick = () => { smpPage++; this.render(); };
+    this.bar = el("div", "xbar"); this.barIn = el("i"); this.bar.appendChild(this.barIn);
+    foot.append(this.prev, this.pageEl, this.next, this.msg, this.bar);
+    if (PHONE) view.append(hdr, hdr2, this.list, foot); else view.append(hdr, this.list, foot);
+    this.items = []; this.X = this.X1;
+    this.load();
+  },
+  async load() {
+    const src = smpMode;
+    try {
+      const r = await fetch("/samples?src=" + src + "&path=" + encodeURIComponent(smpPath[src])), d = await r.json();
+      if (d.error) { if (smpPath[src]) { smpPath[src] = ""; return this.load(); } this.items = []; this.say(d.error); }
+      else { this.items = (smpPath[src] ? [{ up: true }] : []).concat(d.dirs.map(n => ({ dir: n })), d.files.map(f => ({ file: f.name, size: f.size }))); }
+    } catch (e) { this.items = []; this.say("T95 bridge not answering"); }
+    if (curName === "samples" && smpMode === src) this.render();
+  },
+  say(t, bad) { if (this.msg) { this.msg.textContent = t || ""; this.msg.classList.toggle("bad", !!bad); } },
+  full(name) { const p = smpPath[smpMode]; return p ? p + "/" + name : name; },
+  render() {
+    const src = smpMode, pages = Math.max(1, Math.ceil(this.items.length / this.rowsN));
+    smpPage = Math.max(0, Math.min(pages - 1, smpPage));
+    this.crumb.textContent = (src === "lib" ? "library" : "SD card") + (smpPath[src] ? " / " + smpPath[src] : "");
+    this.pageEl.textContent = (smpPage + 1) + " / " + pages; this.prev.disabled = smpPage === 0; this.next.disabled = smpPage >= pages - 1;
+    this.list.textContent = "";
+    const want = [];
+    for (const it of this.items.slice(smpPage * this.rowsN, (smpPage + 1) * this.rowsN)) {
+      const row = el("div", "li"), nm = el("span", "nm2"), acts = el("div", "act");
+      const mk = (cls, t, f) => { const b = el("button", "b " + cls, t); b.onclick = e => { e.stopPropagation(); f(b); }; acts.appendChild(b); return b; };
+      if (it.up || it.dir) {
+        nm.textContent = it.up ? "‹ back" : "📁 " + it.dir; row.classList.add("dir");
+        row.onclick = () => { const p = smpPath[src]; smpPath[src] = it.up ? p.split("/").slice(0, -1).join("/") : (p ? p + "/" : "") + it.dir; smpPage = 0; this.load(); };
+        row.append(nm, el("span"), el("span", "d"), acts);
+        if (it.dir && src === "sd") mk("", "import all", () => this.imp(this.full(it.dir)));
+      } else {
+        const path = this.full(it.file), cv = el("canvas"), d = el("span", "d");
+        nm.textContent = it.file;
+        row.append(nm, cv, d, acts);
+        const play = mk("act", "▶", b => { b.classList.add("on"); pvPlay(src, path, err => { b.classList.remove("on"); if (err) this.say(err, true); }); });
+        play.title = "hear it on this device";
+        mk("", "send", () => this.send(src, path));
+        if (src === "sd") mk("", "import", () => this.imp(path));
+        else mk("", "✕", b => { if (b.dataset.sure) this.del(path); else { b.dataset.sure = 1; b.textContent = "sure?"; b.classList.add("warn"); } });
+        want.push({ key: src + ":" + path, src, path, cv, d });
+      }
+      this.list.appendChild(row);
+    }
+    this.S(); this.peaks(want);
+  },
+  async peaks(want) {
+    const token = this.token = {};
+    for (const w of want) {
+      let p = peakCache.get(w.key);
+      if (!p) {
+        try { p = await (await fetch("/samples/peaks?src=" + w.src + "&path=" + encodeURIComponent(w.path))).json(); } catch (e) { p = { error: "?" }; }
+        if (!p.error) { p.pk = p.peaks ? p.peaks.match(/../g).map(h => parseInt(h, 16)) : null; peakCache.set(w.key, p); }
+      }
+      if (this.token !== token) return;          /* another page is showing now */
+      w.d.textContent = p.error ? "" : p.secs < 10 ? p.secs.toFixed(2) + " s" : p.secs.toFixed(0) + " s";
+      drawPeaks(w.cv, p.pk);
+    }
+  },
+  async post(path, body) { try { const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return await r.json(); } catch (e) { return { error: "T95 bridge not answering" }; } },
+  async send(src, path) { const r = await this.post("/samples/send", { src, path, track: st.sel + 1 }); this.say(r.error || "queued for track " + (st.sel + 1), !!r.error); },
+  async imp(path) { this.say("copying to the library…"); const r = await this.post("/samples/import", { path }); this.say(r.error || "in the library: " + (r.copied !== undefined ? r.copied + " files" : "done"), !!r.error); },
+  async del(path) { const r = await this.post("/samples/delete", { path }); this.say(r.error || "deleted", !!r.error); this.load(); },
+  async upload(files) {
+    let n = 0;
+    for (const f of files) {
+      this.say("uploading " + f.name + "…");
+      try { const r = await (await fetch("/samples/upload?name=" + encodeURIComponent(f.name), { method: "POST", body: f })).json(); if (r.error) { this.say(f.name + ": " + r.error, true); continue; } n++; } catch (e) { this.say("upload failed", true); }
+    }
+    if (n) { this.say(n + " uploaded to library / uploads"); smpPath.lib = "uploads"; smpPage = 0; this.load(); }
+  },
+  X1() {
+    const x = st.xfer; if (!x || !this.msg) return;
+    const pct = x.chunks ? Math.round(x.acked / x.chunks * 100) : 0;
+    this.barIn.style.width = (x.state === "done" ? 100 : pct) + "%"; this.bar.classList.toggle("on", x.state === "sending" || x.state === "converting" || x.state === "loading");
+    this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track + (x.cut ? " (cut to fit)" : "") + (x.kb_per_s ? " · " + x.kb_per_s + " kB/s" : "")
+      : x.name + " → track " + x.track + ": " + x.state + (x.state === "sending" ? " " + pct + "%" : ""), x.state === "failed");
+  },
+  S() { if (this.to) { const t = (st.sel + 1) + " · " + trackName(st.sel); if (this.to.textContent !== t) this.to.textContent = t; } },
+  N() { this.S(); },
+
+  /* record with this device's microphone, into the library, and on to the selected track */
+  buildRec() {
+    view.className = "v"; view.style.gridTemplateRows = sz("auto 1fr 190px", "auto auto 1fr 150px", "auto 1fr 84px");
+    const hdr = el("div", "hdr"), hdr2 = PHONE ? el("div", "hdr") : hdr; this.to = el("span", "big"); this.msg = el("span", "lbl msg");
+    hdr.append(smpSub()); hdr2.append(this.msg, el("span", "sp"), el("span", "lbl", "sends to"), this.to);
+    const w = el("div", "wave"), cv = el("canvas"); w.appendChild(cv); this.cv = cv;
+    const row = el("div"); row.style.cssText = "display:grid;grid-template-columns:" + sz("220px 1fr", "130px 1fr", "110px 1fr") + ";gap:" + sz(12, 8, 6) + "px;min-height:0";
+    const c1 = el("div", "cell"), rb = el("button", "recbtn", "REC"); c1.appendChild(rb); this.rb = rb;
+    const c2 = el("div", "cell"); c2.style.cssText = "align-items:flex-start;padding:0 " + sz(24, 12, 12) + "px;gap:" + sz(10, 6, 4) + "px";
+    this.auto = true;
+    const tg = el("button", "b act on", "send to the selected track when done"); tg.style.cssText = "padding:0 14px;height:" + sz(36, 32, 26) + "px";
+    tg.onclick = () => { this.auto = !this.auto; tg.classList.toggle("on", this.auto); };
+    const info = el("span", "hint"); this.info = info; c2.append(tg, info);
+    row.append(c1, c2);
+    if (PHONE) view.append(hdr, hdr2, w, row); else view.append(hdr, w, row);
+    this.pk = []; this.rec = null;
+    const local = ["localhost", "127.0.0.1"].includes(location.hostname);
+    if (!navigator.mediaDevices || !window.MediaRecorder || (!window.isSecureContext && !local)) {
+      const port = st.caps.https_port;
+      info.textContent = port ? "The microphone only works on the secure address. The browser warns once about the certificate: accept it." : "This browser can't record here.";
+      rb.textContent = port ? "OPEN" : "–"; rb.classList.add("idle");
+      rb.onclick = () => { if (port) location.href = "https://" + location.hostname + ":" + port + "/apcbox?v=samples&sm=rec"; };
+      return;
+    }
+    info.textContent = "Records this device's microphone into the library (uploads). For the Daisy's own input, use ARM on a track.";
+    rb.classList.add("idle");
+    rb.onclick = () => (this.rec ? this.recStop() : this.recStart());
+  },
+  async recStart() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      const AC = window.AudioContext || window.webkitAudioContext, ctx = new AC(), an = ctx.createAnalyser(); an.fftSize = 2048;
+      ctx.createMediaStreamSource(stream).connect(an);
+      const rec = new MediaRecorder(stream), chunks = [], buf = new Float32Array(an.fftSize), t0 = performance.now();
+      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      this.pk = []; this.rec = { rec, stream, ctx, chunks, t0 };
+      const tick = () => {
+        if (!this.rec || this.rec.rec !== rec) return;
+        an.getFloatTimeDomainData(buf); let p = 0; for (const v of buf) p = Math.max(p, Math.abs(v));
+        this.pk.push(Math.min(255, Math.round(p * 255))); if (this.pk.length > 600) this.pk = this.pk.filter((_, i) => i % 2 === 0);
+        drawPeaks(this.cv, this.pk, "#ff4b3e");
+        this.say("● recording " + ((performance.now() - t0) / 1000).toFixed(1) + " s");
+        setTimeout(tick, 50);
+      };
+      rec.onstop = () => this.recDone(rec, chunks);
+      rec.start(250); this.rb.textContent = "STOP"; this.rb.classList.remove("idle"); tick();
+    } catch (e) { this.say("no microphone: " + (e.message || e), true); }
+  },
+  recStop() { const r = this.rec; if (!r) return; this.rec = null; try { r.rec.stop(); } catch (e) { } r.stream.getTracks().forEach(t => t.stop()); try { r.ctx.close(); } catch (e) { } this.rb.textContent = "REC"; this.rb.classList.add("idle"); },
+  async recDone(rec, chunks) {
+    const blob = new Blob(chunks, { type: rec.mimeType }), ext = /mp4|aac|m4a/.test(rec.mimeType) ? "mp4" : /ogg/.test(rec.mimeType) ? "ogg" : "webm";
+    const d = new Date(), z = n => String(n).padStart(2, "0"), name = `rec ${z(d.getDate())}-${z(d.getMonth() + 1)} ${z(d.getHours())}.${z(d.getMinutes())}.${z(d.getSeconds())}.${ext}`;
+    this.say("saving " + name + "…");
+    try {
+      const r = await (await fetch("/samples/upload?name=" + encodeURIComponent(name), { method: "POST", body: blob })).json();
+      if (r.error) return this.say(r.error, true);
+      this.say(name + " is in library / uploads");
+      if (this.auto) { const q = await this.post("/samples/send", { src: "lib", path: "uploads/" + name, track: st.sel + 1 }); this.say(q.error || name + ": on its way to track " + (st.sel + 1), !!q.error); this.X = this.X2; }
+    } catch (e) { this.say("couldn't save the recording", true); }
+  },
+  X2() { const x = st.xfer; if (x) this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track : x.name + " → track " + x.track + ": " + x.state, x.state === "failed"); },
+
+  /* kits on the Daisy (built in, and folders on its card): load one into tracks 1-8 or 9-16 */
+  buildKits() {
+    view.className = "v"; view.style.gridTemplateRows = "auto 1fr auto";
+    const hdr = el("div", "hdr"); this.to = null; this.msg = null;
+    hdr.append(smpSub(), el("span", "lbl", PHONE ? "" : "a kit fills 8 tracks: pick which 8"), el("span", "sp"));
+    this.rowsN = sz(10, 9, 4);
+    this.list = el("div", "list"); this.list.style.gridTemplateRows = `repeat(${this.rowsN},1fr)`;
+    const foot = el("div", "hdr"); this.prev = el("button", "b", "◀"); this.next = el("button", "b", "▶"); this.pageEl = el("span", "lbl");
+    for (const b of [this.prev, this.next]) b.style.cssText = "width:54px;height:34px;font-size:15px";
+    this.prev.onclick = () => { smpPage--; this.K(); }; this.next.onclick = () => { smpPage++; this.K(); };
+    foot.append(this.prev, this.pageEl, this.next, el("span", "sp"));
+    view.append(hdr, this.list, foot);
+    this.K = this.K1;
+  },
+  K1() {
+    const pages = Math.max(1, Math.ceil(st.kits.length / this.rowsN));
+    smpPage = Math.max(0, Math.min(pages - 1, smpPage));
+    this.pageEl.textContent = (smpPage + 1) + " / " + pages; this.prev.disabled = smpPage === 0; this.next.disabled = smpPage >= pages - 1;
+    this.list.textContent = "";
+    for (let k = smpPage * this.rowsN; k < Math.min(st.kits.length, (smpPage + 1) * this.rowsN); k++) {
+      const row = el("div", "li kit"), nm = el("span", "nm2", st.kits[k] || "?"), acts = el("div", "act");
+      for (const pg of [0, 1]) { const b = el("button", "b act" + (st.kitPg[pg] === k ? " on" : ""), pg ? "9-16" : "1-8"); b.onclick = () => act(`kit ${k + 1} ${pg}`); acts.appendChild(b); }
+      row.append(nm, el("span"), el("span", "d", st.kitPg[0] === k && st.kitPg[1] === k ? "on all 16" : st.kitPg[0] === k ? "on 1-8" : st.kitPg[1] === k ? "on 9-16" : ""), acts);
+      this.list.appendChild(row);
+    }
   },
 };
 
@@ -964,15 +1342,15 @@ V.system = {
       ["CPU", Math.round(st.cpu / 10) + "%"], ["browsers", String(b.clients || 0)]];
     this.kv.textContent = ""; for (const [k, v] of rows) this.kv.append(el("span", "", k), el("span", "", v));
   },
-  S() { }, L() { this.logEl.textContent = st.log.slice(-(PHONE ? 14 : 22)).join("\n"); },
+  S() { }, L() { this.logEl.textContent = st.log.slice(-sz(22, 14, 9)).join("\n"); },
 };
 
 /* ---------- shell ---------- */
 const TABS = [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
 function buildTabs() {
   const tb = document.getElementById("tabs"); tb.textContent = "";
-  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === curName ? " on" : "")); if (!PHONE) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
-  if (!PHONE) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
+  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === curName ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
+  if (!PHONE && !SHORT) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
 }
 function show(name) {
   if (!V[name]) name = "perform";
@@ -980,7 +1358,7 @@ function show(name) {
   try { localStorage.setItem("apcbox-view", name); } catch (e) { }
   view.textContent = ""; view.removeAttribute("style"); view.className = "";
   cur.build();
-  for (const k of ["N", "T", "A", "M", "G", "Q", "O", "Z", "H", "S"]) if (cur[k]) cur[k]();
+  for (const k of ["N", "T", "A", "M", "G", "Q", "O", "Z", "H", "J", "K", "X", "S"]) if (cur[k]) cur[k]();
   buildTabs();
 }
 function call(k, arg) { if (cur && cur[k]) cur[k](arg); }
@@ -994,7 +1372,7 @@ function line(l) {
       st.playing = f[0]; st.step = f[1]; st.pat = f[2]; st.qpat = f[3]; st.rec = f[4]; if (!isBusy("bpm")) st.bpm = f[5]; st.metro = f[6];
       if (!isBusy("sel")) st.sel = f[7];
       st.cpu = f[11]; st.sd = f[13]; st.apc = f[14]; st.fx = f[16] | f[17]; st.mute = f[19]; st.solo = f[20]; st.loading = f[21]; st.synth = f[37];
-      st.lrec = f[47]; st.lrecT = f[48]; st.lrecBars = f[49]; st.inPeak = f[50]; st.mon = f[51]; st.set = f[53]; st.dirty = f[54];
+      st.lrec = f[47]; st.lrecT = f[48]; st.lrecBars = f[49]; st.inPeak = f[50]; st.mon = f[51]; st.set = f[53]; st.dirty = f[54]; st.setOp = f[55];
       topS(); topStatus(); call("S"); break;
     }
     case "G": { const i = rest.indexOf(" "); const p = +rest.slice(0, i); if (isBusy("G") && p === st.gridPat) break; st.gridPat = p; st.grid = rest.slice(i + 1); call("G"); break; }
@@ -1008,16 +1386,22 @@ function line(l) {
     case "Z": { const f = rest.split(" "), t = +f[0]; if (!(t >= 0 && t < 16)) break; const len = +f[1], rate = +f[2] || 48000; let pts = null;
       if (len && f[3] && f[3] !== "-") { pts = []; for (let i = 0; i < f[3].length; i += 2) pts.push(parseInt(f[3].substr(i, 2), 16)); }
       st.tr[t].wave = { len, rate, pts, key: rest.length + ":" + rest.slice(-40) + len }; call("Z", t); break; }
+    case "J": { const f = rest.split(" "), i = +f[0]; if (!(i >= 0 && i < 8)) break;
+      st.sets[i] = f[1] === "1" ? { exists: true, bpm: +f[2] / 10, samples: +f[3], loops: +f[4], synths: +f[5], name: f.slice(6).join(" ") } : { exists: false }; call("J"); break; }
+    case "JT": { const i = rest.indexOf(" "); st.trans = +rest.slice(0, i); st.transName = rest.slice(i + 1); call("J"); break; }
+    case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
+    case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); break;
   }
 }
-const REPORT_VERSION = 10;
+const REPORT_VERSION = 11;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");
   es.onmessage = e => line(e.data);
   es.addEventListener("bridge", e => { try { const b = JSON.parse(e.data); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (err) { } });
+  es.addEventListener("xfer", e => { try { st.xfer = JSON.parse(e.data); call("X"); } catch (err) { } });
   es.addEventListener("ir", e => { try { remote(JSON.parse(e.data).action); } catch (err) { } });
   es.onerror = () => { st.daisy = false; sendErr = "T95 bridge not answering"; topStatus(); };
   es.onopen = () => { sendErr = ""; topStatus(); };
@@ -1041,7 +1425,9 @@ document.addEventListener("keydown", e => {
   else if (e.key === " ") { act(st.playing ? "stop" : "play"); e.preventDefault(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowRight") { remote(e.key === "ArrowLeft" ? "left" : "right"); e.preventDefault(); }
 });
-function refit() { if (fit()) { buildTop(); show(curName); } else if (cur && cur.Z) cur.Z(); }
+fetch("/caps").then(r => r.json()).then(c => { st.caps = c; }).catch(() => { });
+function refit() { if (document.activeElement && document.activeElement.tagName === "INPUT") return;   /* the keyboard is up */
+  if (fit()) { buildTop(); show(curName); } else if (cur && cur.Z) cur.Z(); }
 window.addEventListener("resize", refit);
 window.addEventListener("orientationchange", () => setTimeout(refit, 200));
 if (window.visualViewport) visualViewport.addEventListener("resize", refit);

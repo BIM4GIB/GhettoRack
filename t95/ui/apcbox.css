@@ -230,3 +230,88 @@ body.phone button.tab{font-size:10px;font-weight:700;height:44px;padding:0 1px;l
 .tb.sm.listen.connecting{color:var(--amber);border-color:var(--amber)}
 .tb.sm.listen.error{color:var(--red);border-color:var(--red)}
 body.phone .leds .led:nth-child(n+3){display:none}
+
+/* ---- lists: samples, kits, sets ---- */
+.li{grid-template-columns:minmax(140px,320px) minmax(0,1fr) 76px auto;gap:14px}
+.li canvas{width:100%;height:68%;min-width:0}
+.li.dir{cursor:pointer}.li.dir .nm2{color:var(--amber)}
+.li .act .b{padding:0 12px;height:32px;min-width:44px}
+.li.kit{grid-template-columns:minmax(140px,1fr) 0 120px auto}
+.b.warn,.bigpad.warn{color:var(--red);border-color:var(--red);box-shadow:0 0 9px #ff4b3e77}
+.msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.msg.bad{color:var(--red)}
+.xbar{flex:1;height:8px;border-radius:4px;background:var(--off);overflow:hidden;visibility:hidden;min-width:40px}
+.xbar.on{visibility:visible}.xbar i{display:block;height:100%;width:0;background:var(--green);box-shadow:0 0 8px var(--green)}
+input[type=text]{background:#0b0c0d;color:var(--text);border:1px solid #3a3f45;border-radius:6px;padding:8px 10px;font:inherit;font-family:var(--mono);font-size:16px;
+  -webkit-user-select:text;user-select:text;min-width:0;flex:1;max-width:340px}
+input[type=text]:focus{outline:2px solid var(--yellow)}
+.setrow{display:grid;grid-template-columns:44px minmax(0,1fr) auto;grid-template-rows:1fr 1fr;align-items:center;column-gap:10px;text-align:left;padding:0 14px;
+  border-radius:10px;background:#1d2024;border:1px solid #33373c;color:#5d646b;min-height:0;appearance:none}
+.setrow .num{grid-row:1 / span 2;font-family:var(--mono);font-size:22px}
+.setrow .nm2{font-size:18px;align-self:end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.setrow .d{grid-column:2;grid-row:2;font-family:var(--mono);font-size:12px;align-self:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.setrow .tag2{grid-column:3;grid-row:1 / span 2;font-size:12px;color:var(--green)}
+.setrow.has{color:var(--text);border-color:#7a4d12}.setrow.has .num{color:var(--amber)}
+.setrow.open{border-color:var(--green);box-shadow:inset 0 0 18px #35d05a33}
+.setrow.sel{outline:2px solid var(--yellow);outline-offset:1px}
+button.recbtn{background:none;font-family:inherit;cursor:pointer}
+.recbtn.idle{box-shadow:none;border-color:#7a2a25;color:#c05048}
+button.bigpad:disabled{opacity:.35}
+body.phone .li{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto 1fr;gap:0 8px;padding:4px 8px}
+body.phone .li .nm2{grid-column:1;grid-row:1}
+body.phone .li canvas{grid-column:1;grid-row:2;height:20px}
+body.phone .li .act{grid-column:2;grid-row:1 / span 2}
+body.phone .li .act .b{padding:0 8px;min-width:34px;height:30px}
+body.phone .li.kit{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:1fr}
+body.phone .li.kit .act{grid-row:1}
+body.phone .setrow{grid-template-columns:30px minmax(0,1fr) auto;padding:0 8px}
+body.phone .setrow .num{font-size:16px}body.phone .setrow .nm2{font-size:14px}body.phone .setrow .d{font-size:10px}
+body.phone .msg{max-width:none;flex:1;font-size:10px}
+body.phone input[type=text]{font-size:16px;padding:6px 8px}
+
+/* ---- a phone on its side: view buttons in a rail on the left, one compact top row ---- */
+body.short .app{grid-template-columns:78px minmax(0,1fr);grid-template-rows:44px minmax(0,1fr)}
+body.short .top{grid-column:1 / -1;grid-row:1;padding:0 8px;gap:7px}
+body.short .tabs{grid-column:1;grid-row:2;flex-direction:column;align-items:stretch;padding:5px;gap:4px;border-top:none;border-right:1px solid var(--line)}
+body.short #view{grid-column:2;grid-row:2}
+body.short button.tab{flex:1;height:auto;font-size:11px;padding:0;justify-content:center;border-radius:6px}
+body.short .tb{height:32px;min-width:38px;font-size:14px}
+body.short .tb.sm{height:30px;min-width:34px;font-size:10px;padding:0 6px}
+body.short .top .big{font-size:19px}
+body.short .beats i{width:11px;height:11px}
+body.short .leds{gap:8px}body.short .led{font-size:10px}body.short .leds .led:nth-child(n+3){display:none}
+body.short .v{padding:6px;gap:6px}
+body.short .strips{gap:3px}
+body.short .st{padding:3px 2px;gap:3px;border-radius:6px}
+body.short .nm{font-size:9px}body.short .nm b{font-size:9px}
+body.short .kn{font-size:8px}
+body.short .b{height:24px;font-size:10px}
+body.short .cap{width:24px;height:14px}
+body.short .mt i{width:5px}
+body.short .fd{grid-template-columns:1fr 8px 1fr}
+body.short .hdr{min-height:26px;gap:8px}body.short .hdr .big{font-size:15px;white-space:nowrap}
+body.short .sub span{padding:4px 9px;font-size:11px;white-space:nowrap}
+body.short .grid{grid-template-columns:74px repeat(16,1fr);gap:2px}
+body.short .grid .tn{font-size:10px;padding-left:4px;gap:4px;white-space:nowrap;overflow:hidden}
+body.short .grid .tn b{width:13px;font-size:9px}
+body.short .sc{border-radius:3px}
+body.short .colh{font-size:9px}
+body.short .bigsteps{gap:4px}
+body.short .bs{padding:3px;font-size:10px;border-radius:6px;gap:2px}body.short .bs .nt{font-size:12px}body.short .bs .sl{font-size:7px;padding:0 2px}
+body.short .roll{grid-template-columns:30px repeat(16,1fr);padding:3px;gap:1px}
+body.short .roll .k{font-size:8px;padding-right:2px}body.short .roll .c.s{border-right-width:4px}
+body.short .row8{gap:5px}
+body.short .cell{gap:1px;border-radius:7px}
+body.short .cell .val{font-size:12px}body.short .cell .n{font-size:8px;letter-spacing:.03em;text-align:center}
+body.short .bigpad{font-size:11px;border-radius:6px}body.short .bigpad small{font-size:8px}
+body.short .pg{gap:4px}
+body.short .kv{font-size:11px;gap:3px 10px}body.short .log{font-size:9px}
+body.short .box{padding:6px}body.short .box h3{margin-bottom:4px;font-size:9px}
+body.short .wave .tag{font-size:9px;top:3px}
+body.short .li{gap:8px;padding:0 8px}body.short .li .nm2{font-size:12px}body.short .li .act .b{height:26px;padding:0 8px}
+body.short .setrow{padding:0 8px;grid-template-columns:30px minmax(0,1fr) auto}
+body.short .setrow .num{font-size:15px}body.short .setrow .nm2{font-size:13px}body.short .setrow .d{font-size:9px}
+body.short input[type=text]{font-size:16px;padding:3px 8px;max-width:200px}
+body.short .recbtn{width:66px;height:66px;font-size:13px}
+body.short .hint{font-size:11px}
+body.short .msg{font-size:10px}

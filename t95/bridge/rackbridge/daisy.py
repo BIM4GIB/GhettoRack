@@ -285,7 +285,7 @@ class DaisyMixin:
             if self.fd is None:
                 return 503, {"error": "the Daisy isn't connected"}
             if self.ctl < need:
-                return 503, {"error": "the Daisy's firmware is too old for this (needs v13.%d+)" % (9 if need == 4 else 7)}
+                return 503, {"error": "the Daisy's firmware is too old for this (needs v13.%d+)" % {4: 9, 5: 10}.get(need, 7)}
         sent = sum(1 for a in actions if self.ui_send(a))
         if sent < len(actions):
             return 503, {"error": "the Daisy isn't taking commands fast enough", "sent": sent}

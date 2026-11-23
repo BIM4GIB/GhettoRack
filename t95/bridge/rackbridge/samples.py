@@ -49,6 +49,38 @@ def convert_for_daisy(path):
     return data, "as it is (no ffmpeg)"
 
 
+PEAK_POINTS = 96
+PREVIEW_MAX_FILE = 40 << 20     # bigger files: no waveform, no preview
+PREVIEW_KEEP = 6                # converted files kept for playing again
+
+
+def wav_peaks(wav):
+    """(seconds, 96 peaks 0-255 scaled to the loudest) from a 16-bit mono WAV, or (0, None)"""
+    i = wav.find(b"data", 12)
+    if i < 0 or wav[:4] != b"RIFF":
+        return 0.0, None
+    rate = struct.unpack_from("<I", wav, 24)[0] or 48000
+    ch = struct.unpack_from("<H", wav, 22)[0] or 1
+    if struct.unpack_from("<H", wav, 34)[0] != 16:
+        return 0.0, None
+    body = memoryview(wav)[i + 8:]
+    n = len(body) // 2
+    if n < PEAK_POINTS:
+        return n / rate / ch, None
+    import array
+    a = array.array("h")
+    a.frombytes(body[:n * 2])
+    if sys.byteorder == "big":
+        a.byteswap()
+    pk = []
+    for k in range(PEAK_POINTS):
+        seg = a[n * k // PEAK_POINTS:n * (k + 1) // PEAK_POINTS]
+        step = max(1, len(seg) // 2000)
+        pk.append(max(max(seg[::step]), -min(seg[::step])))
+    top = max(pk) or 1
+    return n / rate / ch, [min(255, v * 255 // top) for v in pk]
+
+
 class Transfer:
     """One sample on its way to the Daisy"""
 
@@ -116,6 +148,38 @@ class SamplesMixin:
             return 400, {"error": str(e)}
         rel = os.path.relpath(p, os.path.realpath(root))
         return 200, {"src": src, "path": "" if rel == "." else rel, "dirs": dirs[:500], "files": files[:2000]}
+
+    async def preview(self, src, rel, want_wav):
+        """What the Daisy would get of a file: (code, peaks JSON) or (200, wav bytes).
+        Converted once (ffmpeg), remembered: peaks for every file seen, the audio for the last few."""
+        root = self.roots(src)
+        p = safe_join(root, rel)
+        if p is None or not os.path.isfile(p):
+            return 400, {"error": "no such file"}
+        st = os.stat(p)
+        if st.st_size > PREVIEW_MAX_FILE:
+            return 413, {"error": "too big to preview"}
+        key = (p, st.st_mtime_ns, st.st_size)
+        if not hasattr(self, "pv_peaks"):
+            self.pv_peaks, self.pv_wav, self.pv_sem = collections.OrderedDict(), collections.OrderedDict(), asyncio.Semaphore(2)
+        if key not in self.pv_peaks or (want_wav and key not in self.pv_wav):
+            async with self.pv_sem:
+                if key not in self.pv_peaks or (want_wav and key not in self.pv_wav):
+                    try:
+                        wav, how = await asyncio.get_running_loop().run_in_executor(None, convert_for_daisy, p)
+                    except (ValueError, OSError, subprocess.SubprocessError) as e:
+                        return 415, {"error": str(e)[:200]}
+                    secs, pk = wav_peaks(wav)
+                    self.pv_peaks[key] = {"secs": round(secs, 3), "peaks": bytes(pk).hex() if pk else None}
+                    while len(self.pv_peaks) > 4000:
+                        self.pv_peaks.popitem(last=False)
+                    self.pv_wav[key] = wav
+                    while len(self.pv_wav) > PREVIEW_KEEP:
+                        self.pv_wav.popitem(last=False)
+        if want_wav:
+            self.pv_wav.move_to_end(key)
+            return 200, self.pv_wav[key]
+        return 200, self.pv_peaks[key]
 
     def xfer_event(self, t):
         self.broadcast(sse_event("xfer", t.info()))

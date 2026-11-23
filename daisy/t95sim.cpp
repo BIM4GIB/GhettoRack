@@ -11,7 +11,9 @@
  */
 #include "box.cpp"
 #include "ports.h"
+#include <dirent.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <pty.h>
 #include <termios.h>
 #include <time.h>
@@ -48,21 +50,100 @@ class SimPlat : public Platform
 {
   public:
     void     Out(const char* l) override { WriteLine(l); }
-    bool     FileOpen(const char*) override { return false; }
-    int32_t  FileRead(void*, uint32_t) override { return -1; }
-    bool     FileSkip(uint32_t) override { return false; }
-    uint32_t FileTell() override { return 0; }
-    void     FileClose() override {}
+    /* An optional folder as the Daisy's SD card (second argument): sets can be saved and loaded */
+    std::string root;
+    std::string Full(const char* p) { return root + "/" + p; }
+    FILE*       rf = nullptr;
+    FILE*       wf = nullptr;
+    DIR*        d  = nullptr;
+    std::string dpath;
+    bool     FileOpen(const char* p) override { return !root.empty() && (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
+    int32_t  FileRead(void* dst, uint32_t n) override { return rf ? (int32_t)fread(dst, 1, n, rf) : -1; }
+    bool     FileSkip(uint32_t n) override { return rf && fseek(rf, n, SEEK_CUR) == 0; }
+    uint32_t FileTell() override { return rf ? (uint32_t)ftell(rf) : 0; }
+    void     FileClose() override
+    {
+        if(rf)
+            fclose(rf);
+        rf = nullptr;
+    }
+    bool FileCreate(const char* dd, const char* p) override
+    {
+        if(root.empty())
+            return false;
+        std::string acc;
+        for(const char* q = dd; *q; q++)
+        {
+            acc += *q;
+            if(q[1] == '/' || q[1] == 0)
+                mkdir(Full(acc.c_str()).c_str(), 0755);
+        }
+        wf = fopen(Full(p).c_str(), "wb");
+        return wf != nullptr;
+    }
+    int32_t FileWrite(const void* s, uint32_t n) override { return wf ? (int32_t)fwrite(s, 1, n, wf) : -1; }
+    bool    FileWriteClose() override
+    {
+        bool ok = wf && fclose(wf) == 0;
+        wf      = nullptr;
+        return ok;
+    }
+    bool Remove(const char* p) override { return !root.empty() && ::remove(Full(p).c_str()) == 0; }
     uint8_t* Scratch(uint32_t* s) override
     {
         *s = sizeof(scratch);
         return scratch;
     }
-    bool    DirOpen(const char*) override { return false; }
-    bool    DirNext(char*, size_t, bool*) override { return false; }
-    void    DirClose() override {}
-    bool    WriteFile(const char*, const char*, const void*, uint32_t) override { return false; }
-    int32_t ReadFile(const char*, void*, uint32_t) override { return -1; }
+    bool DirOpen(const char* p) override
+    {
+        if(root.empty())
+            return false;
+        dpath = Full(p);
+        return (d = opendir(dpath.c_str())) != nullptr;
+    }
+    bool DirNext(char* name, size_t cap, bool* is_dir) override
+    {
+        dirent* e;
+        do
+        {
+            e = d ? readdir(d) : nullptr;
+        } while(e && e->d_name[0] == '.');
+        if(!e)
+            return false;
+        snprintf(name, cap, "%s", e->d_name);
+        struct stat sb;
+        *is_dir = stat((dpath + "/" + e->d_name).c_str(), &sb) == 0 && S_ISDIR(sb.st_mode);
+        return true;
+    }
+    void DirClose() override
+    {
+        if(d)
+            closedir(d);
+        d = nullptr;
+    }
+    bool WriteFile(const char* dd, const char* p, const void* data, uint32_t n) override
+    {
+        if(root.empty())
+            return false;
+        mkdir(Full(dd).c_str(), 0755);
+        FILE* f = fopen(Full(p).c_str(), "wb");
+        if(!f)
+            return false;
+        bool ok = fwrite(data, 1, n, f) == n;
+        fclose(f);
+        return ok;
+    }
+    int32_t ReadFile(const char* p, void* data, uint32_t cap) override
+    {
+        if(root.empty())
+            return -1;
+        FILE* f = fopen(Full(p).c_str(), "rb");
+        if(!f)
+            return -1;
+        int32_t r = (int32_t)fread(data, 1, cap, f);
+        fclose(f);
+        return r;
+    }
     float    CpuAvg() override { return 0.1f; }
     float    CpuMax() override { return 0.2f; }
     bool     ControllerUp() override;
@@ -75,7 +156,7 @@ class SimPlat : public Platform
         *n = (uint32_t)stage.size();
         return stage.data();
     }
-    uint8_t  scratch[4096];
+    uint8_t  scratch[16384];
 };
 
 static SimPlat  sim_plat;
@@ -96,7 +177,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: t95sim <symlink path>\n");
+        fprintf(stderr, "usage: t95sim <symlink path> [folder to use as the SD card]\n");
         return 2;
     }
     int master, slave;
@@ -125,6 +206,8 @@ int main(int argc, char** argv)
     mem.capture_l = cl.data(), mem.capture_r = cr.data(), mem.capture_len = 4800;
     mem.reverb = &rv;
     eng_.Init(48000.f, mem);
+    if(argc > 2)
+        sim_plat.root = argv[2];
     BoxInit(&sim_plat, &eng_);
     BoxStorageReady(false);
     t95.Init(WriteLine);

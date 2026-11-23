@@ -80,7 +80,7 @@ IR_PROFILES = ["all", "selector", "apcbox", "midihub", "clock"]
 UI_ACTIONS = {"play": 2, "stop": 2, "track": 2, "turn": 2, "push": 2, "back": 2,
               "mute": 4, "solo": 4, "knob": 4, "acid": 4, "glob": 4, "tempo": 4, "step": 4, "note": 4,
               "pat": 4, "pcopy": 4, "pclear": 4, "undo": 4, "fx": 4, "rec": 4, "metro": 4, "mon": 4,
-              "type": 4, "lrec": 4, "kit": 4, "audition": 4}
+              "type": 4, "lrec": 4, "kit": 4, "audition": 4, "set": 5}
 UI_ACTION_MAX = 31        # HostCmd::kMaxText on the Daisy is 32
 DAISY_UI = {"play": "play", "stop": "stop", "left": "turn -1", "right": "turn 1",
             "ok": "push", "back": "back", "0": "track 10",
@@ -116,7 +116,7 @@ XFER_TRIES = 8            # sends per chunk before giving up
 UPLOAD_MAX = 64 * 1024 * 1024
 
 # Line types whose second field says which track/slot they describe
-KEYED = {"T", "N", "Q", "A", "KN", "Z"}
+KEYED = {"T", "N", "Q", "A", "KN", "Z", "J", "KL"}
 
 log = logging.getLogger("bridge")
 

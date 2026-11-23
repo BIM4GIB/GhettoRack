@@ -32,7 +32,7 @@ class TestPlat : public Platform
     {
         if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
             xfer_lines.push_back(l);
-        if(strchr("HOZ", l[0]) && l[1] == ' ')
+        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3))
             ui_lines.push_back(l);
     }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
@@ -629,7 +629,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 4 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 5 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -702,7 +702,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 4 03 01 02 1") >= 1);
+        CHECK(T95Count("P 5 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -721,7 +721,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 4 ") >= 1);
+        CHECK(T95Count("P 5 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -926,6 +926,87 @@ int main()
                     n += l[0] == 'Z';
                 CHECK(n == 0);
             }
+            /* Control protocol 5: sets and kits from a page */
+            {
+                auto has = [](const std::string& want) {
+                    for(auto& l : ui_lines)
+                        if(l == want)
+                            return true;
+                    return false;
+                };
+                auto wait_idle = []() {
+                    for(int i = 0; i < 20000 && (set_op || load_phase); i++)
+                        T95Tick(1);
+                    T95Tick(50);
+                };
+                wait_idle();
+                int free0 = FirstFreeSlot();
+                CHECK(free0 >= 0);
+                ui_lines.clear();
+                e.track[4].mute = true;
+                U("tempo 1410");
+                U("set new jam one");
+                wait_idle();
+                CHECK(set_exists[free0] && !strcmp(set_list[free0].name, "jam one"));
+                CHECK(open_set == free0);
+                char want[64];
+                snprintf(want, sizeof(want), "J %d 1 1410 %d %d %d jam one", free0, set_list[free0].samples,
+                         set_list[free0].loops, set_list[free0].synths);
+                if(!has(want))
+                    printf("no line '%s'\n", want);
+                CHECK(has(want));
+                // change things, load it back: as saved
+                e.track[4].mute = false;
+                U("tempo 900");
+                T95Tick(600);
+                CHECK(set_dirty);
+                char cmd[40];
+                snprintf(cmd, sizeof(cmd), "set load %d", free0 + 1);
+                U(cmd);
+                wait_idle();
+                CHECK(e.track[4].mute && fabsf(e.global.bpm - 141.f) < 0.01f);
+                // save over it with a new name, rename, transition
+                snprintf(cmd, sizeof(cmd), "set save %d second-take", free0 + 1);
+                U(cmd);
+                wait_idle();
+                CHECK(!strcmp(set_list[free0].name, "second-take"));
+                snprintf(cmd, sizeof(cmd), "set name %d final!", free0 + 1);   // "!" isn't allowed in a name
+                U(cmd);
+                T95Tick(50);
+                CHECK(!strcmp(set_list[free0].name, "final_"));
+                U("set trans 3");
+                T95Tick(50);
+                CHECK(set_trans == 3 && has("JT 3 ECHO OUT"));
+                U("set trans 9");
+                U("set load 9");
+                U("set explode 1");
+                CHECK(set_trans == 3);
+                snprintf(cmd, sizeof(cmd), "set delete %d", free0 + 1);
+                U(cmd);
+                T95Tick(50);
+                CHECK(!set_exists[free0]);
+                snprintf(want, sizeof(want), "J %d 0", free0);
+                CHECK(has(want));
+                e.track[4].mute = false;
+                U("tempo 1200");
+                U("set trans 1");
+                // every kit by name after a resync, and which kit each track page has
+                ui_lines.clear();
+                BoxResync();
+                T95Tick(100);
+                int kl = 0, kp = 0;
+                for(auto& l : ui_lines)
+                {
+                    kl += !l.compare(0, 3, "KL ");
+                    kp += !l.compare(0, 3, "KP ");
+                }
+                CHECK(kl == num_kits && kp >= 1);
+                U("kit 2 1");
+                wait_idle();
+                T95Tick(3000);
+                CHECK(loaded_kit_pg[1] == 1);
+                printf("t95 sets and kits ok (%d kits)\n", num_kits);
+            }
             SelectTrack(0);
             printf("t95 page controls ok\n");
         }
@@ -946,7 +1027,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 4 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 5 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */

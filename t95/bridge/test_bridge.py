@@ -1560,14 +1560,21 @@ class PageControlTest(unittest.TestCase):
     def setUpClass(cls):
         cls.dir = tempfile.mkdtemp()
         link = os.path.join(cls.dir, "daisy")
-        cls.sim = subprocess.Popen([SIM, link], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.card = os.path.join(cls.dir, "card")         # the Daisy's SD card: sets go here
+        os.makedirs(cls.card)
+        cls.lib = os.path.join(cls.dir, "lib")           # the T95's sample library
+        os.makedirs(os.path.join(cls.lib, "breaks"))
+        make_wav(os.path.join(cls.lib, "a kick.wav"), secs=0.4, hz=60)
+        make_wav(os.path.join(cls.lib, "b tone.wav"), secs=1.0, hz=440)
+        make_wav(os.path.join(cls.lib, "breaks", "loop.wav"), secs=2.0, hz=220)
+        cls.sim = subprocess.Popen([SIM, link, cls.card], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cls.addClassCleanup(cls.sim.kill)
         end = time.time() + 5
         while not os.path.exists(link) and time.time() < end:
             time.sleep(0.05)
         cls.http = free_port()
         cls.proc = subprocess.Popen(
-            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+            [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0", "--library", cls.lib,
              "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--no-midi"],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.addClassCleanup(cls.proc.kill)
@@ -1601,7 +1608,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 4)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 5)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -1660,11 +1667,13 @@ class PageControlTest(unittest.TestCase):
             # the TV, a Mac window, an iPad both ways, an iPhone with Safari's bars showing, a big iPhone
             for name, vp in (("tv", {"width": 1920, "height": 1080}), ("mac", {"width": 1440, "height": 800}),
                              ("ipad", {"width": 1180, "height": 750}), ("ipad-upright", {"width": 820, "height": 1100}),
-                             ("phone", {"width": 390, "height": 664}), ("phone-big", {"width": 430, "height": 740})):
+                             ("phone", {"width": 390, "height": 664}), ("phone-big", {"width": 430, "height": 740}),
+                             ("phone-sideways", {"width": 750, "height": 340}), ("phone-big-sideways", {"width": 932, "height": 400})):
                 pg = b.new_page(viewport=vp)
                 pg.on("pageerror", lambda e: errors.append(str(e)))
                 pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
-                for v in ("perform", "steps", "mixer", "sound", "samples", "patterns", "fx", "system"):
+                for v in ("perform", "steps", "mixer", "sound", "samples", "samples&sm=rec", "samples&sm=kits", "patterns",
+                          "patterns&pt=sets", "fx", "system"):
                     pg.goto(url + "?v=" + v + ("&tv=1" if name == "tv" else ""))
                     pg.wait_for_selector(".tab.on")
                     pg.wait_for_timeout(500)
@@ -1672,11 +1681,14 @@ class PageControlTest(unittest.TestCase):
                     self.assertEqual(size, [vp["width"], vp["height"]], "%s %s scrolls" % (name, v))
                     # every view button and every control is inside the window
                     out = pg.evaluate("""() => { const W = innerWidth, H = innerHeight, bad = [];
-                        for (const e of document.querySelectorAll('.tab, .st, .cell, .bigpad, .pad, .sc, .bs, .tb, .wave')) {
+                        for (const e of document.querySelectorAll('.tab, .st, .cell, .bigpad, .pad, .sc, .bs, .tb, .wave, .li, .setrow, .b, input')) {
                             const r = e.getBoundingClientRect();
                             if (r.width && (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1)) bad.push(e.className); }
                         return [document.querySelectorAll('.tab').length, bad]; }""")
                     self.assertEqual(out, [8, []], "%s %s: something is off the screen" % (name, v))
+                    mode = pg.evaluate("document.body.className")
+                    self.assertEqual("short" in mode, "sideways" in name, "%s got layout '%s'" % (name, mode))
+                    self.assertEqual("phone" in mode, name in ("phone", "phone-big", "ipad-upright"), "%s got layout '%s'" % (name, mode))
                     if shots:
                         pg.screenshot(path=os.path.join(shots, "%s-%s.png" % (name, v)))
                 pg.close()
@@ -1732,6 +1744,103 @@ class PageControlTest(unittest.TestCase):
             self.assertGreater(drawn, 500, "no waveform on the Sound view")
             b.close()
         self.assertEqual(errors, [])
+
+    def test_p6_samples_view_waveforms_preview_send_kits(self):
+        code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))
+        pk = json.loads(body)
+        self.assertAlmostEqual(pk["secs"], 1.0, delta=0.05)
+        self.assertEqual(len(pk["peaks"]), 192)
+        code, ctype, wav = BridgeTest.get("/samples/preview?src=lib&path=" + urllib.parse.quote("b tone.wav"))
+        self.assertEqual((ctype, wav[:4], wav[8:12]), ("audio/wav", b"RIFF", b"WAVE"))
+        for bad in ("nope.wav", "../state.json", "breaks"):
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote(bad))
+            self.assertEqual(e.exception.code, 400, bad)
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch(args=["--autoplay-policy=no-user-gesture-required"])
+            pg = b.new_page(viewport={"width": 390, "height": 664})
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox?v=samples" % self.http)
+            pg.wait_for_selector(".li canvas")
+            names = pg.eval_on_selector_all(".li .nm2", "es => es.map(e => e.textContent)")
+            self.assertEqual(names, ["📁 breaks", "a kick.wav", "b tone.wav"])
+            pg.wait_for_function("""() => { const c = document.querySelectorAll('.li canvas')[1], d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+                let n = 0; for (let i = 1; i < d.length; i += 4) if (d[i] > 100) n++; return n > 200; }""")
+            # hear it on this device: the button lights while it plays
+            pg.locator(".li").nth(2).locator(".b.act").click()
+            pg.wait_for_function("document.querySelectorAll('.li')[2].querySelector('.b.act').classList.contains('on') && pvSrc !== null")
+            # into a folder and back
+            pg.locator(".li.dir").first.click()
+            pg.wait_for_function("document.querySelectorAll('.li .nm2')[1] && document.querySelectorAll('.li .nm2')[1].textContent === 'loop.wav'")
+            pg.locator(".li.dir").first.click()
+            pg.wait_for_function("document.querySelectorAll('.li .nm2').length === 3")
+            # send the tone to track 4: it arrives in the firmware's loader
+            self.do("track 4")
+            pg.wait_for_function("document.querySelector('.hdr .big').textContent.startsWith('4 ')")
+            pg.locator(".li").nth(2).locator("button:text-is('send')").click()
+            pg.wait_for_function("document.querySelector('.msg').textContent.includes('is in track 4')", timeout=20000)
+            self.assertTrue(self.box.wait_for(lambda c: self.last("N 3 ") == "N 3 b_tone.wav", 5), self.last("N 3 "))
+            # kits: put kit 2 on tracks 9-16
+            pg.goto("http://127.0.0.1:%d/apcbox?v=samples&sm=kits" % self.http)
+            pg.wait_for_selector(".li.kit")
+            self.assertGreaterEqual(pg.locator(".li.kit").count(), 2)
+            k0 = self.last("KP ").split()
+            want = "0" if k0[2] != "0" else "1"
+            pg.locator(".li.kit").nth(int(want)).locator("button:text-is('9-16')").click()
+            self.assertTrue(self.box.wait_for(lambda c: self.last("KP ").split()[2] == want, 8), self.last("KP "))
+            pg.wait_for_function("document.querySelectorAll('.li.kit')[%s].querySelectorAll('.b.on').length >= 1" % want)
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("track 1", "type 4 sample")
+
+    def test_p7_sets_from_the_page(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(13) == 1))            # the card is there
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 1440, "height": 800})
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox?v=patterns&pt=sets" % self.http)
+            pg.wait_for_selector(".setrow")
+            self.assertEqual(pg.locator(".setrow.has").count(), 0)
+            self.do("tempo 1410", "mute 6 1")
+            pg.fill("input[type=text]", "Night Jam!")
+            pg.click("button:text-is('SAVE AS NEW')")
+            pg.wait_for_function("document.querySelector('.setrow.has .nm2') && document.querySelector('.setrow.has .nm2').textContent === 'night jam-'", timeout=15000)
+            self.assertTrue(os.path.exists(os.path.join(self.card, "sets", "01", "set.bin")))
+            self.assertEqual(self.last("J 0 ").split(" ", 6)[3], "1410")
+            pg.wait_for_function("document.querySelector('.setrow.open') !== null")
+            # change things, then load the set back: a second tap confirms dropping the changes
+            self.do("tempo 900", "mute 6 0")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(54) == 1 and self.s(5) == 900, 5))
+            pg.locator(".setrow").first.click()
+            pg.click("button:text-is('LOAD')")
+            pg.wait_for_selector("button:text-is('DROP CHANGES? TAP AGAIN')")
+            pg.click("button:text-is('DROP CHANGES? TAP AGAIN')")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(5) == 1410 and self.s(19) & 32 and self.s(55) == 0, 20), self.last("S "))
+            # rename, change the transition, delete (two taps)
+            pg.fill("input[type=text]", "second")
+            pg.click("button:text-is('RENAME')")
+            pg.wait_for_function("document.querySelector('.setrow.has .nm2').textContent === 'second'")
+            t0 = self.last("JT ")
+            pg.click(".hdr .b.act")
+            self.assertTrue(self.box.wait_for(lambda c: self.last("JT ") != t0))
+            pg.click("button:text-is('DELETE')")
+            pg.click("button:text-is('DELETE? TAP AGAIN')")
+            pg.wait_for_function("document.querySelectorAll('.setrow.has').length === 0")
+            self.assertFalse(os.path.exists(os.path.join(self.card, "sets", "01", "set.bin")))
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("tempo 1200", "mute 6 0", "set trans 1")
 
 
 class IrTest(unittest.TestCase):

@@ -248,6 +248,13 @@ class WebMixin:
                 code, out = self.list_samples(params.get("src", "lib"),
                                               urllib.parse.unquote(params.get("path", "")))
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
+            elif path in ("/samples/peaks", "/samples/preview"):
+                wav = path.endswith("preview")
+                code, out = await self.preview(params.get("src", "lib"), urllib.parse.unquote(params.get("path", "")), wav)
+                if code == 200 and wav:
+                    await self.reply(writer, 200, "audio/wav", out)
+                else:
+                    await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/routes":
                 await self.reply(writer, 200, "application/json", json.dumps(self.routes_json(), indent=1).encode() + b"\n")
             elif path == "/state":
