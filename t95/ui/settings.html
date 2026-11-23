@@ -86,6 +86,14 @@ header a{white-space:nowrap}
       <div class="row"><button id="n-prev">◀</button><span id="n-page" class="dim"></span><button id="n-next">▶</button><span class="sp"></span>
         <span class="dim">box name</span><input id="n-host" maxlength="32" autocapitalize="off" spellcheck="false" style="width:170px"><button id="n-host-save">SAVE</button></div>
     </section>
+    <section id="s-hot">
+      <div class="row"><span class="big" id="h-now">?</span><span class="dim mono" id="h-addr"></span><span class="sp"></span><button id="h-toggle" class="act">TURN ON</button></div>
+      <div id="h-banner" class="banner"></div>
+      <div class="row"><span class="dim">password</span><input id="h-psk" type="password" placeholder="8 to 63 characters" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1;min-width:120px">
+        <button id="h-show">show</button><button id="h-save">SAVE</button></div>
+      <div class="row"><button id="h-auto"></button><span class="dim" id="h-auto-text"></span></div>
+      <p id="h-text"></p>
+    </section>
     <section id="s-bt">
       <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-toggle" class="act">TURN ON</button></div>
       <div id="b-banner" class="banner"></div>
@@ -113,12 +121,13 @@ header a{white-space:nowrap}
 const $ = id => document.getElementById(id), el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const Q = new URLSearchParams(location.search), tv = Q.has("tv");
 if (tv) $("back").href = "/?tv=1";
-const TABS = [["net", "Network"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"]];
+const TABS = [["net", "Network"], ["hot", "Hotspot"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"]];
 let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null, trial = null, sure = "", pinOk = false;
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
 
 /* a result (good / bad) goes away by itself after a while, or at a tap; a plain one stays until replaced */
 const btimer = {};
+function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function banner(id, text, cls) {
   const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : "");
   clearTimeout(btimer[id]); b.onclick = () => banner(id, "");
@@ -224,8 +233,8 @@ function draw() {
   $("c-helper").textContent = st ? (h ? "helper: running" : "helper: not running") : "box: not answering"; $("c-helper").className = "chip " + (h ? "ok" : "warn");
   $("c-pin").textContent = !h ? "?" : !st.pin_set ? "no PIN set" : pinOk ? "unlocked" : "locked"; $("c-pin").className = "chip " + (pinOk ? "ok" : "warn");
   if (!st) return;
-  if (!h && !trial) { if (!down) for (const b of ["n-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95."); down = true; }
-  else if (h && down) { down = false; for (const b of ["n-banner", "b-banner", "y-banner"]) if (!trial || b !== "n-banner") banner(b, ""); }
+  if (!h && !trial) { if (!down) for (const b of ["n-banner", "h-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95."); down = true; }
+  else if (h && down) { down = false; for (const b of ["n-banner", "h-banner", "b-banner", "y-banner"]) if (!trial || b !== "n-banner") banner(b, ""); }
   const w = st.wifi || {};
   $("n-now").textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?";
   $("n-ip").textContent = h && w.ip ? w.ip : "";
@@ -235,6 +244,17 @@ function draw() {
   $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
   $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box." :
     "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
+  const hs = st.hotspot || {};
+  $("h-now").textContent = !h ? "?" : hs.on ? "on: " + hs.ssid : "off";
+  $("h-addr").textContent = h && hs.on ? hs.clients + (hs.clients === 1 ? " device on it" : " devices on it") + (hs.by === "itself" ? ", started by itself" : "") : "";
+  $("h-toggle").textContent = sure === "hot" ? "SURE?" : hs.on ? "TURN OFF" : "TURN ON"; $("h-toggle").disabled = !h || (!hs.on && (!hs.set || !hs.tool));
+  $("h-auto").textContent = hs.auto ? "BY ITSELF: ON" : "BY ITSELF: OFF"; $("h-auto").className = hs.auto ? "act" : ""; $("h-auto").disabled = !h;
+  $("h-auto-text").textContent = "starts when the box finds no known Wi-Fi for half a minute";
+  if (document.activeElement !== $("h-psk")) $("h-psk").placeholder = hs.set ? "set (type a new one to change it)" : "8 to 63 characters";
+  $("h-text").innerHTML = !h ? "" : !hs.tool ? "The hotspot needs one small package on the box. On the T95, online: <code>sudo apt install dnsmasq-base</code>, then reload this page." :
+    !hs.set ? "The box's own Wi-Fi network, for where there is none. Set a password first: the box never opens a network without one." :
+    "The box's own Wi-Fi network, for where there is none. On a phone or laptop: join <b>" + esc(hs.ssid) + "</b>, then open <code>https://" + hs.addr + ":8443</code>. No internet over it: a phone keeps its own."
+    + (hs.on ? "" : " Turned on here, the box leaves the Wi-Fi it is on, so this page loses it: join the hotspot to get back. If nobody joins within two minutes the box returns to the Wi-Fi.");
   const br = st.bridge || {};
   kv("y-kv", [["box name", st.hostname || "?"], ["address", w.ip || "?"], ["Wi-Fi", w.ssid || "?"], ["helper", h ? "running" : "not running"], ["page", secure ? "secure" : "plain http: read-only"]]);
   if (document.activeElement !== $("y-auto")) $("y-auto").value = br.autostart_s || 0;
@@ -264,6 +284,17 @@ $("n-show").onclick = () => { const p = $("n-psk"); p.type = p.type === "passwor
 $("n-prev").onclick = () => { npage--; drawNets(); }; $("n-next").onclick = () => { npage++; drawNets(); };
 $("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const o = await sys("hostname", { name: $("n-host").value.trim() }, true);
   banner("n-banner", o.error || "The box is now called " + $("n-host").value.trim() + ". Other devices pick the new name up within a minute.", o.error ? "bad" : "good"); poll(); };
+$("h-show").onclick = () => { const p = $("h-psk"); p.type = p.type === "password" ? "text" : "password"; $("h-show").textContent = p.type === "password" ? "show" : "hide"; };
+$("h-save").onclick = async () => { if (!needPin("h-banner")) return; const psk = $("h-psk").value;
+  if (psk.length < 8 || psk.length > 63) return banner("h-banner", "A hotspot password is 8 to 63 characters.", "bad");
+  const o = await sys("hotspot_set", { psk }, true); banner("h-banner", o.error || "Hotspot password saved." + (st.hotspot && st.hotspot.on ? " It applies the next time the hotspot starts." : ""), o.error ? "bad" : "good");
+  if (!o.error) $("h-psk").value = ""; poll(); };
+$("h-auto").onclick = async () => { if (!needPin("h-banner")) return; const o = await sys("hotspot_set", { auto: !(st.hotspot && st.hotspot.auto) }, true);
+  if (o.error) banner("h-banner", o.error, "bad"); poll(); };
+$("h-toggle").onclick = async () => { if (!needPin("h-banner")) return; const hs = st.hotspot || {}, on = !hs.on;
+  if (on && sure !== "hot") { sure = "hot"; return draw(); }
+  sure = ""; const o = await sys("hotspot", { on }, true);
+  banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting. Join " + hs.ssid + " on this device, then open https://" + hs.addr + ":8443" : "Hotspot off: the box is going back to the Wi-Fi.", o.error && !o.gone ? "bad" : ""); poll(); };
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
   banner("b-banner", on ? "Starting Bluetooth: up to 20 seconds the first time after a restart." : "");
   const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth is starting: the radio takes about ten seconds." : "Bluetooth is off, and stays off after a restart."), o.error ? "bad" : "good"); poll(); };

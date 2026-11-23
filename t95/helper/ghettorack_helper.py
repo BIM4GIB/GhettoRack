@@ -12,6 +12,11 @@ helper over a local socket, and this helper does only what is on its list:
                           had (no lockout). A wrong password is back within
                           seconds
     forget ssid         remove a network this helper added
+    hotspot_set psk auto  the password of the box's own network, and whether
+                          it starts by itself when no known Wi-Fi connects
+    hotspot on|off      the box's own network, for where there is no Wi-Fi:
+                          named like the box, fixed address, no internet.
+                          Started by hand it stops again if nobody joins it
     hostname name       the box's name on the network
     bt on|off           Bluetooth on the UWE5622 (needs the attach tool): the
                           chip attaches once per boot and is never detached;
@@ -52,7 +57,7 @@ import threading
 import time
 
 log = logging.getLogger("helper")
-RISKY = {"join", "forget", "hostname", "bt", "restart_bridge", "reboot", "poweroff"}
+RISKY = {"join", "forget", "hotspot", "hotspot_set", "hostname", "bt", "restart_bridge", "reboot", "poweroff"}
 HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 ATTACH = "/usr/local/bin/hciattach_opi"
@@ -68,6 +73,9 @@ class Helper:
         self.trial = None           # {id, ssid, psk, phase: connecting|connected, deadline}
         self.last = None            # how the last try ended: {ssid, ok, why}
         self.ctl_n = 0
+        self.hot_file = os.path.join(a.state_dir, "hotspot")
+        self.hot = None             # {id, auto, since, seen, idle, scan, proc, clients}
+        self.down_since = None      # since when the Wi-Fi has had no network
         self.fails, self.locked_until = 0, 0.0
 
     # ---- running things ----
@@ -262,8 +270,11 @@ class Helper:
         return {"ok": True, "trial_s": self.a.trial_s, "connect_s": self.a.connect_s}
 
     def back_locked(self, nid):
-        """drop the tried network and let the ones from before connect again"""
+        """drop the tried network and let the ones from before connect again (or the hotspot, if that was up)"""
         self.ctl("REMOVE_NETWORK " + nid)
+        if self.hot:
+            self.ctl("SELECT_NETWORK " + self.hot["id"])
+            return
         self.ctl("ENABLE_NETWORK all")
         self.ctl("REASSOCIATE")
 
@@ -322,6 +333,8 @@ class Helper:
                 self.restore(before)
                 self.fail_locked("it connected but couldn't be saved")
                 return {"error": why}
+            if self.hot:                                                 # joined from the hotspot: that one is done
+                self.hot_clear_locked()
             self.ctl("ENABLE_NETWORK all")                               # the older ones stay as a way back
             self.trial, self.last = None, {"ssid": t["ssid"], "ok": True, "why": ""}
         log.info("new Wi-Fi confirmed: kept")
@@ -349,6 +362,202 @@ class Helper:
                 if name == ssid:
                     self.ctl("REMOVE_NETWORK " + i)
         return {"ok": True}
+
+    # ---- the box's own network ----
+    # Seen by hand on the rig (2026-11-23): the same running wpa_supplicant puts wlan0 into AP
+    # mode (mode=2 network), a phone saw it and passed the WPA2 handshake. Addresses for the
+    # phones come from dnsmasq (DHCP only, no DNS, no route: a phone keeps its own internet).
+    def hot_cfg(self):
+        try:
+            c = json.load(open(self.hot_file))
+            return {"psk": c.get("psk", ""), "auto": bool(c.get("auto", True))}
+        except (OSError, ValueError, AttributeError):
+            return {"psk": "", "auto": True}
+
+    def cmd_hotspot_set(self, d):
+        c = self.hot_cfg()
+        if "psk" in d:
+            psk = d["psk"]
+            if not isinstance(psk, str) or not 8 <= len(psk) <= 63 or any(ord(ch) < 32 or ord(ch) > 126 for ch in psk):
+                return {"error": "a hotspot password is 8 to 63 characters"}
+            c["psk"] = psk
+        if "auto" in d:
+            if not isinstance(d["auto"], bool):
+                return {"error": "auto: true or false"}
+            c["auto"] = d["auto"]
+        tmp = self.hot_file + ".tmp"
+        with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(c, f)
+        os.replace(tmp, self.hot_file)
+        return {"ok": True}
+
+    def hot_why_not(self):
+        if not self.hot_cfg()["psk"]:
+            return "set a hotspot password first: the box never opens a network without one"
+        if not os.path.exists(self.a.dnsmasq):
+            return "the hotspot needs dnsmasq on the box: sudo apt install dnsmasq-base"
+        return None
+
+    def hot_start_locked(self, auto):
+        """None = it is coming up, else why not"""
+        why = self.hot_why_not()
+        if why:
+            return why
+        name = socket.gethostname()
+        nid = self.ctl("ADD_NETWORK")
+        if not nid.isdigit():
+            return "the Wi-Fi isn't answering"
+        key = hashlib.pbkdf2_hmac("sha1", self.hot_cfg()["psk"].encode(), name.encode(), 4096, 32).hex()
+        for k, v in (("ssid", name.encode().hex()), ("mode", "2"), ("frequency", str(self.a.hot_freq)), ("key_mgmt", "WPA-PSK"),
+                     ("proto", "RSN"), ("pairwise", "CCMP"), ("psk", key)):
+            if self.ctl("SET_NETWORK %s %s %s" % (nid, k, v)) != "OK":
+                self.ctl("REMOVE_NETWORK " + nid)
+                return "the Wi-Fi didn't take the hotspot (%s)" % k
+        if self.ctl("SELECT_NETWORK " + nid) != "OK":
+            self.ctl("REMOVE_NETWORK " + nid)
+            self.ctl("ENABLE_NETWORK all")
+            return "the Wi-Fi didn't start the hotspot"
+        now = time.monotonic()
+        self.hot = {"id": nid, "auto": auto, "since": now, "seen": False, "idle": now, "scan": None, "proc": None, "clients": 0}
+        log.info("hotspot up (%s)", "by itself: no known Wi-Fi" if auto else "from Settings")
+        return None
+
+    def hot_clear_locked(self):
+        """take the hotspot's own pieces away; what the Wi-Fi does next is the caller's"""
+        h, self.hot = self.hot, None
+        self.down_since = None
+        self.ctl("REMOVE_NETWORK " + h["id"])
+        if h["proc"] and h["proc"].poll() is None:
+            h["proc"].terminate()
+        self.run(self.a.ip, "addr", "del", self.a.hot_addr + "/24", "dev", self.a.iface)
+
+    def hot_stop_locked(self, why):
+        self.hot_clear_locked()
+        self.ctl("ENABLE_NETWORK all")
+        self.ctl("REASSOCIATE")
+        log.info("hotspot down (%s)", why)
+
+    def hot_clients(self):
+        n, r = 0, self.ctl("STA-FIRST")
+        while r and not r.startswith("FAIL") and n < 32:
+            n += 1
+            r = self.ctl("STA-NEXT " + r.splitlines()[0])
+        return n
+
+    def hot_keep_locked(self, now):
+        """every few seconds while it is up: address, address server, who is on it, the way back"""
+        h = self.hot
+        # the address: put back if the network service took it off when the link came up
+        if (self.a.hot_addr + "/") not in self.run(self.a.ip, "-4", "-o", "addr", "show", "dev", self.a.iface)[1]:
+            self.run(self.a.ip, "addr", "add", self.a.hot_addr + "/24", "dev", self.a.iface)
+        if h["proc"] is None or h["proc"].poll() is not None:
+            base = self.a.hot_addr.rsplit(".", 1)[0]
+            try:
+                h["proc"] = subprocess.Popen(
+                    [self.a.dnsmasq, "--keep-in-foreground", "--conf-file=/dev/null", "--port=0", "--interface=" + self.a.iface,
+                     "--bind-interfaces", "--dhcp-range=%s.10,%s.99,1h" % (base, base), "--dhcp-option=3", "--dhcp-option=6",
+                     "--dhcp-leasefile=" + os.path.join(os.path.dirname(self.a.socket), "hotspot.leases")],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                h["proc"] = None
+        h["clients"] = self.hot_clients()
+        if h["clients"]:
+            h["seen"], h["idle"], h["scan"] = True, now, None
+            return
+        if not h["auto"] and not h["seen"] and now - h["since"] > self.a.hot_trial_s:
+            self.hot_stop_locked("nobody joined it: back to the Wi-Fi")
+            self.last = {"ssid": socket.gethostname(), "ok": False, "why": "nobody joined the hotspot"}
+            return
+        # Nobody on it: look now and then whether a known network is back. Whether this driver
+        # scans while it is an access point is not known (not seen on the rig yet). If it
+        # doesn't, a hotspot that came up by itself steps aside for a moment instead: the
+        # Wi-Fi gets auto_s to find a network, else the hotspot returns.
+        if not h["auto"]:                                     # started by hand: it stays until turned off
+            return
+        if h["scan"] is None and now - h["idle"] > self.a.rescan_s:
+            h["idle"] = now
+            if self.ctl("SCAN") == "OK":
+                h["scan"] = now
+            else:
+                self.hot_stop_locked("looking for a known Wi-Fi")
+        elif h["scan"] is not None and now - h["scan"] > self.a.scan_s:
+            h["scan"] = None
+            known = {name for i, name, _ in self.nets() if i != h["id"]}
+            seen = {l.split("\t")[4] for l in self.ctl("SCAN_RESULTS").splitlines()[1:] if len(l.split("\t")) > 4}
+            if known & seen or not seen:
+                self.hot_stop_locked("a known Wi-Fi is back" if known & seen else "looking for a known Wi-Fi")
+
+    def keeper(self):
+        """the hotspot's housekeeping, and starting it when the box has had no Wi-Fi for a while"""
+        # A hotspot left over from a helper that was restarted: nothing looks after it and
+        # its address server went with that helper. Take it down; if it is still needed it
+        # comes back by itself.
+        with self.lock:
+            left = [i for i, _, _ in self.nets() if self.ctl("GET_NETWORK %s mode" % i) == "2"]
+            for i in left:
+                self.ctl("REMOVE_NETWORK " + i)
+            if left:
+                self.ctl("ENABLE_NETWORK all")
+                self.ctl("REASSOCIATE")
+                self.run(self.a.ip, "addr", "del", self.a.hot_addr + "/24", "dev", self.a.iface)
+                log.info("took down a hotspot left over from before")
+        while True:
+            time.sleep(self.a.keep_s)
+            try:
+                with self.lock:
+                    now = time.monotonic()
+                    if self.trial:
+                        self.down_since = None
+                    elif self.hot:
+                        self.hot_keep_locked(now)
+                    else:
+                        st = dict(l.split("=", 1) for l in self.ctl("STATUS").splitlines() if "=" in l)
+                        if not st or st.get("wpa_state") == "COMPLETED" or not self.hot_cfg()["auto"] or self.hot_why_not():
+                            self.down_since = None
+                        elif self.down_since is None:
+                            self.down_since = now
+                        elif now - self.down_since > self.a.auto_s:
+                            self.down_since = None
+                            self.hot_start_locked(True)
+            except Exception as e:                             # must not die: it is the way back
+                log.error("keeper: %s", type(e).__name__)
+
+    def cmd_hotspot(self, d):
+        on = d.get("on")
+        if not isinstance(on, bool):
+            return {"error": "on: true or false"}
+        with self.lock:
+            if self.trial:
+                return {"error": "a network is being tried: wait for it"}
+            if not on:
+                if self.hot:
+                    threading.Timer(self.a.select_s, self.hot_off_later).start()
+                return {"ok": True}
+            if self.hot:
+                return {"ok": True}
+            why = self.hot_why_not()
+            if why:
+                return {"error": why}
+        threading.Timer(self.a.select_s, self.hot_on_later).start()      # the answer first: the box leaves the Wi-Fi for it
+        return {"ok": True, "ssid": socket.gethostname(), "addr": self.a.hot_addr, "trial_s": self.a.hot_trial_s}
+
+    def hot_on_later(self):
+        with self.lock:
+            if not self.hot and not self.trial:
+                why = self.hot_start_locked(False)
+                if why:
+                    self.last = {"ssid": socket.gethostname(), "ok": False, "why": why}
+
+    def hot_off_later(self):
+        with self.lock:
+            if self.hot and not self.trial:
+                self.hot_stop_locked("turned off in Settings")
+
+    def hot_status(self):
+        c, h = self.hot_cfg(), self.hot
+        return {"set": bool(c["psk"]), "auto": c["auto"], "tool": os.path.exists(self.a.dnsmasq), "on": bool(h),
+                "by": ("itself" if h["auto"] else "hand") if h else "", "clients": h["clients"] if h else 0,
+                "ssid": socket.gethostname(), "addr": self.a.hot_addr}
 
     # ---- the rest ----
     def cmd_hostname(self, d):
@@ -452,9 +661,10 @@ class Helper:
             left = max(0, int(t["deadline"] - time.monotonic()) + 1) if t else 0
             trial = {"ssid": t["ssid"], "phase": t["phase"], "left_s": left} if t else None
             last = self.last
+            hot = self.hot_status()
         return {"ok": True, "wifi": {"ssid": ssid, "state": state, "ip": ip, "iface": self.a.iface},
                 "saved": sorted(self.saved()), "hostname": socket.gethostname(),
-                "trial": trial, "last": last, "pin_set": self.pin_set_p(), "bt": self.bt()}
+                "trial": trial, "last": last, "hotspot": hot, "pin_set": self.pin_set_p(), "bt": self.bt()}
 
     def handle(self, d):
         cmd = d.get("cmd") if isinstance(d, dict) else None
@@ -474,6 +684,7 @@ class Helper:
 
 def serve(a):
     h = Helper(a)
+    threading.Thread(target=h.keeper, daemon=True).start()
     os.makedirs(a.state_dir, mode=0o700, exist_ok=True)
     try:
         os.unlink(a.socket)
@@ -519,6 +730,12 @@ def main():
     ap.add_argument("--connect-s", type=float, default=25, help="time the box gets to connect to it")
     ap.add_argument("--watch-s", type=float, default=0.5)
     ap.add_argument("--select-s", type=float, default=1.0, help="pause between answering 'join' and leaving the current network")
+    ap.add_argument("--hot-addr", default="10.42.0.1", help="the box's address on its own network")
+    ap.add_argument("--hot-freq", type=int, default=2437, help="channel 6: 2.4 GHz reaches every phone")
+    ap.add_argument("--auto-s", type=float, default=30, help="no Wi-Fi for this long: the hotspot starts by itself")
+    ap.add_argument("--hot-trial-s", type=float, default=120, help="started by hand and nobody joins: back to the Wi-Fi")
+    ap.add_argument("--rescan-s", type=float, default=120)
+    ap.add_argument("--keep-s", type=float, default=2)
     ap.add_argument("--wpa-ctrl", default="/run/wpa_supplicant", help="directory of wpa_supplicant's control sockets")
     ap.add_argument("--scan-s", type=float, default=3)
     ap.add_argument("--lock-s", type=float, default=60)
@@ -527,7 +744,8 @@ def main():
     ap.add_argument("--bt-class-dir", default="/sys/class/bluetooth")
     ap.add_argument("--bt-wait-s", type=float, default=20)
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
-                       ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl")):
+                       ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl"),
+                       ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq")):
         ap.add_argument("--" + tool, default=path)
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

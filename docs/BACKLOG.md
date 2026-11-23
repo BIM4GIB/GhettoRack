@@ -93,8 +93,8 @@ them one on the map (REC still arms a loop).
   join as a trial that goes back by itself (seconds on a wrong password), forget, box name; Bluetooth
   on/off (needs `sudo t95/helper/get-bt-tool.sh` once); restart bridge,
   reboot, shut down, start-up delay; a PIN for everything that changes the
-  box; devices (Daisy, controllers). Still to build: the box's own hotspot
-  when no known Wi-Fi is around (agreed: automatic), Bluetooth pairing and
+  box; devices (Daisy, controllers). The box's own hotspot when no known
+  Wi-Fi is around is built (2026-11-23), not yet run on the T95. Still to build: Bluetooth pairing and
   Bluetooth MIDI, sound cards and SD cards under Devices, the remote's
   buttons moved over from the start screen, TV remote navigation on the page.
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),

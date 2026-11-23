@@ -25,6 +25,10 @@ case "$(basename "$0") $*" in
      printf 'b\\t5180\\t-70\\t[WPA2-PSK-CCMP][ESS]\\tHome Net\\n'
      printf 'c\\t2437\\t-81\\t[ESS]\\tCafe Open\\n'
      printf 'd\\t2437\\t-60\\t[WPA2-PSK-CCMP][ESS]\\t\\n' ;;
+  "ip addr add "*) touch "$FAKEDIR/hot-addr" ;;
+  "ip addr del "*) rm -f "$FAKEDIR/hot-addr" ;;
+  "ip -4 -o addr show dev wlan0") [ -f "$FAKEDIR/hot-addr" ] && echo "3: wlan0 inet 10.42.0.1/24 scope global wlan0" ;;
+  "dnsmasq "*) echo $$ > "$FAKEDIR/dnsmasq.pid"; exec sleep 600 ;;
   "netplan generate") [ -f "$FAKEDIR/netplan-broken" ] && { echo "bad yaml"; exit 1; } ;;
   "systemctl start --no-block ghettorack-bluetooth.service") [ -f "$FAKEDIR/chip-dead" ] || mkdir -p "$FAKEDIR/btclass/hci0" ;;
   "bluetoothctl show") printf 'Controller XX:XX:XX:XX:XX:XX (public)\\n\\tPowered: yes\\n' ;;
@@ -45,6 +49,7 @@ class FakeWpa(threading.Thread):
         self.mode, self.log = "ok", []
         self.nets = {"0": {"ssid": "Home Net", "off": False}}
         self.cur, self.next = "0", 1
+        self.clients, self.air, self.ap_scan = [], None, True     # phones on the hotspot; networks in the air (None: any); scans as an AP
         self.start()
 
     def flags(self, i):
@@ -56,9 +61,9 @@ class FakeWpa(threading.Thread):
         return "[DISABLED]" if n["off"] else ""
 
     def settle(self):
-        """connect to what is allowed, as the real one would"""
+        """connect to what is allowed (and in the air), as the real one would"""
         for i, n in self.nets.items():
-            if not n["off"] and not n.get("wrong") and not n.get("never"):
+            if not n["off"] and not n.get("wrong") and not n.get("never") and (n.get("mode") == "2" or self.air is None or n["ssid"] in self.air):
                 self.cur = i
                 return
         self.cur = None
@@ -72,11 +77,13 @@ class FakeWpa(threading.Thread):
         if w[0] == "SET_NETWORK" and w[1] in self.nets:
             if w[2] == "ssid":
                 self.nets[w[1]]["ssid"] = bytes.fromhex(w[3]).decode()
+            self.nets[w[1]][w[2]] = w[3] if w[2] != "ssid" else self.nets[w[1]]["ssid"]
             return "OK"
         if w[0] == "SELECT_NETWORK" and w[1] in self.nets:
             for i, n in self.nets.items():
                 n["off"] = i != w[1]
-            self.nets[w[1]]["wrong"], self.nets[w[1]]["never"] = self.mode == "wrong", self.mode == "never"
+            ap = self.nets[w[1]].get("mode") == "2"
+            self.nets[w[1]]["wrong"], self.nets[w[1]]["never"] = self.mode == "wrong" and not ap, self.mode == "never" and not ap
             self.settle()
             return "OK"
         if w[0] == "REMOVE_NETWORK" and w[1] in self.nets:
@@ -95,6 +102,17 @@ class FakeWpa(threading.Thread):
             if self.cur is None:
                 return "wpa_state=SCANNING"
             return "id=%s\nssid=%s\nwpa_state=COMPLETED" % (self.cur, self.nets[self.cur]["ssid"])
+        if w[0] == "GET_NETWORK" and w[1] in self.nets:
+            return self.nets[w[1]].get(w[2], "FAIL")
+        if c == "STA-FIRST":
+            return self.clients[0] if self.clients else ""
+        if w[0] == "STA-NEXT":
+            i = self.clients.index(w[1]) + 1 if w[1] in self.clients else len(self.clients)
+            return self.clients[i] if i < len(self.clients) else ""
+        if c == "SCAN":
+            return "OK" if self.ap_scan or not self.ap() else "FAIL-BUSY"
+        if c == "SCAN_RESULTS":
+            return "bssid / frequency / signal level / flags / ssid\n" + "\n".join("a\t2412\t-50\t[ESS]\t" + n for n in (self.air or ["Home Net"]))
         if c == "LIST_NETWORKS":
             return "network id / ssid / bssid / flags\n" + "\n".join(
                 "%s\t%s\tany\t%s" % (i, n["ssid"], self.flags(i)) for i, n in self.nets.items())
@@ -106,6 +124,11 @@ class FakeWpa(threading.Thread):
             c = data.decode()
             self.log.append(c)
             self.s.sendto(self.answer(c).encode(), addr)
+
+    def ap(self):
+        """the hotspot network, if that is what the radio is doing"""
+        n = self.nets.get(self.cur) if self.cur else None
+        return n if n and n.get("mode") == "2" else None
 
     def names(self):
         return sorted(n["ssid"] for n in self.nets.values())
@@ -121,7 +144,7 @@ class HelperTest(unittest.TestCase):
         os.makedirs(cls.netplan)
         open(os.path.join(cls.netplan, "30-t95-wifi.yaml"), "w").write("# from the install: never touched\n")
         tools = {}
-        for t in ("wpa_cli", "netplan", "hostnamectl", "systemctl", "bluetoothctl"):
+        for t in ("wpa_cli", "netplan", "hostnamectl", "systemctl", "bluetoothctl", "ip", "dnsmasq"):
             p = os.path.join(cls.bin, t)
             open(p, "w").write(FAKE)
             os.chmod(p, 0o755)
@@ -134,11 +157,14 @@ class HelperTest(unittest.TestCase):
         cls.sock = os.path.join(cls.dir, "h.sock")
         cls.attach = os.path.join(cls.dir, "hciattach_opi")
         cls.wpa = FakeWpa(os.path.join(cls.dir, "wpa"))
+        cls.wpa.nets["7"] = {"ssid": "left over", "off": False, "mode": "2"}                             # a hotspot from a helper that died
+        cls.wpa.next = 8
         env = dict(os.environ, FAKELOG=cls.log, FAKEDIR=cls.dir)
         cls.proc = subprocess.Popen(
             [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
              "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--select-s", "0.05", "--connect-s", "1.5", "--watch-s", "0.05",
-             "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
+             "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"],
+             "--keep-s", "0.05", "--auto-s", "0.6", "--hot-trial-s", "1.2", "--rescan-s", "0.5", "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
              "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
              "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
@@ -176,6 +202,7 @@ class HelperTest(unittest.TestCase):
         return os.path.join(self.netplan, "40-ghettorack-wifi.yaml")
 
     def test_1_status_scan_need_no_pin(self):
+        self.assertEqual(self.wpa.names(), ["Home Net"])                                               # the left-over hotspot is gone
         st = self.ask(cmd="status")
         self.assertEqual(st["wifi"], {"ssid": "Home Net", "state": "COMPLETED", "ip": "198.51.100.7", "iface": "wlan0"})
         self.assertEqual((st["saved"], st["trial"], st["last"], st["pin_set"]), ([], None, None, False))
@@ -333,6 +360,102 @@ class HelperTest(unittest.TestCase):
         self.assertIn("systemctl restart apcbox-bridge.service", self.calls())
         self.assertEqual(self.ask(cmd="poweroff")["error"], "wrong PIN")
         self.assertNotIn("systemctl poweroff", self.calls())
+
+    def test_45_hotspot(self):
+        P, w = "4711", self.wpa
+        key = "rack rack 99"
+
+        def hot():
+            return self.ask(cmd="status")["hotspot"]
+
+        def until(f, t=4):
+            end = time.time() + t
+            while not f() and time.time() < end:
+                time.sleep(0.05)
+            self.assertTrue(f())
+        name = socket.gethostname()
+        self.assertEqual(hot(), {"set": False, "auto": True, "tool": True, "on": False, "by": "", "clients": 0, "ssid": name, "addr": "10.42.0.1"})
+        # no password: no hotspot, by hand or by itself (never an open one)
+        self.assertIn("PIN", self.ask(cmd="hotspot", on=True)["error"])
+        self.assertIn("password first", self.ask(cmd="hotspot", pin=P, on=True)["error"])
+        w.air = []
+        w.settle()
+        time.sleep(1.2)
+        self.assertIsNone(w.ap())
+        w.air = ["Home Net"]
+        w.settle()
+        self.assertIn("8 to 63", self.ask(cmd="hotspot_set", pin=P, psk="short")["error"])
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, psk=key, auto=False), {"ok": True})
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.dir, "state", "hotspot")).st_mode), 0o600)
+        self.assertEqual((hot()["set"], hot()["auto"]), (True, False))
+        # by hand: WPA2 only, named like the box, an address, an address server; nobody joins: back to the Wi-Fi
+        r = self.ask(cmd="hotspot", pin=P, on=True)
+        self.assertEqual((r["ok"], r["ssid"], r["addr"]), (True, name, "10.42.0.1"))
+        until(lambda: w.ap() and os.path.exists(os.path.join(self.dir, "hot-addr")) and os.path.exists(os.path.join(self.dir, "dnsmasq.pid")))
+        ap = w.ap()
+        self.assertEqual((ap["ssid"], ap["key_mgmt"], ap["proto"], ap["pairwise"], ap["frequency"]), (name, "WPA-PSK", "RSN", "CCMP", "2437"))
+        self.assertEqual(hot()["by"], "hand")
+        d = [c for c in self.calls() if c.startswith("dnsmasq ")][-1]
+        self.assertIn("--port=0", d)                                                                  # addresses only
+        self.assertIn("--dhcp-range=10.42.0.10,10.42.0.99,1h", d)
+        until(lambda: not w.ap() and w.cur == "0")
+        self.assertEqual((hot()["on"], w.names(), os.path.exists(os.path.join(self.dir, "hot-addr"))), (False, ["Home Net"], False))
+        self.assertIn("nobody joined", self.ask(cmd="status")["last"]["why"])
+        # by hand and somebody joins: it stays, also after they leave; off in Settings ends it
+        self.ask(cmd="hotspot", pin=P, on=True)
+        until(lambda: w.ap())
+        w.clients = ["XX:XX:XX:XX:XX:01", "XX:XX:XX:XX:XX:02"]
+        until(lambda: hot()["clients"] == 2)
+        time.sleep(1.5)
+        self.assertTrue(w.ap())
+        w.clients = []
+        time.sleep(1.5)
+        self.assertTrue(w.ap())
+        # a join from the hotspot that fails brings the hotspot back; one that works ends it
+        w.mode = "wrong"
+        self.assertTrue(self.join("Venue", "12345678")["ok"])
+        until(lambda: self.ask(cmd="status")["last"] is not None)
+        self.assertTrue(w.ap())
+        self.assertTrue(hot()["on"])
+        w.mode, w.air = "ok", ["Home Net", "Venue"]
+        self.assertTrue(self.join("Venue", "12345678")["ok"])
+        until(lambda: (self.ask(cmd="status")["trial"] or {}).get("phase") == "connected")
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": True})
+        self.assertEqual((hot()["on"], w.names(), os.path.exists(os.path.join(self.dir, "hot-addr"))), (False, ["Home Net", "Venue"], False))
+        self.assertEqual(self.ask(cmd="forget", pin=P, ssid="Venue"), {"ok": True})
+        self.assertEqual(self.ask(cmd="hotspot", pin=P, on=True)["ok"], True)
+        until(lambda: w.ap())
+        self.assertEqual(self.ask(cmd="hotspot", pin=P, on=False), {"ok": True})
+        until(lambda: not w.ap() and not hot()["on"])
+        # by itself: no known Wi-Fi for a while brings it up; a known one back in the air takes it down
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, auto=True), {"ok": True})
+        time.sleep(1.0)
+        self.assertIsNone(w.ap())                                                                     # there is Wi-Fi: no hotspot
+        w.air = []
+        w.settle()
+        until(lambda: w.ap())
+        self.assertEqual(hot()["by"], "itself")
+        w.clients = ["XX:XX:XX:XX:XX:01"]
+        w.air = ["Home Net"]
+        time.sleep(1.5)
+        self.assertTrue(w.ap())                                                                       # somebody is on it: it stays
+        w.clients = []
+        until(lambda: not w.ap() and w.cur is not None)
+        self.assertFalse(hot()["on"])
+        # a driver that can't scan as an access point: the hotspot steps aside, finds no Wi-Fi, returns
+        w.ap_scan, w.air = False, []
+        w.settle()
+        until(lambda: w.ap())
+        until(lambda: not w.ap())
+        until(lambda: w.ap())
+        w.air = ["Home Net"]
+        until(lambda: not w.ap() and w.cur is not None)
+        w.ap_scan = True
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, auto=False), {"ok": True})
+        w.air = None
+        # the password never reaches the log, a command line or the Wi-Fi's control socket
+        for text in (open(os.path.join(self.dir, "helper.log")).read(), "\n".join(self.calls()), "\n".join(w.log)):
+            self.assertNotIn(key, text)
 
     def test_5_garbage_on_the_socket(self):
         s = socket.socket(socket.AF_UNIX)

@@ -2814,7 +2814,7 @@ class SettingsTest(unittest.TestCase):
         cls.netplan = os.path.join(cls.dir, "netplan")
         os.makedirs(cls.netplan)
         tools = {}
-        for t in ("wpa_cli", "netplan", "hostnamectl", "systemctl", "bluetoothctl"):
+        for t in ("wpa_cli", "netplan", "hostnamectl", "systemctl", "bluetoothctl", "ip", "dnsmasq"):
             os.makedirs(os.path.join(cls.dir, "bin"), exist_ok=True)
             tools[t] = os.path.join(cls.dir, "bin", t)
             with open(tools[t], "w") as f:
@@ -2826,7 +2826,7 @@ class SettingsTest(unittest.TestCase):
         cls.helper = subprocess.Popen(
             [sys.executable, os.path.join(REPO, "t95", "helper", "ghettorack_helper.py"), "--socket", cls.sock,
              "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--select-s", "0.05", "--connect-s", "6", "--scan-s", "0.05",
-             "--wpa-ctrl", os.path.join(cls.dir, "wpa"),
+             "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"], "--keep-s", "0.1",
              "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
              "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],
              "--bluetoothctl", tools["bluetoothctl"]],
@@ -2903,7 +2903,7 @@ class SettingsTest(unittest.TestCase):
             for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
                 pg = b.new_page(viewport={"width": w_, "height": h_})
                 pg.on("pageerror", lambda e: errors.append(str(e)))
-                for s_ in ("net", "bt", "sys", "dev"):
+                for s_ in ("net", "hot", "bt", "sys", "dev"):
                     pg.goto(url + "?s=" + s_)
                     pg.wait_for_function("document.getElementById('c-helper').textContent === 'helper: running'")
                     self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"),
@@ -2957,6 +2957,35 @@ class SettingsTest(unittest.TestCase):
                 pg.wait_for_function("document.getElementById('n-banner').textContent === 'Forgot Cafe Open.'")
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 self.assertEqual(self.wpa.names(), ["Home Net"])
+                # Hotspot: no password, no hotspot; with one it asks twice, comes up named like the box, and goes off again
+                pg.click("nav button:has-text('Hotspot')")
+                name = socket.gethostname()
+                if not self.state()["hotspot"]["set"]:
+                    pg.wait_for_function("document.getElementById('h-text').textContent.includes('Set a password first')")
+                    self.assertTrue(pg.locator("#h-toggle").is_disabled())
+                    pg.fill("#h-psk", "short")
+                    pg.click("#h-save")
+                    pg.wait_for_function("document.getElementById('h-banner').textContent.includes('8 to 63')")
+                    pg.fill("#h-psk", "rack rack 99")
+                    pg.click("#h-save")
+                    pg.wait_for_function("document.getElementById('h-banner').textContent === 'Hotspot password saved.'")
+                pg.wait_for_function("document.getElementById('h-text').textContent.includes('https://10.42.0.1:8443')")
+                self.assertIn(name, pg.inner_text("#h-text"))
+                pg.wait_for_function("!document.getElementById('h-toggle').disabled")
+                pg.click("#h-toggle")
+                pg.wait_for_function("document.getElementById('h-toggle').textContent === 'SURE?'")
+                self.assertIsNone(self.wpa.ap())
+                pg.click("#h-toggle")
+                pg.wait_for_function("document.getElementById('h-now').textContent === 'on: %s'" % name, timeout=8000)
+                self.assertEqual(self.wpa.ap()["ssid"], name)
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"),
+                                 [False, False], (w_, h_, "hot on"))
+                if (w_, h_) in ((1920, 1080), (390, 664)):
+                    pg.screenshot(path=os.path.join(self.dir, "settings-hotspot-%d.png" % w_))
+                    print("shot:", os.path.join(self.dir, "settings-hotspot-%d.png" % w_))
+                pg.click("#h-toggle")
+                pg.wait_for_function("document.getElementById('h-now').textContent === 'off'", timeout=8000)
+                self.assertIsNone(self.wpa.ap())
                 # Bluetooth: not set up, said how; System: reboot asks twice
                 pg.click("nav button:has-text('Bluetooth')")
                 pg.wait_for_function("document.getElementById('b-text').textContent.includes('get-bt-tool.sh')")

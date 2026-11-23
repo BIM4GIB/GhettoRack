@@ -168,7 +168,7 @@ class WebMixin:
 
     # ---- Settings: the bridge has no rights; it asks the helper (t95/helper) ----
     SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "restart_bridge", "reboot", "poweroff",
-                "pin_set", "pin_check"}
+                "pin_set", "pin_check", "hotspot", "hotspot_set"}
 
     def helper_ask(self, d, timeout=75):
         """One request to the settings helper. Blocking: call it from an executor"""

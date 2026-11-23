@@ -48,6 +48,9 @@ install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
 getent group ghettorack >/dev/null || groupadd --system ghettorack
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
 install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
+# The box's own hotspot hands out addresses with dnsmasq (the program only: dnsmasq-base
+# installs no service). Without it Settings says what is missing.
+[ -x /usr/sbin/dnsmasq ] || apt-get install -y --no-install-recommends dnsmasq-base || echo "note: no dnsmasq; the hotspot stays off until 'sudo apt install dnsmasq-base' works"
 install -m 644 "$REPO/t95/helper/ghettorack-helper.service" /etc/systemd/system/ghettorack-helper.service
 install -m 644 "$REPO/t95/helper/ghettorack-bluetooth.service" /etc/systemd/system/ghettorack-bluetooth.service
 # Ableton Link for the clock module (optional): a venv that also sees the system
