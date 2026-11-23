@@ -9,9 +9,27 @@ const DIV = ["1/16", "1/8", "1/8 dot", "1/4", "1/4 dot", "1/2"];
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const Q = new URLSearchParams(location.search);
 const tv = Q.has("tv");
-const phoneMq = matchMedia("(max-width: 700px)");
-let PHONE = phoneMq.matches;
-document.body.classList.toggle("phone", PHONE);
+/* One layout drawn for a 1920 px wide screen (TV, Mac, iPad on its side) and one
+   for a 390 px wide phone held upright (also an iPad held upright). Whichever
+   fits is scaled to the window, so nothing is ever cut off and the view bar is
+   always on screen. The height comes from the visible area, which on iOS is
+   smaller than "100vh" while Safari's bars show. */
+const WIDE_W = 1920, WIDE_MIN_H = 900, TALL_W = 390, TALL_MIN_H = 700;
+let PHONE = false, SCALE = 1;
+function fit() {
+  const vv = window.visualViewport, w = Math.round(vv ? vv.width : innerWidth), h = Math.round(vv ? vv.height : innerHeight);
+  const tall = h > w * 1.1;
+  let s = w / (tall ? TALL_W : WIDE_W);
+  if (h / s < (tall ? TALL_MIN_H : WIDE_MIN_H)) s = h / (tall ? TALL_MIN_H : WIDE_MIN_H);
+  const app = document.querySelector(".app");
+  app.style.width = (w / s) + "px"; app.style.height = (h / s) + "px"; app.style.transform = "scale(" + s + ")";
+  SCALE = s;
+  const was = PHONE;
+  PHONE = tall;
+  document.body.classList.toggle("phone", PHONE);
+  return was !== PHONE;
+}
+fit();
 document.body.classList.toggle("tv", tv);
 
 /* ---------- state, from the Daisy ---------- */
@@ -109,7 +127,7 @@ function Pot(o) {
   function change(v) { v = Math.max(0, Math.min(127, Math.round(v))); if (v === val) return; set(v); o.onChange(v); }
   let drag = null;
   svg.addEventListener("pointerdown", e => { drag = { y: e.clientY, v: val }; svg.setPointerCapture(e.pointerId); svg.focus(); e.preventDefault(); });
-  svg.addEventListener("pointermove", e => { if (drag) change(drag.v + (drag.y - e.clientY) * (e.shiftKey ? 0.2 : 0.8)); });
+  svg.addEventListener("pointermove", e => { if (drag) change(drag.v + (drag.y - e.clientY) / Math.max(0.5, SCALE) * (e.shiftKey ? 0.2 : 0.8)); });
   const end = () => { drag = null; };
   svg.addEventListener("pointerup", end); svg.addEventListener("pointercancel", end);
   svg.addEventListener("dblclick", () => { if (o.reset !== undefined) change(o.reset); });
@@ -141,7 +159,7 @@ function Fader(onChange) {
   f.appendChild(m1.el); f.appendChild(slot); f.appendChild(m2.el); f.appendChild(cap);
   let val = -1, drag = false;
   function set(v) { if (v === val) return; val = v; cap.style.top = ((1 - v / 127) * 88) + "%"; }
-  function at(e) { const r = f.getBoundingClientRect(); const v = Math.max(0, Math.min(127, Math.round((1 - (e.clientY - r.top - 9) / (r.height - 18)) * 127))); if (v !== val) { set(v); onChange(v); } }
+  function at(e) { const r = f.getBoundingClientRect(); const v = Math.max(0, Math.min(127, Math.round((1 - (e.clientY - r.top - 9 * SCALE) / (r.height - 18 * SCALE)) * 127))); if (v !== val) { set(v); onChange(v); } }
   f.addEventListener("pointerdown", e => { drag = true; f.setPointerCapture(e.pointerId); at(e); e.preventDefault(); });
   f.addEventListener("pointermove", e => { if (drag) at(e); });
   const end = () => { drag = false; };
@@ -619,7 +637,7 @@ V.system = {
 const TABS = [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
 function buildTabs() {
   const tb = document.getElementById("tabs"); tb.textContent = "";
-  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === curName ? " on" : "")); if (!PHONE) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(PHONE ? t[2] : t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
+  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === curName ? " on" : "")); if (!PHONE) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
   if (!PHONE) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
 }
 function show(name) {
@@ -689,8 +707,11 @@ document.addEventListener("keydown", e => {
   else if (e.key === " ") { act(st.playing ? "stop" : "play"); e.preventDefault(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowRight") { remote(e.key === "ArrowLeft" ? "left" : "right"); e.preventDefault(); }
 });
-phoneMq.addEventListener("change", () => { PHONE = phoneMq.matches; document.body.classList.toggle("phone", PHONE); buildTop(); show(curName); });
-window.addEventListener("resize", () => { if (cur && cur.Z) cur.Z(); });
+function refit() { if (fit()) { buildTop(); show(curName); } else if (cur && cur.Z) cur.Z(); }
+window.addEventListener("resize", refit);
+window.addEventListener("orientationchange", () => setTimeout(refit, 200));
+if (window.visualViewport) visualViewport.addEventListener("resize", refit);
+document.addEventListener("gesturestart", e => e.preventDefault());   /* iOS: no pinch zoom over the controls */
 
 buildTop();
 let start = Q.get("v"); try { start = start || localStorage.getItem("apcbox-view"); } catch (e) { }

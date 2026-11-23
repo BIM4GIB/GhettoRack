@@ -1657,7 +1657,10 @@ class PageControlTest(unittest.TestCase):
         with sync_playwright() as pw:
             b = pw.chromium.launch()
             errors = []
-            for name, vp in (("tv", {"width": 1920, "height": 1080}), ("phone", {"width": 390, "height": 844})):
+            # the TV, a Mac window, an iPad both ways, an iPhone with Safari's bars showing, a big iPhone
+            for name, vp in (("tv", {"width": 1920, "height": 1080}), ("mac", {"width": 1440, "height": 800}),
+                             ("ipad", {"width": 1180, "height": 750}), ("ipad-upright", {"width": 820, "height": 1100}),
+                             ("phone", {"width": 390, "height": 664}), ("phone-big", {"width": 430, "height": 740})):
                 pg = b.new_page(viewport=vp)
                 pg.on("pageerror", lambda e: errors.append(str(e)))
                 pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -1667,6 +1670,13 @@ class PageControlTest(unittest.TestCase):
                     pg.wait_for_timeout(500)
                     size = pg.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight]")
                     self.assertEqual(size, [vp["width"], vp["height"]], "%s %s scrolls" % (name, v))
+                    # every view button and every control is inside the window
+                    out = pg.evaluate("""() => { const W = innerWidth, H = innerHeight, bad = [];
+                        for (const e of document.querySelectorAll('.tab, .st, .cell, .bigpad, .pad, .sc, .bs, .tb, .wave')) {
+                            const r = e.getBoundingClientRect();
+                            if (r.width && (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1)) bad.push(e.className); }
+                        return [document.querySelectorAll('.tab').length, bad]; }""")
+                    self.assertEqual(out, [8, []], "%s %s: something is off the screen" % (name, v))
                     if shots:
                         pg.screenshot(path=os.path.join(shots, "%s-%s.png" % (name, v)))
                 pg.close()

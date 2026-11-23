@@ -209,3 +209,18 @@ body.phone .leds{gap:8px;margin-left:auto}
 body.phone .led{font-size:10px}
 body.phone .top .r2 .big{font-size:15px}
 
+
+/* ---- any screen: the app is absolutely sized and scaled by fit() in apcbox.js ---- */
+html,body{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;touch-action:manipulation;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-text-size-adjust:100%}
+.app{position:absolute;left:0;top:0;height:auto;transform-origin:0 0}
+body.phone .app{grid-template-rows:92px minmax(0,1fr) 58px}
+.app{grid-template-rows:64px minmax(0,1fr) 60px}
+#view{min-height:0;min-width:0;overflow:hidden}
+/* the view bar reads as buttons: this is how you get around */
+.tabs{gap:10px}
+button.tab{border:1px solid #3a3f45;background:#1d2024;color:#c3c8cd;height:44px;font-size:16px;font-weight:600}
+button.tab.on{color:#0b0c0d;background:var(--green);border-color:var(--green);box-shadow:0 0 14px #35d05a88}
+button.tab.on kbd{border-color:#0b0c0d55;color:#0b0c0d}
+body.phone .tabs{gap:3px;padding:0 4px}
+body.phone button.tab{font-size:10px;font-weight:700;height:44px;padding:0 1px;letter-spacing:-.01em}
