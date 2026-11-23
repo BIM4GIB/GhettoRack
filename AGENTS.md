@@ -30,7 +30,8 @@ daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: 
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
             remote, router, network MIDI), ui/ (selector, MIDI hub, clock, the
             ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen),
-            kiosk/ (Chromium on HDMI)
+            kiosk/ (Chromium on HDMI), helper/ (the root helper behind the Settings
+            page: Wi-Fi, name, Bluetooth, reboot; its README says what it may do)
 protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
             flash-seed.sh (flash one chosen Seed; macOS and Linux)
@@ -106,6 +107,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   transfers must not block MIDI forwarding or the Daisy audio callback.
   Apply real-time scheduling only to measured, bounded timing work, not the
   web server, filesystem operations or logging. Measure latency and jitter.
+- Anything needing root on the T95 goes through `t95/helper/ghettorack_helper.py`
+  (a fixed list of commands, PIN for whatever changes the box), never by giving
+  the bridge rights. A network change must be a trial that goes back by itself.
 - Keep bootable recovery media and board-specific DTB/firmware changes intact.
   Re-identify disks before a write; device numbers in docs are observations,
   not portable install targets. Do not include destructive commands in general

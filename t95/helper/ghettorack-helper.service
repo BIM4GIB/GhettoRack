@@ -1,0 +1,20 @@
+[Unit]
+Description=GhettoRack settings helper (Wi-Fi, name, Bluetooth, reboot: the few things that need root)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/apcbox-bridge/ghettorack_helper.py
+Restart=always
+RestartSec=2
+# Root on purpose: it rewrites one Netplan file, renames the box, reboots it.
+# It takes commands only from its socket (group ghettorack = the bridge) and
+# only the ones on its list; everything that changes the box needs the PIN.
+RuntimeDirectory=ghettorack
+RuntimeDirectoryMode=0755
+StateDirectory=ghettorack
+StateDirectoryMode=0700
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

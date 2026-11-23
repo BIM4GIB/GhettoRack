@@ -277,6 +277,9 @@ The clock module (`/clock`): one tempo for everything.
 | `POST /ir/learn` | `{"profile", "action", "press": "tap"/"hold"}`: the next button press is bound |
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 | `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |
+| `/settings` | The Settings page (`t95/ui/settings.html`): network, Bluetooth, system, devices |
+| `/sys/state` | What the settings helper reports (Wi-Fi, address, name, saved networks, trial, PIN set, Bluetooth) plus the bridge's own (Daisy, controllers, start-up delay). `{"helper": false}` when the helper isn't running |
+| `POST /sys/do` | `{"cmd": ...}` passed to the settings helper (`t95/helper/README.md`): `scan`, `join`, `confirm`, `forget`, `hostname`, `bt`, `restart_bridge`, `reboot`, `poweroff`, `pin_set`, `pin_check`. A request carrying a PIN or a password is refused unless it came over HTTPS or from the box itself |
 | `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy. Optional `"start"`, `"end"` (0-1) and `"norm": true`: trim and normalise first |
 | `POST /samples/upload?name=` | raw file body (up to 64 MB) into `uploads/`; page recordings come as `.webm` (Chrome) or `.mp4` (Safari) |
 | `POST /samples/import` | `{"path"}`: copy a file or folder (audio only) from the SD card into the library |

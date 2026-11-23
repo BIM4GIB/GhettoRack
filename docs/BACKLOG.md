@@ -88,10 +88,15 @@ them one on the map (REC still arms a loop).
 
 ## Modules
 
-- **Settings** (start screen): network manager (Wi-Fi, address, name),
-  remote control setup, peripherals (MIDI devices, audio cards, SD),
-  Bluetooth. The remote setup and start-up options move there from the
-  selector.
+- **Settings** (start screen, top right): first slice built 2026-11-23,
+  NOT yet run on the T95 (`t95/helper/README.md`). In it: Wi-Fi status, scan,
+  join as a 60 s trial that goes back by itself, forget, box name; Bluetooth
+  on/off (needs `sudo t95/helper/get-bt-tool.sh` once); restart bridge,
+  reboot, shut down, start-up delay; a PIN for everything that changes the
+  box; devices (Daisy, controllers). Still to build: the box's own hotspot
+  when no known Wi-Fi is around (agreed: automatic), Bluetooth pairing and
+  Bluetooth MIDI, sound cards and SD cards under Devices, the remote's
+  buttons moved over from the start screen, TV remote navigation on the page.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
 - **Numark DJ**: likely Mixxx on the T95 in the kiosk; which Numark?
@@ -117,7 +122,8 @@ them one on the map (REC still arms a loop).
 
 - DIN MIDI when the parts arrive (UART4 on D1/D2; D13/D14 are the screen's).
   USB-to-DIN cables as ports meanwhile.
-- Bluetooth MIDI (experiment).
+- Bluetooth MIDI: the T95's own radio works (scan found 21 devices on the
+  rig); pairing and BLE MIDI are the next experiment.
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.
 - MIDI clock following: tempo ramps lag by the fit window (4 beats).

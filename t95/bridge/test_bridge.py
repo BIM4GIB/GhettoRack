@@ -33,6 +33,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 BRIDGE = os.path.join(HERE, "apcbox_bridge.py")
 UI = os.path.join(HERE, "..", "..", "daisy", "ui", "apcbox-ui.html")
+REPO = os.path.join(HERE, "..", "..")
 
 
 def free_port():
@@ -2790,6 +2791,153 @@ while True:
     if d > 0:
         time.sleep(d)
 """
+
+
+class SettingsTest(unittest.TestCase):
+    """The Settings page and the bridge's way to the settings helper (t95/helper), with fake system tools"""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(REPO, "t95", "helper"))
+        import test_helper
+        cls.dir = tempfile.mkdtemp()
+        cls.netplan = os.path.join(cls.dir, "netplan")
+        os.makedirs(cls.netplan)
+        tools = {}
+        for t in ("wpa_cli", "netplan", "hostnamectl", "systemctl", "bluetoothctl"):
+            os.makedirs(os.path.join(cls.dir, "bin"), exist_ok=True)
+            tools[t] = os.path.join(cls.dir, "bin", t)
+            with open(tools[t], "w") as f:
+                f.write(test_helper.FAKE)
+            os.chmod(tools[t], 0o755)
+        cls.sock = os.path.join(cls.dir, "h.sock")
+        cls.calls = os.path.join(cls.dir, "calls.log")
+        cls.helper = subprocess.Popen(
+            [sys.executable, os.path.join(REPO, "t95", "helper", "ghettorack_helper.py"), "--socket", cls.sock,
+             "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--scan-s", "0.05",
+             "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
+             "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],
+             "--bluetoothctl", tools["bluetoothctl"]],
+            env=dict(os.environ, FAKELOG=cls.calls, FAKEDIR=cls.dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        cls.addClassCleanup(cls.helper.kill)
+        cls.http = free_port()
+        cls.proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
+             "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
+             "--helper-socket", cls.sock],
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
+        cls.addClassCleanup(cls.proc.kill)
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: True, 10)
+
+    def post(self, path, body):
+        req = urllib.request.Request("http://127.0.0.1:%d%s" % (self.http, path), data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def state(self):
+        return json.loads(BridgeTest.get("/sys/state")[2])
+
+    def test_s1_state_and_commands_pass_through(self):
+        st = self.state()
+        self.assertEqual(st["wifi"]["ssid"], "Home Net")
+        self.assertEqual((st["pin_set"], st["bridge"]["daisy"], st["bridge"]["controllers"]), (False, False, []))
+        code, out = self.post("/sys/do", {"cmd": "scan"})
+        self.assertEqual((code, [n["ssid"] for n in out["networks"]]), (200, ["Home Net", "Cafe Open"]))
+        self.assertEqual(self.post("/sys/do", {"cmd": "status; reboot"})[0], 400)
+        self.assertEqual(self.post("/sys/do", {"cmd": "handle"})[0], 400)
+        self.assertEqual(self.post("/sys/do", [1])[0], 400)
+        code, out = self.post("/sys/do", {"cmd": "reboot"})
+        self.assertEqual((code, out["error"]), (400, "set a PIN first"))
+        self.assertEqual(self.post("/sys/do", {"cmd": "pin_set", "new": "2468"}), (200, {"ok": True}))
+        code, out = self.post("/sys/do", {"cmd": "hostname", "name": "rack", "pin": "0000"})
+        self.assertEqual((code, out["error"]), (400, "wrong PIN"))
+        self.assertEqual(self.post("/sys/do", {"cmd": "hostname", "name": "rack", "pin": "2468"}), (200, {"ok": True}))
+        self.assertIn("hostnamectl set-hostname rack", open(self.calls).read())
+
+    def test_s2_secrets_only_over_https_or_from_the_box(self):
+        import asyncio
+        from rackbridge.web import WebMixin
+
+        class B(WebMixin):
+            args = type("A", (), {"helper_socket": self.sock})
+        b = B()
+        for body in ({"cmd": "pin_check", "pin": "2468"}, {"cmd": "join", "ssid": "X", "psk": "x" * 8},
+                     {"cmd": "pin_set", "new": "1111"}):
+            code, out = asyncio.run(b.sys_do(json.dumps(body).encode(), False))
+            self.assertEqual((code, out.get("https")), (400, True), body)
+        self.assertEqual(asyncio.run(b.sys_do(b'{"cmd": "scan"}', False))[0], 200)       # looking is free
+        self.assertEqual(asyncio.run(b.sys_do(b'{"cmd": "pin_check", "pin": "2468"}', True))[0], 200)
+        # no helper on the box: said plainly, nothing breaks
+        b.args = type("A", (), {"helper_socket": os.path.join(self.dir, "nope.sock")})
+        code, out = asyncio.run(b.sys_do(b'{"cmd": "scan"}', True))
+        self.assertEqual((code, out["helper"]), (503, False))
+
+    def test_s3_the_page(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        url = "http://127.0.0.1:%d/settings" % self.http
+        self.assertIn(b"SETTINGS", BridgeTest.get("/settings")[2])
+        self.assertIn(b'href="/settings"', BridgeTest.get("/")[2])
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
+                pg = b.new_page(viewport={"width": w_, "height": h_})
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                for s_ in ("net", "bt", "sys", "dev"):
+                    pg.goto(url + "?s=" + s_)
+                    pg.wait_for_function("document.getElementById('c-helper').textContent === 'helper: running'")
+                    self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"),
+                                     [False, False], (w_, h_, s_))
+                    out = pg.evaluate("""() => [...document.querySelectorAll('section.on button, section.on input, nav button')].filter(e => {
+                        const r = e.getBoundingClientRect(); return r.width && (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1); }).map(e => e.id || e.textContent)""")
+                    self.assertEqual(out, [], (w_, h_, s_))
+                pg.goto(url)
+                pg.wait_for_function("document.getElementById('n-now').textContent === 'Home Net'")
+                pg.click("#n-scan")
+                pg.wait_for_selector(".net.cur")
+                self.assertGreaterEqual(pg.locator(".net").count(), 2 if h_ > 400 else 1)
+                # joining needs the PIN: without it, a hint and nothing sent
+                while not pg.locator(".net", has_text="Cafe Open").count():
+                    pg.click("#n-next")
+                pg.locator(".net", has_text="Cafe Open").locator("button:has-text('JOIN')").click()
+                pg.click("#n-go")
+                pg.wait_for_function("document.getElementById('n-banner').textContent.includes('PIN')")
+                self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                pg.fill("#pin", "2468")
+                pg.wait_for_function("document.getElementById('c-pin').textContent === 'unlocked'")
+                pg.click("#n-go")
+                pg.wait_for_function("document.getElementById('n-banner').textContent.startsWith('Trying Cafe Open')")
+                self.assertTrue(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                # the fake box never moves to it and nobody confirms: it goes back, and the page says so
+                pg.wait_for_function("document.getElementById('n-banner').textContent.includes('went back')", timeout=15000)
+                self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+                # Bluetooth: not set up, said how; System: reboot asks twice
+                pg.click("nav button:has-text('Bluetooth')")
+                pg.wait_for_function("document.getElementById('b-text').textContent.includes('get-bt-tool.sh')")
+                self.assertTrue(pg.locator("#b-toggle").is_disabled())
+                pg.click("nav button:has-text('System')")
+                n0 = open(self.calls).read().count("systemctl reboot")
+                pg.click("#y-reboot")
+                pg.wait_for_function("document.getElementById('y-reboot').textContent === 'SURE?'")
+                time.sleep(1.5)
+                self.assertEqual(open(self.calls).read().count("systemctl reboot"), n0)
+                pg.click("#y-reboot")
+                pg.wait_for_function("document.getElementById('y-banner').textContent.startsWith('Rebooting')")
+                end = time.time() + 5
+                while open(self.calls).read().count("systemctl reboot") == n0 and time.time() < end:
+                    time.sleep(0.1)
+                self.assertEqual(open(self.calls).read().count("systemctl reboot"), n0 + 1)
+                pg.close()
+            b.close()
+        self.assertEqual(errors, [])
 
 
 class ListenTest(unittest.TestCase):

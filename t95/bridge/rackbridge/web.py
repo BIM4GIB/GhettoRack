@@ -166,6 +166,42 @@ class WebMixin:
             return 200, {"ok": True, "dropped": n}
         return 404, {"error": "not found"}
 
+    # ---- Settings: the bridge has no rights; it asks the helper (t95/helper) ----
+    SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "restart_bridge", "reboot", "poweroff",
+                "pin_set", "pin_check"}
+
+    def helper_ask(self, d, timeout=75):
+        """One request to the settings helper. Blocking: call it from an executor"""
+        import socket
+        try:
+            s = socket.socket(socket.AF_UNIX)
+            s.settimeout(timeout)
+            s.connect(self.args.helper_socket)
+            s.sendall(json.dumps(d).encode() + b"\n")
+            buf = b""
+            while not buf.endswith(b"\n") and len(buf) < 65536:
+                c = s.recv(65536)
+                if not c:
+                    break
+                buf += c
+            s.close()
+            out = json.loads(buf.decode())
+            return out if isinstance(out, dict) else {"error": "the settings helper answered nonsense"}
+        except (OSError, ValueError):
+            return {"error": "the settings helper isn't running on the T95 (sudo t95/bridge/install.sh)", "helper": False}
+
+    async def sys_do(self, body, secure):
+        try:
+            d = json.loads(body.decode() or "{}")
+        except ValueError:
+            d = None
+        if not isinstance(d, dict) or d.get("cmd") not in self.SYS_CMDS:
+            return 400, {"error": "unknown settings command"}
+        if not secure and any(k in d for k in ("pin", "psk", "old", "new")):
+            return 400, {"error": "PINs and passwords only over the https:// address of this page", "https": True}
+        out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, d)
+        return (200 if "error" not in out else 503 if out.get("helper") is False else 400), out
+
     async def handle_http(self, reader, writer):
         peer = writer.get_extra_info("peername")
         try:
@@ -208,6 +244,12 @@ class WebMixin:
                 if n > POST_MAX:
                     raise ValueError
                 body = await asyncio.wait_for(reader.readexactly(n), 10) if n else b""
+                if path == "/sys/do":
+                    secure = writer.get_extra_info("ssl_object") is not None or (peer and peer[0] in ("127.0.0.1", "::1"))
+                    code, out = await self.sys_do(body, secure)
+                    await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
+                    writer.close()
+                    return
                 code, out = self.post(path, body)
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
             elif method != "GET":
@@ -265,6 +307,14 @@ class WebMixin:
                 await self.reply(writer, 200, "application/json", json.dumps(self.routes_json(), indent=1).encode() + b"\n")
             elif path == "/state":
                 await self.reply(writer, 200, "application/json", json.dumps(self.state_json(), indent=1).encode() + b"\n")
+            elif path == "/settings":
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["settings"])
+            elif path == "/sys/state":
+                out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, {"cmd": "status"})
+                out["bridge"] = {"daisy": self.fd is not None, "control": self.ctl,
+                                 "controllers": [p.name for p in sorted(self.ports.values(), key=lambda p: p.num)],
+                                 "autostart_s": self.state.data.get("autostart_s", 0)}
+                await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":

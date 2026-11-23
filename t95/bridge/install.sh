@@ -12,6 +12,8 @@ DEST=/opt/apcbox-bridge
 
 if [ "${1:-}" = "--remove" ]; then
   systemctl disable --now apcbox-bridge.service 2>/dev/null || true
+  systemctl disable --now ghettorack-helper.service ghettorack-bluetooth.service 2>/dev/null || true
+  rm -f /etc/systemd/system/ghettorack-helper.service /etc/systemd/system/ghettorack-bluetooth.service
   rm -f /etc/systemd/system/apcbox-bridge.service /etc/udev/rules.d/99-apcbox.rules
   rm -f /etc/avahi/services/ghettorack-midi.service
   rm -rf "$DEST"
@@ -40,6 +42,13 @@ install -m 644 "$REPO/t95/ui/selector.html" "$DEST/selector.html"
 install -m 644 "$REPO/t95/ui/midihub.html" "$DEST/midihub.html"
 install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
 install -m 644 "$REPO/t95/ui/apcbox.html" "$DEST/apcbox.html"
+install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
+# Settings: the helper that does the few things needing root (t95/helper/README.md).
+# The bridge reaches it through the group; networks it joins and its PIN stay on the box.
+getent group ghettorack >/dev/null || groupadd --system ghettorack
+install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
+install -m 644 "$REPO/t95/helper/ghettorack-helper.service" /etc/systemd/system/ghettorack-helper.service
+install -m 644 "$REPO/t95/helper/ghettorack-bluetooth.service" /etc/systemd/system/ghettorack-bluetooth.service
 # Ableton Link for the clock module (optional): a venv that also sees the system
 # packages, with aalink (a wheel of Ableton's Link library). Without it Link is off.
 if [ ! -x "$DEST/venv/bin/python3" ]; then
@@ -64,6 +73,8 @@ udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=0483
 udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=vfat
 udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=exfat
 systemctl daemon-reload
+systemctl enable ghettorack-helper.service
+systemctl restart ghettorack-helper.service
 systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service
 sleep 2

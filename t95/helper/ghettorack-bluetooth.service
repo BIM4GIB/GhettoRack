@@ -1,0 +1,17 @@
+[Unit]
+Description=Bluetooth on the T95's UWE5622 (loads the tty module, attaches the chip, unblocks the radio)
+ConditionPathExists=/usr/local/bin/hciattach_opi
+After=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+# As found by hand on the rig 2026-11-23 (t95/README.md). Off unless turned on in Settings.
+ExecStartPre=/sbin/modprobe sprdbt_tty
+ExecStartPre=/bin/sleep 1
+ExecStart=/usr/local/bin/hciattach_opi -n -s 1500000 /dev/ttyBT0 sprd
+ExecStartPost=/bin/sh -c 'sleep 8; for r in /sys/class/rfkill/rfkill*; do [ "$(cat $r/type)" = bluetooth ] && echo 0 > $r/soft; done; systemctl start bluetooth.service || true'
+Restart=on-failure
+RestartSec=5
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target

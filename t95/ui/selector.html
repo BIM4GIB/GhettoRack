@@ -89,6 +89,7 @@ td.code.set{color:var(--green)}
   <span id="c-daisy" class="chip">Daisy: ?</span>
   <span id="c-ctl" class="chip">controllers: ?</span>
   <span id="c-ir" class="chip">remote: ?</span>
+  <a id="settings" class="chip" href="/settings" style="margin-left:auto;text-decoration:none;color:inherit">⚙ Settings</a>
 </header>
 <main>
   <h2>Modules</h2>
@@ -127,6 +128,7 @@ td.code.set{color:var(--green)}
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const tv = params.has("tv"), boot = params.has("boot");
+if (tv) $("settings").href = "/settings?tv=1";
 if (tv) document.body.classList.add("tv");
 let st = null, profile = "all", countdown = null;
 

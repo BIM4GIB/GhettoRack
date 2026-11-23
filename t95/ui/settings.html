@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GhettoRack settings</title>
+<style>
+:root{--bg:#0d0f11;--panel:#16191c;--line:#2a2e33;--txt:#e8eaed;--dim:#8b929b;--amber:#ffb833;--green:#35d05a;--red:#ff4b3e;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overflow:hidden}
+body{display:grid;grid-template-rows:auto 1fr;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--line);min-width:0}
+header h1{font-size:15px;letter-spacing:.18em;margin:0;font-weight:700}
+header a{color:var(--dim);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.sp{flex:1}
+.pin{display:flex;align-items:center;gap:8px}
+.pin input{width:92px}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--dim);white-space:nowrap}
+.chip.ok{color:var(--green);border-color:#2f6a3f}.chip.warn{color:var(--amber);border-color:#8a6a20}
+main{display:grid;grid-template-columns:170px 1fr;gap:12px;padding:12px 16px;min-height:0}
+nav{display:flex;flex-direction:column;gap:8px}
+nav button{height:52px;font-size:15px;font-weight:600}
+button{background:#1d2126;color:var(--txt);border:1px solid var(--line);border-radius:9px;padding:0 14px;height:38px;font:inherit;cursor:pointer;white-space:nowrap}
+button.on{background:var(--green);color:#06210e;border-color:var(--green)}
+button.act{border-color:#2f6a3f;color:var(--green)}
+button.warn{border-color:var(--red);color:var(--red)}
+button:disabled{opacity:.35;cursor:default}
+input{background:#0f1113;color:var(--txt);border:1px solid var(--line);border-radius:8px;height:38px;padding:0 10px;font:16px var(--mono);min-width:0}
+input:focus{outline:none;border-color:var(--amber)}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-height:0;display:none;flex-direction:column;gap:10px;overflow:hidden}
+section.on{display:flex}
+h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:0;font-weight:600}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
+.big{font-size:18px;font-weight:600}
+.dim{color:var(--dim)}.mono{font-family:var(--mono)}
+.list{flex:1;min-height:0;display:grid;grid-auto-rows:1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.net{display:grid;grid-template-columns:minmax(0,1fr) 54px auto;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid #202327;min-height:0}
+.net:last-child{border-bottom:0}
+.net .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.net .tag{font-size:11px;color:var(--amber);margin-left:8px}
+.net.cur .nm{color:var(--green)}
+.bars{display:flex;gap:2px;align-items:flex-end;height:16px}
+.bars i{width:5px;background:#3a4047;border-radius:1px}.bars i.on{background:var(--green)}
+.acts{display:flex;gap:6px}
+.banner{border:1px solid #8a6a20;color:var(--amber);border-radius:10px;padding:8px 12px;display:none}
+.banner.on{display:block}.banner.bad{border-color:var(--red);color:var(--red)}.banner.good{border-color:#2f6a3f;color:var(--green)}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-family:var(--mono);font-size:14px}
+.kv span:nth-child(odd){color:var(--dim)}
+p{margin:0;color:#b9bec5}
+code{font-family:var(--mono);background:#0f1113;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
+header a{white-space:nowrap}
+@media (min-width:1500px){html{zoom:1.5}}
+@media (max-width:700px){
+  #pinlbl,#c-helper{display:none}.pin input{width:74px}.chip{font-size:11px;padding:3px 7px}
+  main{grid-template-columns:1fr;grid-template-rows:auto 1fr;padding:8px;gap:8px}
+  nav{flex-direction:row}nav button{flex:1;height:40px;font-size:13px;padding:0 4px}
+  header{padding:8px 10px;gap:8px}header h1{display:none}
+  .kv{grid-template-columns:110px 1fr;font-size:13px}
+  section{padding:10px}
+}
+@media (max-height:480px){
+  header{padding:5px 10px}main{padding:6px 10px;gap:8px;grid-template-columns:120px 1fr}
+  nav button{height:34px;font-size:13px}section{padding:8px 10px;gap:6px}button{height:30px}input{height:30px}
+  p{font-size:12px}.big{font-size:15px}
+}
+</style>
+</head>
+<body>
+<header>
+  <a href="/" id="back">‹ Modules</a>
+  <h1>SETTINGS</h1>
+  <span id="c-helper" class="chip">helper: ?</span>
+  <span class="sp"></span>
+  <span class="pin"><span class="dim" id="pinlbl">PIN</span><input id="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="····"><span id="c-pin" class="chip">locked</span></span>
+</header>
+<main>
+  <nav id="nav"></nav>
+  <div id="panes" style="min-height:0;display:grid">
+    <section id="s-net">
+      <div class="row"><span class="big" id="n-now">?</span><span class="dim mono" id="n-ip"></span><span class="sp"></span><button id="n-scan" class="act">SCAN</button></div>
+      <div id="n-banner" class="banner"></div>
+      <div id="n-join" class="row" style="display:none"><span id="n-join-name" class="big"></span><input id="n-psk" type="password" placeholder="password" autocomplete="off" autocapitalize="off" spellcheck="false" style="flex:1">
+        <button id="n-show">show</button><button id="n-go" class="act">CONNECT</button><button id="n-cancel">cancel</button></div>
+      <div id="n-list" class="list"></div>
+      <div class="row"><button id="n-prev">◀</button><span id="n-page" class="dim"></span><button id="n-next">▶</button><span class="sp"></span>
+        <span class="dim">box name</span><input id="n-host" maxlength="32" autocapitalize="off" spellcheck="false" style="width:170px"><button id="n-host-save">SAVE</button></div>
+    </section>
+    <section id="s-bt">
+      <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-toggle" class="act">TURN ON</button></div>
+      <div id="b-banner" class="banner"></div>
+      <p id="b-text"></p>
+      <p class="dim">Pairing devices and Bluetooth MIDI come next. Bluetooth and Wi-Fi share one chip on this box: if the pages get slow with Bluetooth on, turn it off again.</p>
+    </section>
+    <section id="s-sys">
+      <div class="kv" id="y-kv"></div>
+      <div class="row"><span class="dim">On boot, start the last module after</span><input id="y-auto" type="number" min="0" max="60" style="width:80px"><span class="dim">s (0 = stay on the start screen)</span><button id="y-auto-save">SAVE</button></div>
+      <div id="y-banner" class="banner"></div>
+      <div class="row"><button id="y-bridge">RESTART BRIDGE</button><button id="y-reboot">REBOOT</button><button id="y-off" class="warn">SHUT DOWN</button></div>
+      <h2>PIN</h2>
+      <div class="row"><input id="y-old" type="password" inputmode="numeric" maxlength="8" placeholder="old PIN" autocomplete="off" style="width:120px">
+        <input id="y-new" type="password" inputmode="numeric" maxlength="8" placeholder="new PIN" autocomplete="off" style="width:120px"><button id="y-pin">SET PIN</button>
+        <span class="dim" id="y-pin-hint"></span></div>
+    </section>
+    <section id="s-dev">
+      <div class="kv" id="d-kv"></div>
+      <p class="dim">The remote control's buttons are still set on the start screen. Sound cards and SD cards will be listed here.</p>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id), el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+const Q = new URLSearchParams(location.search), tv = Q.has("tv");
+if (tv) $("back").href = "/?tv=1";
+const TABS = [["net", "Network"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"]];
+let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null, trial = null, sure = "", pinOk = false;
+const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
+
+function banner(id, text, cls) { const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : ""); }
+async function get(u) { try { return await (await fetch(u, { cache: "no-store" })).json(); } catch (e) { return null; } }
+/* risky: sends the PIN along. Returns the helper's answer ({error} on failure) */
+async function sys(cmd, extra, risky) {
+  const d = Object.assign({ cmd }, extra || {}); if (risky) d.pin = $("pin").value;
+  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }); return await r.json(); }
+  catch (e) { return { error: "the box isn't answering", gone: true }; }
+}
+function needPin(id) {
+  if (!secure) { banner(id, "Open this page as https://" + location.hostname + ":8443/settings to change things: PINs and passwords don't go over plain http.", "bad"); return false; }
+  if (st && !st.pin_set) { banner(id, "Set a PIN first (System). It is asked for everything that changes the box.", "bad"); return false; }
+  if (!$("pin").value) { banner(id, "Type the PIN at the top right first.", "bad"); $("pin").focus(); return false; }
+  return true;
+}
+
+function nav() {
+  const n = $("nav"); n.textContent = "";
+  for (const [k, name] of TABS) { const b = el("button", k === tab ? "on" : "", name); b.onclick = () => { tab = k; sure = ""; nav(); draw(); }; n.appendChild(b); }
+  for (const [k] of TABS) $("s-" + k).classList.toggle("on", k === tab);
+}
+
+function rowsN() { const h = $("n-list").clientHeight; return Math.max(2, Math.floor(h / 46)); }
+function drawNets() {
+  const L = $("n-list"); L.textContent = "";
+  const all = nets || [], per = rowsN(), pages = Math.max(1, Math.ceil(all.length / per)); npage = Math.max(0, Math.min(pages - 1, npage));
+  L.style.gridTemplateRows = `repeat(${per},1fr)`;
+  $("n-page").textContent = nets ? (npage + 1) + " / " + pages : ""; $("n-prev").disabled = npage === 0; $("n-next").disabled = npage >= pages - 1;
+  if (!nets) { const d = el("div", "net"); d.appendChild(el("span", "dim", "SCAN shows the networks in range.")); L.appendChild(d); return; }
+  if (!all.length) { const d = el("div", "net"); d.appendChild(el("span", "dim", "No networks found. Try SCAN again.")); L.appendChild(d); return; }
+  for (const n of all.slice(npage * per, (npage + 1) * per)) {
+    const r = el("div", "net" + (n.current ? " cur" : "")), nm = el("span", "nm", n.ssid), bars = el("span", "bars"), acts = el("span", "acts");
+    nm.appendChild(el("span", "tag", (n.current ? "connected" : n.saved ? "saved" : "") + (n.secure ? "" : " open")));
+    for (let i = 0; i < 4; i++) { const b = el("i", n.signal > i * 25 ? "on" : ""); b.style.height = (4 + i * 4) + "px"; bars.appendChild(b); }
+    if (!n.current) { const j = el("button", "act", n.saved ? "RETRY" : "JOIN"); j.onclick = () => { joining = n; $("n-psk").value = ""; drawJoin(); if (n.secure) $("n-psk").focus(); }; acts.appendChild(j); }
+    if (n.saved) { const f = el("button", sure === "f:" + n.ssid ? "warn" : "", sure === "f:" + n.ssid ? "SURE?" : "FORGET");
+      f.onclick = async () => { if (sure !== "f:" + n.ssid) { sure = "f:" + n.ssid; return drawNets(); } sure = ""; if (!needPin("n-banner")) return drawNets();
+        const o = await sys("forget", { ssid: n.ssid }, true); banner("n-banner", o.error || "Forgot " + n.ssid + ".", o.error ? "bad" : "good"); if (!o.error) scan(); else drawNets(); };
+      acts.appendChild(f); }
+    r.append(nm, bars, acts); L.appendChild(r);
+  }
+}
+function drawJoin() {
+  $("n-join").style.display = joining ? "flex" : "none";
+  if (!joining) return;
+  $("n-join-name").textContent = joining.ssid; $("n-psk").style.display = $("n-show").style.display = joining.secure ? "" : "none";
+}
+async function scan() {
+  $("n-scan").disabled = true; $("n-scan").textContent = "SCANNING";
+  const o = await sys("scan");
+  $("n-scan").disabled = false; $("n-scan").textContent = "SCAN";
+  if (o.error) return banner("n-banner", o.error, "bad");
+  nets = o.networks; drawNets();
+}
+async function join() {
+  const n = joining; if (!n || !needPin("n-banner")) return;
+  const psk = n.secure ? $("n-psk").value : "";
+  if (n.secure && (psk.length < 8 || psk.length > 63)) return banner("n-banner", "A Wi-Fi password is 8 to 63 characters.", "bad");
+  const o = await sys("join", { ssid: n.ssid, psk }, true);
+  if (o.error) return banner("n-banner", o.error, "bad");
+  joining = null; drawJoin(); $("n-psk").value = "";
+  trial = { ssid: n.ssid, until: Date.now() + o.trial_s * 1000 };
+  banner("n-banner", "Trying " + n.ssid + ". This page confirms by itself as soon as it reaches the box on it; if it can't within " + Math.round(o.trial_s) + " s the box goes back to the network it had.");
+}
+/* while a network is on trial: confirm it once the box is on it and we can still reach the box */
+async function trialTick() {
+  if (!trial || !st) return;
+  if (st.wifi.ssid === trial.ssid && st.wifi.state === "COMPLETED" && st.trial_s > 0) {
+    const o = await sys("confirm"); if (o.ok) { banner("n-banner", trial.ssid + " works and is saved.", "good"); trial = null; scan(); }
+  } else if (st.trial_s === 0) {
+    banner("n-banner", st.wifi.ssid === trial.ssid ? trial.ssid + " is connected." : "Couldn't reach the box on " + trial.ssid + " in time, so it went back to " + (st.wifi.ssid || "the network it had")
+      + ". Wrong password, or this device isn't on that network.", st.wifi.ssid === trial.ssid ? "good" : "bad");
+    trial = null;
+  }
+}
+
+function kv(id, rows) { const k = $(id); k.textContent = ""; for (const [a, b] of rows) k.append(el("span", "", a), el("span", "", b)); }
+function draw() {
+  const h = st && st.helper !== false && !st.error;
+  $("c-helper").textContent = st ? (h ? "helper: running" : "helper: not running") : "box: not answering"; $("c-helper").className = "chip " + (h ? "ok" : "warn");
+  $("c-pin").textContent = !h ? "?" : !st.pin_set ? "no PIN set" : pinOk ? "unlocked" : "locked"; $("c-pin").className = "chip " + (pinOk ? "ok" : "warn");
+  if (!st) return;
+  if (!h) { for (const b of ["n-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95.", "bad"); }
+  const w = st.wifi || {};
+  $("n-now").textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?";
+  $("n-ip").textContent = h && w.ip ? w.ip : "";
+  if (document.activeElement !== $("n-host") && h) $("n-host").value = st.hostname || "";
+  const b = st.bt || {};
+  $("b-now").textContent = !h ? "?" : !b.tool ? "not set up" : b.on ? (b.powered ? "on" : b.controller ? "on, radio starting" : "starting") : "off";
+  $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
+  $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box." :
+    "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
+  const br = st.bridge || {};
+  kv("y-kv", [["box name", st.hostname || "?"], ["address", w.ip || "?"], ["Wi-Fi", w.ssid || "?"], ["helper", h ? "running" : "not running"], ["page", secure ? "secure" : "plain http: read-only"]]);
+  if (document.activeElement !== $("y-auto")) $("y-auto").value = br.autostart_s || 0;
+  $("y-old").style.display = st.pin_set ? "" : "none"; $("y-pin").textContent = st.pin_set ? "CHANGE PIN" : "SET PIN";
+  $("y-pin-hint").textContent = st.pin_set ? "" : "4 to 8 digits. Whoever sets it first owns the box's settings.";
+  for (const [id, k, t] of [["y-bridge", "bridge", "RESTART BRIDGE"], ["y-reboot", "reboot", "REBOOT"], ["y-off", "off", "SHUT DOWN"]]) $(id).textContent = sure === k ? "SURE?" : t;
+  kv("d-kv", [["Daisy", br.daisy ? "connected, control " + br.control : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
+    ["Bluetooth", b.tool ? (b.on ? "on" : "off") : "not set up"]]);
+  if (tab === "net") drawNets();
+}
+async function poll() {
+  const s = await get("/sys/state"); st = s; draw(); await trialTick();
+}
+async function checkPin() {
+  pinOk = false;
+  if (st && st.pin_set && secure && $("pin").value.length >= 4) { const o = await sys("pin_check", { pin: $("pin").value }); pinOk = !!o.ok; }
+  draw();
+}
+async function power(k, cmd, text) {
+  if (sure !== k) { sure = k; return draw(); }
+  sure = ""; if (!needPin("y-banner")) return draw();
+  const o = await sys(cmd, {}, true); banner("y-banner", o.error || text, o.error ? "bad" : "good"); draw();
+}
+
+$("n-scan").onclick = scan; $("n-go").onclick = join; $("n-cancel").onclick = () => { joining = null; drawJoin(); };
+$("n-show").onclick = () => { const p = $("n-psk"); p.type = p.type === "password" ? "text" : "password"; $("n-show").textContent = p.type === "password" ? "show" : "hide"; };
+$("n-prev").onclick = () => { npage--; drawNets(); }; $("n-next").onclick = () => { npage++; drawNets(); };
+$("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const o = await sys("hostname", { name: $("n-host").value.trim() }, true);
+  banner("n-banner", o.error || "The box is now called " + $("n-host").value.trim() + ". Other devices pick the new name up within a minute.", o.error ? "bad" : "good"); poll(); };
+$("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
+  const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth is starting: the radio takes about ten seconds." : "Bluetooth is off."), o.error ? "bad" : "good"); poll(); };
+$("y-auto-save").onclick = async () => { const a = +$("y-auto").value;
+  try { const r = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autostart_s: a }) })).json(); banner("y-banner", r.error || "Saved.", r.error ? "bad" : "good"); }
+  catch (e) { banner("y-banner", "the box isn't answering", "bad"); } };
+$("y-bridge").onclick = () => power("bridge", "restart_bridge", "The bridge restarts: the page is back in a few seconds.");
+$("y-reboot").onclick = () => power("reboot", "reboot", "Rebooting. The box is back in about a minute.");
+$("y-off").onclick = () => power("off", "poweroff", "Shutting down. Wait for the box's light before pulling the plug.");
+$("y-pin").onclick = async () => {
+  if (!secure) return banner("y-banner", "Open this page as https://" + location.hostname + ":8443/settings to set the PIN.", "bad");
+  const o = await sys("pin_set", { old: $("y-old").value, new: $("y-new").value });
+  banner("y-banner", o.error || "PIN set. Type it at the top right to change things.", o.error ? "bad" : "good");
+  if (!o.error) { $("pin").value = $("y-new").value; $("y-old").value = $("y-new").value = ""; await poll(); checkPin(); }
+};
+let pinT = null; $("pin").addEventListener("input", () => { clearTimeout(pinT); pinT = setTimeout(checkPin, 500); });
+addEventListener("resize", () => { if (tab === "net") drawNets(); });
+nav(); poll(); setInterval(poll, 2500);
+</script>
+</body>
+</html>
