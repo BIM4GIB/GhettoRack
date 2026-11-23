@@ -57,6 +57,8 @@ them one on the map (REC still arms a loop).
 - Boot straight into the last mode. The remote after relearning (OK button).
 - Daisy: the screen's 7-9 ms per loop, the one-off 52 ms ping spike.
 - Mac build of the shared code (`daisy/mac/build.sh`) since v13.9.
+- v13.15 boots, plays and the APC40 map works on the rig (2026-11-23). Still
+  to try there: the items below.
 - v13.15 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
   slot, at the top of the memory nothing used before). Watch the boot log and
   try an undo of a long take. Overdub and one-shot levels with the real
