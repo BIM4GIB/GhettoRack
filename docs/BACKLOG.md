@@ -17,8 +17,10 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   once/beat/bar, held FX at once/step/beat (step by default: on and off
   both land on the grid).
 - Redo of an undone take. APC40: OVERDUB = overdub the selected track's loop,
-  SHIFT + device arrows = undo / redo (the arrows alone still browse the SD
-  card's samples).
+  the two device arrows = undo / redo, SHIFT + them = previous / next sample
+  in the folder (BANK left/right = folder, as before).
+- Undo also takes back a sample changed from the APC40 by accident (one
+  press goes back to what the track held before the browsing started).
 - ROLL (hold) on the Perform strips.
 - Keyboard knobs, pitch bend and pads (channel 10) on the selected track.
 - T95 side, no flash needed: trim and normalise before sending (tap a file
@@ -79,6 +81,7 @@ loop; it follows the take length and beat settings).
 - The Daisy's own SD card browsed from the T95; sets copied to and from the
   T95 (backup); a whole kit sent from the T95 library in one go.
 - 303 cutoff shown in Hz (a percentage today).
+- Undo for a kit loaded by accident, and for a sample sent from the T95.
 - Looper: settings saved with the project; more than one undo; one-shot on
   an APC40 button; learn for keyboard knobs.
 

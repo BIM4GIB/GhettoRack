@@ -93,9 +93,12 @@ live, with markers and bar lines), pad, list row with waveform.
   on the selected track. Desktop-tested; not flashed yet.
 - v13.13 (control protocol 8, report 14): held FX snap to the step (or the
   beat, or not), redo of an undone take. On the APC40: OVERDUB overdubs the
-  selected track's loop (it used to do the same as the record button),
-  SHIFT + the two device arrows are undo and redo of the last take (the
-  arrows alone still step through the SD card's samples).
+  selected track's loop (it used to do the same as the record button). The
+  two device arrows (next to it) are undo and redo: of the last take, and of
+  a sample changed from the APC40 (SHIFT + those arrows = previous / next
+  file, BANK left/right = folder, the encoder), so a sample changed by
+  accident comes back, also when it was a recorded loop. Stepping on through
+  files still undoes to the original.
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

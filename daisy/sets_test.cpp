@@ -1320,8 +1320,7 @@ int main()
         CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2) && e.IsLoop(4));
         U("lrec redo");
         CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2));
-        /* the APC40: SHIFT + the device arrows are undo and redo, OVERDUB overdubs the selected track */
-        Btn(apc::kShift, 0, true);
+        /* the APC40: the device arrows are undo and redo, OVERDUB overdubs the selected track */
         Btn(apc::kDevLeft, 0, true);
         Btn(apc::kDevLeft, 0, false);
         CHECK(!memcmp(s5.data, first.data(), first.size() * 2));
@@ -1330,7 +1329,6 @@ int main()
         CHECK(!memcmp(s5.data, dubbed.data(), dubbed.size() * 2));
         Btn(apc::kDevLeft, 0, true);
         Btn(apc::kDevLeft, 0, false);
-        Btn(apc::kShift, 0, false);
         CHECK(!memcmp(s5.data, first.data(), first.size() * 2) && e.IsLoop(4));
         SelectTrack(4);
         Btn(apc::kOverdub, 0, true);
@@ -1421,6 +1419,62 @@ int main()
         U("lrec undo");
         WaitIdle();
         CHECK(!IsRecPath(slot_path[6]) && BuiltInKitOf(slot_path[6]) >= 0);
+
+        /* a sample changed by accident with the arrows: undo gives the original back */
+        {
+            SelectTrack(9);
+            char was[kPathLen];
+            snprintf(was, kPathLen, "%s", slot_path[9]);
+            ScanFolders();
+            cur_folder = 0;
+            for(int i = 0; i < num_folders; i++)
+                if(!strcmp(folders[i], "samples/test"))
+                    cur_folder = i;
+            ScanFiles(cur_folder);
+            CHECK(num_files >= 2);
+            Btn(apc::kShift, 0, true);
+            Btn(apc::kDevRight, 0, true); // SHIFT + arrow: next sample
+            Btn(apc::kDevRight, 0, false);
+            WaitIdle();
+            Btn(apc::kDevRight, 0, true); // and another: still one undo back to the original
+            Btn(apc::kDevRight, 0, false);
+            Btn(apc::kShift, 0, false);
+            WaitIdle();
+            Tick(40);
+            char browsed[kPathLen];
+            snprintf(browsed, kPathLen, "%s", slot_path[9]);
+            CHECK(strncmp(browsed, "samples/test/", 13) == 0 && strcmp(browsed, was) && lpf(7) == 10);
+            Btn(apc::kDevLeft, 0, true); // the arrow alone: undo
+            Btn(apc::kDevLeft, 0, false);
+            WaitIdle();
+            Tick(40);
+            CHECK(!strcmp(slot_path[9], was) && lpf(7) == 0 && lpf(8) == 10);
+            Btn(apc::kDevRight, 0, true); // redo: the browsed one again
+            Btn(apc::kDevRight, 0, false);
+            WaitIdle();
+            Tick(40);
+            CHECK(!strcmp(slot_path[9], browsed));
+            Btn(apc::kDevLeft, 0, true);
+            Btn(apc::kDevLeft, 0, false);
+            WaitIdle();
+            CHECK(!strcmp(slot_path[9], was));
+            /* over a recorded loop: the loop itself comes back */
+            SelectTrack(4);
+            CHECK(e.IsLoop(4));
+            Btn(apc::kShift, 0, true);
+            Btn(apc::kDevRight, 0, true);
+            Btn(apc::kDevRight, 0, false);
+            Btn(apc::kShift, 0, false);
+            WaitIdle();
+            Tick(40);
+            CHECK(!IsRecPath(slot_path[4]));
+            Btn(apc::kDevLeft, 0, true);
+            Btn(apc::kDevLeft, 0, false);
+            Tick(2100);
+            CHECK(e.IsLoop(4) && IsRecPath(slot_path[4]) && labs((long)s5.length - 96000) < 4
+                  && !memcmp(s5.data, first.data(), first.size() * 2));
+            SelectTrack(0);
+        }
 
         /* pattern switches: on the next step, on the beat, on the bar */
         e.Play();

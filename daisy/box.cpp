@@ -870,6 +870,8 @@ void LoadKit(int k, bool keep_synth = true, int pg = -1)
     Popup("kit %s", kit_names[k]);
 }
 
+void BrowseBackup(int t); // further down: what the track held, so undo gives it back
+
 void LoadBrowsedFile(bool audition)
 {
     if(cur_folder < 0 || cur_folder >= num_folders || cur_file < 0
@@ -882,6 +884,7 @@ void LoadBrowsedFile(bool audition)
         Log("path too long: %s", path);
         return;
     }
+    BrowseBackup(sel_track);
     QueueLoad(sel_track, path, audition);
     loaded_kit_pg[sel_track / 8] = -1; // the kit has been edited
     Popup("%s", files[cur_file]);
@@ -1011,6 +1014,24 @@ void LooperBackup(int t, int mode)
     lundo.mode  = mode;
     if(lundo.data)
         memcpy(mem, eng->GetSlot(t).data, (size_t)lundo.length * sizeof(int16_t));
+}
+
+constexpr int kUndoBrowse = 3; // lundo.mode: not a take, a sample picked with the arrows or the encoder
+
+/** Before a browsed sample goes into a track: keep what it held. Stepping on
+ *  through files keeps the first one, so undo goes back to the original */
+void BrowseBackup(int t)
+{
+    if(eng->LiveRecState() != 0)
+        return;
+    if(lundo.mode == kUndoBrowse && lundo.track == t && lundo.valid && !lundo.redo)
+    {
+        lundo.await = true; // same streak: the load under way changes the track again
+        return;
+    }
+    LooperBackup(t, kUndoBrowse);
+    lundo.valid = true;
+    lundo.await = true;
 }
 
 /** Puts back what the undo holds. `keep`: what the track has now goes into
@@ -1163,8 +1184,9 @@ void LooperUndoTake(bool redo = false)
     }
     int t = lundo.track;
     LooperExchange(true);
-    Popup(redo ? "take on %d back" : "take on %d undone", t + 1);
-    Log("looper: %s the last take on track %d", redo ? "redid" : "undid", t + 1);
+    const bool br = lundo.mode == kUndoBrowse;
+    Popup(redo ? (br ? "track %d: the new sound" : "take on %d back") : (br ? "track %d: sound back" : "take on %d undone"), t + 1);
+    Log("undo: %s the last %s on track %d", redo ? "redid" : "undid", br ? "sample change" : "take", t + 1);
 }
 
 /** The APC40's OVERDUB button: on top of the selected track's loop */
@@ -1815,9 +1837,9 @@ void OnButton(uint8_t ch, uint8_t note, bool on, uint32_t now)
             break;
         case kDevLeft:
         case kDevRight:
-            if(on && shift) // SHIFT + arrows: undo / redo the looper's last take
+            if(on && !shift) // undo / redo: the last take, or a sample changed with SHIFT + these or the BANK arrows
                 LooperUndoTake(note == kDevRight);
-            else if(on && num_files > 0)
+            else if(on && num_files > 0) // SHIFT: previous / next sample in the folder
             {
                 int d = (note == kDevRight) ? 1 : -1;
                 if(cur_file < 0)

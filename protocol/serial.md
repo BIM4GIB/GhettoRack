@@ -104,7 +104,7 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `KL k name` | v13.10: name of kit `k`, for every kit; after `ESC R` and when the list changes |
 | `CK f err` | v13.11: `f` 1 while following the T95's clock, `err` how far the sequencer was from it at the last frame, smoothed, in 0.1 ms (+ = behind) |
 | `CL playing step bpm100 age_us n` | v13.11: each sequencer step as it plays (and the stop), with how long ago it fired, counted in audio samples, so the report's own delay drops out. The T95's clock module follows the Daisy from these. Not passed on to browsers |
-| `LP len count qrec qpat qmute gain mode undo redo qfx` | v13.12: looper and quantise settings as set with `lrec len`, `lrec count`, `quant ...`, `ingain`; `mode` is what the current or last take is (0 loop, 1 overdub, 2 one-shot); `undo` is the track (1-16) whose last take `lrec undo` would take back, 0 = none. v13.13 (report 14) adds `redo` (the track `lrec redo` would bring a take back on, 0 = none) and `qfx`. On change |
+| `LP len count qrec qpat qmute gain mode undo redo qfx` | v13.12: looper and quantise settings as set with `lrec len`, `lrec count`, `quant ...`, `ingain`; `mode` is what the current or last take is (0 loop, 1 overdub, 2 one-shot); `undo` is the track (1-16) whose last take `lrec undo` would take back, 0 = none. v13.13 (report 14) adds `redo` (the track `lrec redo` would bring a take back on, 0 = none) and `qfx`; undo and redo also cover a sample changed with the APC40's browse buttons. On change |
 | `V n` | Report version (14). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields
