@@ -48,6 +48,36 @@ table.list { width: 100%; border-collapse: collapse; font-size: 13px; }
 .list td { padding: 6px; border-bottom: 1px solid var(--line); }
 .list td:last-child { text-align: right; white-space: nowrap; }
 .state-on { color: #8ff0a8; } .state-never { color: #ff9d94; } .state-wait { color: #ffc27a; }
+
+/* ---- GhettoRack look, shared with the ApcBox page (apcbox.css): LEDs and glowing buttons ---- */
+:root{--bg:#0b0c0d;--panel:#15171a;--line:#2a2d31;--text:#d9dcdf;--dim:#7d848c;--green:#35d05a;--red:#ff4b3e;--yellow:#ffb833;--amber:#ff9a1f;--blue:#4aa3ff;--off:#23262a}
+body{background:var(--bg);-webkit-tap-highlight-color:transparent}
+header{background:#101214;gap:10px 18px;padding:12px 18px}
+h1{font-size:18px;letter-spacing:.1em}
+h2{letter-spacing:.1em}
+.chip{background:none!important;padding:0;display:inline-flex;align-items:center;gap:7px;color:var(--dim)!important;font-size:12px}
+.chip::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--off);flex:none}
+.chip.ok::before{background:var(--green);box-shadow:0 0 8px var(--green)}
+.chip.warn::before{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.chip.bad::before{background:var(--red);box-shadow:0 0 8px var(--red)}
+.chip.warn,.chip.bad{color:var(--text)!important}
+button{background:#1d2024;border:1px solid #3a3f45;border-radius:7px;color:#c3c8cd;font-weight:600;min-height:34px}
+button:hover{background:#24282c}
+button:disabled{opacity:.35}
+button.sel,.tabs button.sel,button.on{background:#1d2024;color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1f77, inset 0 0 8px #ff9a1f33}
+button:focus-visible,input:focus-visible,select:focus-visible,.module:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+input[type=checkbox]{accent-color:var(--green);width:18px;height:18px;vertical-align:middle}
+input[type=number],input[type=text],select{background:#0b0c0d;border:1px solid #3a3f45;color:var(--text);border-radius:6px;min-height:34px}
+.panel,.box{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.banner{border-radius:10px}
+#home{height:40px;padding:0 16px}
+.cell{background:#1d2024;border:1px solid #33373c;border-radius:6px;color:#5d646b;min-height:0}
+.cell.on{background:#1d2024;color:var(--green);border-color:var(--green);box-shadow:0 0 9px #35d05a99, inset 0 0 8px #35d05a44}
+.cell.def{background:#1d2024;color:var(--blue);border-color:var(--blue);box-shadow:0 0 9px #4aa3ff88, inset 0 0 8px #4aa3ff33}
+.cell.sel{outline:2px solid var(--yellow);outline-offset:1px}
+.matrix tbody th .act{width:9px;height:9px}
+.matrix tbody th .act.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+.state-on{color:var(--green)}.state-never{color:var(--red)}.state-wait{color:var(--amber)}
 </style>
 </head>
 <body>

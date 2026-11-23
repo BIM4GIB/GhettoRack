@@ -35,11 +35,11 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 4 Sound | Sample track | `sound` | waveform with start and playhead; 8 device pots, 8 track pots | built |
 | 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | built |
 | 4 Sound | Live loop | `loop` | loop waveform with bar lines, arm, stop at bar, cancel, back to a sample | built (no input level yet) |
-| 5 Samples | Library / SD | `samples` | browser with a waveform per file, audition, send to track, upload, import | mock (the tab links to the classic page for now) |
-| 5 Samples | Record | `sampler` | record from the Daisy input or the phone mic, live waveform, trim, normalise, save, send | mock (trim, normalise: later) |
-| 5 Samples | Kits | - | kit list, load, what's in each | to draw |
+| 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete | built |
+| 5 Samples | Record | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built (trim, normalise: later; the Daisy's own input records as a live loop, ARM) |
+| 5 Samples | Kits | - | every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.10) |
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
-| 6 Patterns | Sets | (in `patterns`) | sets on the card, save, load, switch on the bar | mock (needs set commands in the firmware) |
+| 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
 | 8 System | System | `system` | links, ping, OLED mirror, APC40 LED mirror, log, settings | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
@@ -53,8 +53,8 @@ Sound and Steps show the editor that fits the selected track's type.
 | View | Content | Status |
 |---|---|---|
 | Selector | pick a mode | built (`selector.html`) |
-| MIDI hub | routing grid, network devices, presets | built (`midihub.html`); restyle to match |
-| Clock | tempo, source, outputs, timing | built (`clock.html`); restyle to match |
+| MIDI hub | routing grid, network devices, presets | built (`midihub.html`), same look |
+| Clock | tempo, source, outputs, timing | built (`clock.html`), same look |
 | Settings | remote buttons, start-up, TV sound, network name | in the selector today; own view planned |
 | Cubase sync | plugin status, Cubase's transport | later |
 | Numark DJ | decks with scrolling waveforms, mixer, library | later |
@@ -81,8 +81,17 @@ live, with markers and bar lines), pad, list row with waveform.
   metronome, track type, live loop arm/stop/cancel, kit load, audition),
   level meters (`H`), the 64-pattern mask (`O`) and a waveform outline per
   track (`Z`). See `protocol/serial.md`. Desktop-tested; not flashed yet.
-- Still missing in the firmware: set save/load from the T95, sample browser
-  on the Daisy's card from the T95, roll from a page.
+- v13.10 (control protocol 5, report 11): sets and the kit list for the pages.
+- Still missing in the firmware: sample browser on the Daisy's card from the
+  T95, roll from a page.
+
+## Layouts
+
+Three, picked from the window and scaled to fit it (`fit()` in `apcbox.js`):
+wide (TV, Mac, iPad on its side; drawn 1920 wide), upright (phone, iPad
+upright; drawn 390 wide), and a phone on its side (drawn 844 wide: the view
+buttons move to a rail on the left, the top bar is one row, strips lose
+their pots in Perform and the Mixer keeps three small ones).
 
 ## Phone
 

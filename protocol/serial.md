@@ -1,4 +1,4 @@
-# ApcBox serial protocol (report version 10)
+# ApcBox serial protocol (report version 11)
 
 The Daisy's USB-C is a composite USB device, full speed (12 Mbit/s):
 
@@ -23,7 +23,7 @@ From firmware v13.3, every command starts with ESC (0x1B):
 
 From v13.5, the T95 control protocol: version 1 (v13.5, v13.6) has K, M, N
 and P; version 2 (v13.7) adds U; version 3 (v13.8) adds F; version 4 (v13.9) adds the U actions
-for the T95 pages. Send these only after the Daisy has sent a
+for the T95 pages; version 5 (v13.10) adds the set actions. Send these only after the Daisy has sent a
 `P` line, and U only when its version is 2 or more: older firmware would act
 on the `R`/`B` letters inside them.
 
@@ -35,6 +35,7 @@ on the `R`/`B` letters inside them.
 | `ESC P` *id* `\n` | Ping. The Daisy answers `Y` *id* from its main loop (*id*: printable, at most 32) |
 | `ESC U` *action* `\n` | UI action, control protocol 2 (v13.7): `turn N` (-16..16, the encoder), `push`, `back`, `play`, `stop`, `track N` (1-16). Unknown actions are logged and ignored |
 | `ESC U` *action* `\n` | Control protocol 4 (v13.9), for the T95 pages; none of it needs an APC40. Tracks, steps, patterns and FX count from 1; values are 0-127 like the `T`/`A`/`M` lines; *v* flags are 0 off, 1 on, 2 toggle. `mute t v`, `solo t v`, `knob t i val` (*i* 0-11 as in `T`; 12 = crossfader side 0-2), `acid t i val` (*i* 0-7 as in `A`), `glob i val` (*i* 0-9 as in `M`), `tempo x10` (600-2000), `step p t s val` (0 off, 1 on, 2 accent), `note p t s note slide`, `pat p` (queue), `pcopy from to`, `pclear p t` (*t* 0 = whole pattern), `undo`, `fx n 0\|1` (hold; released if the T95 goes quiet for 2 s), `rec v`, `metro v`, `mon v`, `type t 303\|sample`, `lrec arm t`, `lrec stop`, `lrec cancel`, `kit k page`, `audition t`. At most 31 characters |
+| `ESC U set ...` `\n` | Control protocol 5 (v13.10): sets on the Daisy's card, slots 1-8. `set load n` (switches on the bar), `set save n [name]` (no name: keeps the slot's, or the open set's), `set new [name]` (first free slot), `set name n name`, `set delete n`, `set trans k` (0 cut, 1 filter, 2 tape stop, 3 echo out). Names: up to 16 of `a-z A-Z 0-9 space - _ # +`, anything else becomes `_`. Ignored while a set is saving or loading (except `trans`) |
 | `ESC F O` *id track size name* `\n` | Sample transfer, control protocol 3 (v13.8): start sending a WAV file of *size* bytes for *track* (1-16). One at a time; refused while a set loads or if it doesn't fit the staging pool |
 | `ESC F D` *id seq crc32 base64* `\n` | Chunk *seq* (512 bytes, the last may be shorter), CRC32 in hex. Any order, repeats are harmless. At most 800 characters per frame |
 | `ESC F C` *id* `\n` | All chunks sent: if every one arrived, the Daisy loads the file into the track like a file from its card |
@@ -95,7 +96,11 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `H hex` | Level meters, v13.9: 36 hex digits = 16 tracks (post-fader) then master left, right; peak since the last line, 00-ff (ff = full scale), held and falling. Sent when it changes (every 33 ms while there is sound) |
 | `O hex` | v13.9: which of the 64 patterns have steps, 16 hex digits (pattern 1 = lowest bit) |
 | `Z t len rate hex` | v13.9: waveform outline of track `t`'s sound: length in samples at `rate`, then 96 peaks as 2 hex digits each, scaled so the loudest is ff (`-` and length 0 for a 303 track or an empty slot). Sent when the sound changes and after `ESC R`, one track per report pass; not in the once-a-second repeat |
-| `V n` | Report version (10). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
+| `J i exists bpm10 samples loops synths name` | v13.10: set slot `i` (0-7) on the card; `J i 0` when empty. On change and in the once-a-second repeat |
+| `JT k name` | v13.10: the set transition (0-3) and its name |
+| `KP a b n` | v13.10: the kit on tracks 1-8, on tracks 9-16 (-1 = edited since), and how many kits there are |
+| `KL k name` | v13.10: name of kit `k`, for every kit; after `ESC R` and when the list changes |
+| `V n` | Report version (11). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 
 ### S fields
 

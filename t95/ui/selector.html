@@ -47,6 +47,40 @@ td.acts button { padding: 4px 9px; font-size: 12px; }
 .hint { color: var(--dim); font-size: 13px; }
 input[type=number] { width: 64px; background: #24282c; color: var(--text); border: 1px solid #3a3f45; border-radius: 6px; padding: 5px 6px; font: inherit; }
 @media (max-width: 560px) { td.code { width: 56px; } td, th { padding: 5px 3px; } .module { font-size: 15px; } }
+
+/* ---- GhettoRack look, shared with the ApcBox page (apcbox.css): LEDs and glowing buttons ---- */
+:root{--bg:#0b0c0d;--panel:#15171a;--line:#2a2d31;--text:#d9dcdf;--dim:#7d848c;--green:#35d05a;--red:#ff4b3e;--yellow:#ffb833;--amber:#ff9a1f;--blue:#4aa3ff;--off:#23262a}
+body{background:var(--bg);-webkit-tap-highlight-color:transparent}
+header{background:#101214;gap:10px 18px;padding:12px 18px}
+h1{font-size:18px;letter-spacing:.1em}
+h2{letter-spacing:.1em}
+.chip{background:none!important;padding:0;display:inline-flex;align-items:center;gap:7px;color:var(--dim)!important;font-size:12px}
+.chip::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--off);flex:none}
+.chip.ok::before{background:var(--green);box-shadow:0 0 8px var(--green)}
+.chip.warn::before{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.chip.bad::before{background:var(--red);box-shadow:0 0 8px var(--red)}
+.chip.warn,.chip.bad{color:var(--text)!important}
+button{background:#1d2024;border:1px solid #3a3f45;border-radius:7px;color:#c3c8cd;font-weight:600;min-height:34px}
+button:hover{background:#24282c}
+button:disabled{opacity:.35}
+button.sel,.tabs button.sel,button.on{background:#1d2024;color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1f77, inset 0 0 8px #ff9a1f33}
+button:focus-visible,input:focus-visible,select:focus-visible,.module:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+input[type=checkbox]{accent-color:var(--green);width:18px;height:18px;vertical-align:middle}
+input[type=number],input[type=text],select{background:#0b0c0d;border:1px solid #3a3f45;color:var(--text);border-radius:6px;min-height:34px}
+.panel,.box{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.banner{border-radius:10px}
+#home{height:40px;padding:0 16px}
+.module{background:#1d2024;border:1px solid #3a3f45;border-radius:12px;padding:20px 20px;font-size:19px;min-height:76px}
+.module .name{letter-spacing:.02em}
+.module:not(:disabled):hover{border-color:var(--green)}
+.module.last{border-color:var(--green);box-shadow:0 0 14px #35d05a66, inset 0 0 18px #35d05a22}
+.module.last .name{color:var(--green)}
+.module.last .name::after{color:var(--green);opacity:.7}
+.module:disabled{background:#15171a;border-style:dashed}
+td.code.set{color:var(--green)}
+.banner{background:#15231a;border-color:var(--green)}
+.banner.learn{background:#2a2310;border-color:var(--amber)}
+@media (max-width: 560px) { .module{flex-direction:column;align-items:flex-start;gap:4px;padding:14px 16px;font-size:18px;min-height:0} }
 </style>
 </head>
 <body>

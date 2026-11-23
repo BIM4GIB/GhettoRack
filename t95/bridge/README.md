@@ -250,6 +250,8 @@ The clock module (`/clock`): one tempo for everything.
 | `/` | The module selector (`t95/ui/selector.html`) |
 | `/apcbox` | The T95's ApcBox page (`t95/ui/apcbox.html`): full-screen views, works with no APC40, needs firmware v13.9 |
 | `/audio.pcm` | The Daisy's audio for the page's LISTEN button: raw s16le 48 kHz stereo, endless |
+| `/samples/peaks?src=&path=` | JSON `{secs, peaks}`: 96 peaks (hex) of what the Daisy would get of that file, for the waveform in the list |
+| `/samples/preview?src=&path=` | That file as the Daisy would get it (WAV), for hearing it in the browser |
 | `POST /do` | `{"a": "mute 3 2"}` or a list of up to 32: page actions for the Daisy (`ESC U`), checked against a list before they go on the wire |
 | `/classic` | `daisy/ui/apcbox-ui.html`, the monitor page. It reads `/caps`, shows "T95 bridge" and "Daisy" status separately, and hides the Mac build's encoder/touch controls and TFT preview |
 | `/events` | SSE. Default events: one report line each. `event: bridge`: JSON status |
