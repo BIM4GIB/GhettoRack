@@ -381,7 +381,7 @@ $("h-auto").onclick = async () => { if (!needPin("h-banner")) return; const o = 
 $("h-toggle").onclick = async () => { if (!needPin("h-banner")) return; const hs = st.hotspot || {}, on = !hs.on;
   if (on && sure !== "hot") { sure = "hot"; return draw(); }
   sure = ""; const o = await sys("hotspot", { on }, true);
-  banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid + " on this device" : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : on ? "" : "note"); poll(); };
+  banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid + " on this device" : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : "note"); poll(); };
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
   banner("b-banner", on ? "Starting Bluetooth, up to 20 s" : "");
   const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth starting, about 10 s" : "Bluetooth off"), o.error ? "bad" : "good"); poll(); };
