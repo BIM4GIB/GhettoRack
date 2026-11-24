@@ -46,6 +46,10 @@ install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
 # Settings: the helper that does the few things needing root (t95/helper/README.md).
 # The bridge reaches it through the group; networks it joins and its PIN stay on the box.
 getent group ghettorack >/dev/null || groupadd --system ghettorack
+# The bridge's user. The unit says DynamicUser, and systemd takes a user of the unit's name if
+# there is one. There has to be one for Bluetooth MIDI: this box looks users up in /etc/passwd
+# only, and the system bus (the way to BlueZ) turns a user it can't look up away.
+id apcbox-bridge >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin apcbox-bridge
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
 install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
 # The box's own hotspot hands out addresses with dnsmasq (the program only: dnsmasq-base

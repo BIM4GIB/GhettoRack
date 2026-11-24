@@ -6,7 +6,7 @@ After=network.target
 ExecStart=/opt/apcbox-bridge/venv/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ble --ui /opt/apcbox-bridge/apcbox-ui.html --selector /opt/apcbox-bridge/selector.html --hub /opt/apcbox-bridge/midihub.html --clock-page /opt/apcbox-bridge/clock.html --apcbox-page /opt/apcbox-bridge/apcbox.html --settings-page /opt/apcbox-bridge/settings.html
 Restart=always
 RestartSec=2
-# Own throwaway user; dialout for the Daisy, audio for the MIDI controllers,
+# Own user (install.sh makes it: a made-up one can't use the system bus on this box); dialout for the Daisy, audio for the MIDI controllers,
 # input for the IR receiver, ghettorack for the settings helper's socket. State (last module, IR buttons) in /var/lib/apcbox-bridge
 DynamicUser=yes
 SupplementaryGroups=dialout audio input ghettorack
