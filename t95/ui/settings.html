@@ -62,6 +62,12 @@ p{margin:0;color:#b9bec5}
 .irr .x{width:26px;padding:0}
 .tabs{display:flex;gap:6px;flex-wrap:wrap}.tabs button{height:30px;padding:0 10px;font-size:13px}.tabs button.sel{color:var(--amber);border-color:var(--amber)}
 body.rc :focus{outline:2px solid var(--amber);outline-offset:1px}
+#pad{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:9}
+#pad.on{display:flex}
+#pad .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;align-items:center}
+#pad-val{font:22px var(--mono);letter-spacing:.3em;height:30px;color:var(--amber)}
+#pad-keys{display:grid;grid-template-columns:repeat(3,64px);gap:8px}
+#pad-keys button{height:48px;font-size:20px;padding:0}
 code{font-family:var(--mono);background:#0f1113;border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:13px}
 header a{white-space:nowrap}
 @media (min-width:1500px){html{zoom:1.5}}
@@ -76,7 +82,7 @@ header a{white-space:nowrap}
 }
 @media (max-height:480px){
   header{padding:5px 10px}main{padding:6px 10px;gap:8px;grid-template-columns:120px 1fr}
-  nav button{height:34px;font-size:13px}section{padding:8px 10px;gap:6px}button{height:30px}input{height:30px}
+  nav button{height:34px;font-size:13px}section{padding:8px 10px;gap:6px}button{height:30px}input{height:30px}#pad-keys button{height:34px}#pad .box{padding:8px;gap:5px}#pad-keys{gap:5px}#pad-val{height:24px;font-size:18px}
   p{font-size:12px}.big{font-size:15px}.banner{height:28px}.banner.open{min-height:28px;padding:4px 12px}.banner .ba{height:22px}
 }
 </style>
@@ -139,6 +145,7 @@ header a{white-space:nowrap}
     </section>
   </div>
 </main>
+<div id="pad"><div class="box"><span class="dim" id="pad-for">PIN</span><div id="pad-val"></div><div id="pad-keys"></div></div></div>
 <script>
 "use strict";
 const $ = id => document.getElementById(id), el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
@@ -169,7 +176,7 @@ function banner(id, text, cls, act) {
   arm();
 }
 function go(k) { tab = k; sure = ""; nav(); draw(); poll(); }
-function flashPin() { const p = $("pin"); p.focus(); p.classList.add("flash"); setTimeout(() => p.classList.remove("flash"), 900); }
+function flashPin() { const p = $("pin"); if (document.body.classList.contains("rc")) return padOpen(p, document.activeElement); p.focus(); p.classList.add("flash"); setTimeout(() => p.classList.remove("flash"), 900); }
 const httpsAct = () => ({ label: "Open https", href: "https://" + location.hostname + ":8443/settings?s=" + tab + (tv ? "&tv=1" : "") });
 let down = false;       // the "box / helper isn't answering" banners are up
 /* every request gives up after a while: a box that is changing networks must not leave the page stuck */
@@ -355,18 +362,33 @@ $("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const
   banner("n-banner", o.error || "Box name: " + $("n-host").value.trim(), o.error ? "bad" : "good"); poll(); };
 $("d-hdmi").onclick = async () => { await bpost("/settings", { hdmi_audio: !(bst && bst.hdmi_audio && bst.hdmi_audio.on) }); await pollBridge(); setTimeout(pollBridge, 2500); };
 /* The TV remote (and arrow keys) walk the buttons; ok presses one; back / home leave to the modules.
-   Typing (PIN, passwords) needs a keyboard or a phone. */
+   ok on a PIN field (or a button that needs the PIN) opens a number pad. Passwords still need a keyboard or a phone. */
+let pad = null;         // { inp: the field it fills, back: where the cursor returns, val }
+function padDraw() { $("pad-val").textContent = "\u2022".repeat(pad.val.length); }
+function padOpen(inp, back) { pad = { inp, back: back && back !== document.body ? back : inp, val: "" };
+  $("pad-for").textContent = inp.id === "pin" ? "PIN" : inp.placeholder; $("pad").classList.add("on"); document.body.classList.add("rc"); padDraw(); $("pad-keys").children[4].focus(); }
+function padClose(keep) { const p = pad; pad = null; $("pad").classList.remove("on");
+  if (keep) { p.inp.value = p.val; p.inp.dispatchEvent(new Event("input")); } p.back.focus(); }
+function padKey(k) { if (!pad) return; if (k === "OK") return padClose(true); if (k === "DEL") pad.val = pad.val.slice(0, -1); else if (pad.val.length < 8) pad.val += k; padDraw(); }
+function padMove(a) { const ks = [...$("pad-keys").children]; let i = ks.indexOf(document.activeElement); if (i < 0) i = 4;
+  const r = Math.floor(i / 3), c = i % 3; ks[a === "up" ? (r ? i - 3 : i) : a === "down" ? (r < 3 ? i + 3 : i) : a === "left" ? (c ? i - 1 : i) : (c < 2 ? i + 1 : i)].focus(); }
+for (const k of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "DEL", "0", "OK"]) { const b = el("button", k === "OK" ? "act" : "", k === "DEL" ? "\u232b" : k); b.onclick = () => padKey(k); $("pad-keys").appendChild(b); }
+$("pad").onclick = e => { if (e.target === $("pad")) padClose(false); };
 function focusables() { return [...document.querySelectorAll("header a, header input, nav button, section.on button:not(:disabled), section.on input")].filter(e => e.offsetParent && e.style.visibility !== "hidden"); }
 function move(d) { const f = focusables(); let i = f.indexOf(document.activeElement); i = i < 0 ? 0 : Math.max(0, Math.min(f.length - 1, i + d));
   document.body.classList.add("rc"); f[i].focus(); f[i].scrollIntoView({ block: "nearest" }); }
 function act(a) {
+  if (pad) { if (["up", "down", "left", "right"].includes(a)) padMove(a); else if (a === "ok") { if ($("pad").contains(document.activeElement)) document.activeElement.click(); } else if (a === "back" || a === "home") padClose(false); return; }
   if (a === "up" || a === "left") move(-1); else if (a === "down" || a === "right") move(1);
-  else if (a === "ok") { if (document.activeElement && document.activeElement.click) document.activeElement.click(); }
+  else if (a === "ok") { const e = document.activeElement; if (e && e.tagName === "INPUT" && e.inputMode === "numeric") padOpen(e); else if (e && e.click) e.click(); }
   else if (a === "back" || a === "home") location.href = $("back").href;
 }
-document.addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return;
+document.addEventListener("keydown", e => {
+  if (pad) { const k = /^[0-9]$/.test(e.key) ? e.key : e.key === "Backspace" ? "DEL" : null;      // a keyboard works on the pad too
+    if (k) { padKey(k); e.preventDefault(); return; } if (e.key === "Escape") { padClose(false); return; } }
+  if (e.target.tagName === "INPUT") return;
   const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key]; if (k) { act(k); e.preventDefault(); } });
-document.addEventListener("pointerdown", () => document.body.classList.remove("rc"));
+document.addEventListener("pointerdown", () => { if (!pad) document.body.classList.remove("rc"); });
 try { const es = new EventSource("/events?view=settings");
   es.addEventListener("ir", e => { try { act(JSON.parse(e.data).action); } catch (err) {} });
   es.addEventListener("irraw", e => { try { $("r-last").textContent = "last button: " + JSON.parse(e.data).scan; } catch (err) {} });

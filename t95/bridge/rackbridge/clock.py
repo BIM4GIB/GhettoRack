@@ -71,6 +71,7 @@ class Clock:
         self.in_jitter_ms = None
         self.model = None                      # (a, b) while locked
         self.off_line = 0
+        self.bend = 0                          # ticks running whose recent slope is not the line's
         # the Daisy: following it (CL lines) and what it says about following us (CK)
         self.d_tick = 0
         self.d_sent_playing = False
@@ -202,7 +203,25 @@ class Clock:
                 else:
                     self.off_line = 0
             self.in_ticks.append((self.in_n, t))
-            if len(self.in_ticks) >= 12:
+            # A step in tempo. The test above misses one whose ticks cross the old line
+            # (off, on, off: never four running), so also compare the last half beat's own
+            # slope with the line's, against how well that half beat's slope is known: a few
+            # late ticks have a slope too, but a large residual with it.
+            if self.model is not None and len(self.in_ticks) >= 24:
+                f = fit_line(list(self.in_ticks)[-CLOCK_BEND_N:])
+                b = self.model[1]
+                if f and abs(f[1] - b) > max(CLOCK_BEND * b, CLOCK_BEND_SE * max(f[2], 0.0002)):
+                    self.bend += 1
+                    if self.bend >= CLOCK_BEND_RUN:
+                        keep = list(self.in_ticks)[-CLOCK_BEND_N:]
+                        self.in_ticks.clear()
+                        self.in_ticks.extend(keep)
+                        self.bend = self.off_line = 0
+                else:
+                    self.bend = 0
+            # No new fit while ticks are off the line: fitted in, they bend the line and raise
+            # its residual, and the test above (4x the residual) then never calls a tempo change.
+            if len(self.in_ticks) >= 12 and self.off_line == 0:
                 f = fit_line(list(self.in_ticks))
                 if f and f[1] > 0:
                     bpm = 60.0 / (f[1] * CLOCK_PPQ)

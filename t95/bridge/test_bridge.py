@@ -50,7 +50,6 @@ def free_port():
 # smoothness bounds are for the T95; on a Mac they only catch something badly wrong.
 TIMER_SLACK_MS = 4.0 if sys.platform == "darwin" else 0.0
 
-
 class FakeDaisy:
     """The master side of a pty, with the slave reachable through a symlink"""
 
@@ -1194,7 +1193,8 @@ class ClockTest(unittest.TestCase):
               "(ideal 20.000), sd %.3f, worst %.3f; late %s" % (c["tempo"], c["in_jitter_ms"], m, sd, worst, c["late_ms"]))
         self.assertTrue(c["locked"])
         self.assertAlmostEqual(c["tempo"], 125.0, delta=0.4)
-        self.assertEqual(self.rx.bytes_()[0], 0xFA)
+        # send_stopped: a tick of the idle clock can still land between the clear and the start
+        self.assertEqual(self.rx.bytes_()[:3].lstrip(b"\xf8")[:1], b"\xfa")
         self.assertAlmostEqual(m, 20.0, delta=0.2)
         self.assertLess(sd, 1.0 + TIMER_SLACK_MS)
         self.assertLess(abs(len(out) - n), 10)
@@ -1220,8 +1220,7 @@ class ClockTest(unittest.TestCase):
 
     def test_c4_source_gone_holds_tempo(self):
         self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"], "send_stopped": True})
-        # c3 ended at 125 a moment ago. Under half a second of silence and the bridge fits one
-        # line through both tempos (docs/BACKLOG.md, "MIDI and clock"); that is not this test.
+        # c3 ended at 125 a moment ago; start from silence, a tempo step is c4b's business
         time.sleep(0.7)
         self.play_clock(110, 1.5)
         self.assertTrue(self.clock()["locked"])
@@ -1231,6 +1230,17 @@ class ClockTest(unittest.TestCase):
         self.assertFalse(c["locked"])
         m, sd, _ = intervals_ms(self.rx.ticks()[30:])
         self.assertAlmostEqual(m, 60000 / (110 * 24), delta=0.3)   # still ticking at the last tempo
+
+    def test_c4b_tempo_step_soon_after_the_start(self):
+        # a new tempo while the fit is young: the old ticks must not stay in it
+        self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"], "send_stopped": True})
+        time.sleep(0.7)
+        self.play_clock(125, 0.7)        # few ticks in the fit: the new ones bend it easily
+        self.play_clock(110, 1.5, start=False)
+        c = self.clock()
+        print("\n  125 BPM for 0.7 s, then 110 for 1.5 s: tempo %.2f, fit residual %s ms" % (c["tempo"], c["in_jitter_ms"]))
+        self.assertAlmostEqual(c["tempo"], 110.0, delta=0.5)
+        self.assertLess(c["in_jitter_ms"], 4.0)
 
     def test_c5_link(self):
         try:
@@ -2228,6 +2238,59 @@ class PageControlTest(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.exists(SIM), "build daisy/hostbuild/t95sim first (see daisy/t95sim.cpp)")
+class FollowerSimTest(unittest.TestCase):
+    """The tempo fit alone, fed ticks with a made-up clock: steps in tempo, late ticks"""
+
+    def run_ticks(self, seed, n_a, bpm_a, bpm_b, n_b, sigma, phase=0.0, late=None):
+        import random
+        import rackbridge.clock as ck
+
+        class FakeTime:
+            t = 100.0
+
+            def monotonic(self):
+                return self.t
+        ft, real = FakeTime(), ck.time
+        ck.time = ft
+        try:
+            rnd = random.Random(seed)
+            c = ck.Clock(None, {"on": True, "source": "Cubase"})
+            t, out = 100.0, []
+            for k in range(n_a + n_b):
+                if k == n_a:
+                    t += phase
+                t += 60.0 / ((bpm_a if k < n_a else bpm_b) * 24)
+                ft.t = t + abs(rnd.gauss(0, sigma)) + (late[1] if late and k % 97 < late[0] and k > 150 else 0)
+                c.feed(b"\xf8")
+                out.append(c.in_bpm)
+            return out
+        finally:
+            ck.time = real
+
+    def test_s1_tempo_step(self):
+        # before the slope check (2026-11-24) 17 to 73% of these came out wrong: the new ticks bent the old line
+        for a, b, after, sigma in ((125, 110, 36, 0.0005), (125, 110, 36, 0.002), (120, 126, 48, 0.002)):
+            bad = n = 0
+            for seed in range(8):
+                for n_a in (24, 30, 36, 48, 72, 96, 150):
+                    for phase in (-0.008, -0.004, 0, 0.004, 0.008, 0.03, 0.2):
+                        bad += abs(self.run_ticks(seed, n_a, a, b, after, sigma, phase)[-1] - b) > 0.5
+                        n += 1
+            print("\n  %d to %d BPM, %g ms jitter, read %d ticks later: wrong by over 0.5 BPM in %d of %d"
+                  % (a, b, sigma * 1000, after, bad, n))
+            self.assertLess(bad, n * 0.06)
+
+    def test_s2_steady_tempo_stays_steady(self):
+        for name, sigma, late, limit in (("no late ticks", 0.003, None, 0.3), ("one tick 20 ms late", 0.002, (1, 0.020), 0.3),
+                                         ("three running 30 ms late", 0.002, (3, 0.030), 0.6)):
+            worst = 0
+            for seed in range(6):
+                r = self.run_ticks(seed, 1500, 120, 120, 0, sigma, late=late)
+                worst = max(worst, max(abs(x - 120) for x in r[96:]))
+            print("\n  steady 120 BPM, %s: worst reading off by %.2f BPM" % (name, worst))
+            self.assertLess(worst, limit)
+
+
 class ClockDaisyTest(unittest.TestCase):
     """v13.11: the firmware's sequencer follows the T95's clock (ESC T), and the T95's clock follows the Daisy (CL)"""
 
@@ -3155,6 +3218,28 @@ class SettingsTest(unittest.TestCase):
                 pg.keyboard.press("ArrowDown")
                 pg.keyboard.press("ArrowDown")
                 self.assertTrue(pg.evaluate("document.body.classList.contains('rc') && !!document.activeElement && document.activeElement !== document.body"))
+                # the PIN with the remote: ok on the PIN field opens a number pad, the arrows walk it
+                pg.evaluate("document.getElementById('pin').value = ''; document.body.classList.add('rc'); document.getElementById('pin').focus()")
+                pg.evaluate("act('ok')")
+                pg.wait_for_selector("#pad.on")
+                self.assertEqual(pg.evaluate("document.activeElement.textContent"), "5")
+                box = pg.evaluate("(() => { const r = document.querySelector('#pad .box').getBoundingClientRect(); return r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth; })()")
+                self.assertTrue(box, (w_, h_))
+                for a_ in ("up", "ok", "right", "down", "ok", "down", "down", "left", "ok", "up", "up", "up", "up", "left", "ok", "ok"):
+                    pg.evaluate("a => act(a)", a_)                       # 2, 6, 0, 1, 1
+                self.assertEqual(pg.evaluate("document.getElementById('pad-val').textContent.length"), 5)
+                if (w_, h_) in ((1920, 1080), (844, 390)):
+                    pg.screenshot(path=os.path.join(self.dir, "settings-pad-%d.png" % w_))
+                for a_ in ("down", "down", "down", "ok", "right", "right", "ok"):   # delete one, then OK
+                    pg.evaluate("a => act(a)", a_)
+                self.assertEqual(pg.evaluate("[document.getElementById('pad').classList.contains('on'), document.getElementById('pin').value, document.activeElement.id]"),
+                                 [False, "2601", "pin"])
+                pg.evaluate("act('ok')")                                 # again, and back leaves the field as it was
+                pg.keyboard.press("7")
+                pg.evaluate("act('back')")
+                self.assertEqual(pg.evaluate("[document.getElementById('pad').classList.contains('on'), document.getElementById('pin').value, location.pathname]"),
+                                 [False, "2601", "/settings"])
+                pg.evaluate("document.getElementById('pin').value = ''")
                 # the start screen: modules and the way to Settings, nothing else
                 pg.goto("http://127.0.0.1:%d/" % self.http)
                 pg.wait_for_selector(".module")

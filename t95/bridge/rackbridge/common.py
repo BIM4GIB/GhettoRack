@@ -47,6 +47,13 @@ OUT_FIFO_MAX = 512        # routed messages waiting for one port
 CLOCK_PPQ = 24            # MIDI clock ticks per quarter note
 CLOCK_BPM_MIN, CLOCK_BPM_MAX = 20.0, 300.0
 CLOCK_FIT = 96            # incoming ticks the tempo fit uses (4 beats)
+# A tempo step while following: the last CLOCK_BEND_N ticks' own slope is off the fit's by
+# CLOCK_BEND (1%) and by CLOCK_BEND_SE times their residual (6 standard errors of a 12 tick
+# slope), CLOCK_BEND_RUN ticks running (a shift in phase passes through in fewer)
+CLOCK_BEND_N = 12
+CLOCK_BEND = 0.01
+CLOCK_BEND_SE = 0.55
+CLOCK_BEND_RUN = 7
 CLOCK_LOST_S = 0.5        # no incoming tick for this long: hold the last tempo
 CLOCK_SPIN_S = 0.0005     # sleep to this close to a tick, then spin
 PING_KEEP = 300

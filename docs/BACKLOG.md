@@ -162,12 +162,15 @@ them one on the map (REC still arms a loop).
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.
 - MIDI clock following: tempo ramps lag by the fit window (4 beats).
-- Clock follower: a source that pauses for under half a second and comes back
-  at another tempo is fitted with one line through both (seen in the bridge
-  tests on the Mac, 2026-11-24: 125 then 110 BPM, held tempo 113, fit residual
-  16 ms). The check that should catch it allows four times the fit's own
-  residual, and a bad fit raises that. It clears once 96 new ticks are in.
-  Not tried with a real sequencer.
+- Clock follower, tempo steps: fixed 2026-11-24 in the bridge. A step in the
+  source's tempo was often read wrong for up to 4 beats (the new ticks bent the
+  fitted line instead of replacing it: 125 to 110 BPM read as 113). Now the
+  last half beat's own slope is compared with the line's. In a simulation with
+  made-up ticks (`FollowerSimTest`): wrong 17 to 73% of the time before, 0 to
+  4% after. Not tried with a real sequencer.
+- Clock follower, still weak: a run of ticks that all arrive late and then
+  recover (8 ticks 15 ms late in the simulation) throws the reading off by up
+  to 12 BPM until the window has refilled. It did that before the fix too.
 
 ## T95 and pages
 
