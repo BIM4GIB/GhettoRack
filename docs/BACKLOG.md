@@ -14,12 +14,24 @@ not move: the Seed runs exactly this binary). Found with a 33 minute jam take.
   has every interrupt at priority 0, so USB waited behind the audio callback.
   The audio interrupt is now one level down (`daisy/main.cpp`).
 - Seen on the rig: 90 s at 76 % average CPU, 48012 frames/s, no skipped or
-  missed packets. Not yet listened to by Rene.
+  missed packets. Rene listened in the browser afterwards: no gaps heard (no
+  take recorded under load on this build).
 - Open: with 8 sample tracks and 8 303s on every step the Seed stopped
   reporting and taking commands (audio and USB audio went on) until reset. Not
   known whether any build does that. Nothing resets it by itself.
 - Open: one 303 with 8 busy sample tracks takes single blocks to 124 % CPU.
 - The half-hour seam of a take is sample-continuous (seen in that take).
+- CPU, measured on this build: 44 % stopped, 71 to 74 % with 8 sample tracks on
+  every step plus one 303. All code runs from the QSPI flash; the 64 KB of
+  ITCM is unused. Tried 2026-11-24: the audio path (27 KB) linked into ITCM
+  and copied at start-up. Two builds, neither booted. The first because
+  `memset` had moved and the reset code calls it; the second hung inside
+  `hw.Init` (stop report: stage 1), cause not found. The work is in a git
+  stash on Rene's Mac ("ITCM attempt 2026-11-24"), do not flash it as it is.
+  Next (agreed): a build that boots as now and tests ITCM by itself once
+  running (write, read back, run one small function there, log the result),
+  then move functions over a few at a time. After that, step 2: an overload
+  guard that drops voices when the main loop gets no time.
 
 ## v13.21: long plain samples in spare memory (built 2026-11-24, on the rig with the USB audio change, long samples not tried there)
 
