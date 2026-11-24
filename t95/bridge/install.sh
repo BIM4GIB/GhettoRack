@@ -49,7 +49,10 @@ getent group ghettorack >/dev/null || groupadd --system ghettorack
 # The bridge's user. The unit says DynamicUser, and systemd takes a user of the unit's name if
 # there is one. There has to be one for Bluetooth MIDI: this box looks users up in /etc/passwd
 # only, and the system bus (the way to BlueZ) turns a user it can't look up away.
-id apcbox-bridge >/dev/null 2>&1 || useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin apcbox-bridge
+# (Looked for in /etc/passwd itself, and with the service stopped: where libnss-systemd is
+# installed, the running service's made-up user answers to the same name.)
+grep -q '^apcbox-bridge:' /etc/passwd || { systemctl stop apcbox-bridge.service 2>/dev/null || true
+  useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin apcbox-bridge; }
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
 install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
 # The box's own hotspot hands out addresses with dnsmasq (the program only: dnsmasq-base
