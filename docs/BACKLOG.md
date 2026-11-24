@@ -25,6 +25,13 @@ bridge talks to it; nothing of the list below has been played there.
 - A block is free again when its track gets any other sound.
 - No undo for a take that stays in a block, nor for an overdub on one. A
   dropped take puts the track back on what it held, long loop included.
+- BUG (Rene, 2026-11-24, on the rig): after an overdub on a long loop, pressing undo
+  seems to say "take undone" and changes nothing. No undo there is as documented; the
+  message is wrong. Cause: `box.cpp` offered undo after every overdub and said "take
+  undone" although nothing was kept for a long loop. Fixed 2026-11-24 in v13.18
+  (desktop test; flashed, the box says `"firmware": "13.18"`; the overdub itself NOT yet tried on the rig): the overdub ends with
+  "overdub N done (no undo)", undo is not offered, and pressing it says
+  "overdub on long loop: no undo".
 - Sets: a long loop is saved whole and loads back into a block; with none free
   it is cut to 16 s. Any other sound over 16 s is cut on load (sets saved
   before this included). One-shot sampling ends at 16 s.
@@ -87,7 +94,8 @@ them one on the map (REC still arms a loop).
 - Keyboards through the T95: sound check. Sample transfer speed figure.
 - Boot straight into the last mode. The remote after relearning (OK button).
 - Daisy: the screen's 7-9 ms per loop, the one-off 52 ms ping spike.
-- Mac build of the shared code (`daisy/mac/build.sh`) since v13.9.
+- Mac build of the shared code (`daisy/mac/build.sh`): builds, 2026-11-24, with the
+  v13.18 sources. Not started or played since v13.9.
 - v13.15 boots, plays and the APC40 map works on the rig (2026-11-23). Still
   to try there: the items below.
 - v13.15 on the Seed: SDRAM is now 98% used (the looper's undo takes one more
@@ -132,6 +140,17 @@ them one on the map (REC still arms a loop).
   Bluetooth MIDI, the PIN with the TV remote (a number pad). Sound cards and the box's SD card under Devices: built 2026-11-24 (read-only; no eject, and not the Daisy's own card).
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),
   but the error and info banners are ugly and stay too long. UI pass later.
+- **Jam recorder** (next for the box's SD card; Rene, 2026-11-24): record the
+  Daisy's master to the card in the T95's slot. The audio already arrives on
+  the T95 as USB audio (`arecord` showed 48 kHz stereo, `t95/README.md`). Not
+  built. Needs: the card writable only while a recording runs (the udev rule
+  mounts it read-only so pulling it is always safe), an eject under Settings >
+  Devices, a record button on the page, files split or flushed so a pulled
+  card loses seconds, not the take. Open: exFAT in this slot is untested (read
+  or write), write speed and dropouts while the bridge and MIDI run are
+  unmeasured, what happens when the card is full. Recording must not run in
+  the bridge's own loop. Later with a writable card: set and kit backups, the
+  library on the card.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
 - **Numark DJ**: likely Mixxx on the T95 in the kiosk; which Numark?
@@ -170,7 +189,15 @@ them one on the map (REC still arms a loop).
   encrypting. A device that wants a code typed is not handled. While a paired device
   is away the bridge scans 6 s in every 20 for it.
 - The box as a Bluetooth MIDI device that an iPad or Mac finds (the other way round):
-  not built. Its Bluetooth is not visible to others.
+  built 2026-11-24, NOT tried with a device. Settings > Bluetooth > VISIBLE (PIN): for
+  3 minutes the box advertises the MIDI service under its name; whoever connects and
+  turns notifications on is one more controller port ("Bluetooth guest"). No pairing
+  that way, hence PIN and time limit. BlueZ serves the characteristic for the bridge
+  (`Guest` in `rackbridge/ble.py`). Seen on the T95: BlueZ accepts the service
+  (`ble_midi.box.state` is `ready` in `/health`), and VISIBLE without a PIN is turned
+  away. Not seen: the radio advertising at all, an iPad listing or connecting, MIDI
+  either way, what a second device does (one port for all of them today). Only made-up
+  BlueZ in the tests.
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.
 - MIDI clock following: tempo ramps lag by the fit window (4 beats).
@@ -180,9 +207,15 @@ them one on the map (REC still arms a loop).
   last half beat's own slope is compared with the line's. In a simulation with
   made-up ticks (`FollowerSimTest`): wrong 17 to 73% of the time before, 0 to
   4% after. Not tried with a real sequencer.
-- Clock follower, still weak: a run of ticks that all arrive late and then
-  recover (8 ticks 15 ms late in the simulation) throws the reading off by up
-  to 12 BPM until the window has refilled. It did that before the fix too.
+- Clock follower, a run of late ticks: fixed 2026-11-24 in the bridge, in the
+  simulation only. 8 ticks running 15 ms late and then back on time threw the
+  reading off by up to 12 BPM (30 ms late: 25) until the window had refilled:
+  the late ticks were taken for a new tempo and then fitted together with the
+  ones after them. Now the window from before is kept for 2 beats and taken
+  back when the ticks are on its line again: 0.1 BPM off at worst. A run of 16
+  or more still reads up to 1.8 BPM off for a few ticks (was 5.5): it gets a
+  fit of its own from half a beat. Tempo steps read as before (14 of 392 wrong
+  in the 120 to 126 case, before and after). Not tried with a real sequencer.
 
 ## T95 and pages
 

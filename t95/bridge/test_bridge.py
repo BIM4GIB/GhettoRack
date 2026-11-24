@@ -2282,7 +2282,12 @@ class FollowerSimTest(unittest.TestCase):
 
     def test_s2_steady_tempo_stays_steady(self):
         for name, sigma, late, limit in (("no late ticks", 0.003, None, 0.3), ("one tick 20 ms late", 0.002, (1, 0.020), 0.3),
-                                         ("three running 30 ms late", 0.002, (3, 0.030), 0.6)):
+                                         ("three running 30 ms late", 0.002, (3, 0.030), 0.6),
+                                         # these two read up to 12 and 25 BPM off before the window from before the late
+                                         # ticks was taken back (2026-11-24)
+                                         ("eight running 15 ms late", 0.002, (8, 0.015), 0.3), ("eight running 30 ms late", 0.002, (8, 0.030), 0.3),
+                                         # longer runs get a fit of their own from half a beat of ticks: rough for a moment
+                                         ("sixteen running 15 ms late", 0.002, (16, 0.015), 2.5)):
             worst = 0
             for seed in range(6):
                 r = self.run_ticks(seed, 1500, 120, 120, 0, sigma, late=late)
@@ -2398,6 +2403,85 @@ class BleMidiTest(unittest.TestCase):
             link.close()
             loop.remove_reader(radio.fileno())
             radio.close()
+        aio.run(go())
+
+    def test_b3_the_box_as_a_device(self):
+        """The other way round (VISIBLE): what BlueZ hands the bridge becomes a controller port, what the
+        bridge sends goes out as notifications, and the box advertises only for its minutes. BlueZ and the
+        D-Bus objects are made up here; nothing of this has been seen with a real device."""
+        import asyncio as aio
+        from rackbridge import ble as B
+
+        class Chr:
+            notifying = False
+
+            def __init__(self):
+                self.out = []
+
+            def notify(self, pkt):
+                self.out.append(pkt)
+
+        class FakeBle:
+            def __init__(self):
+                self.links, self.calls, self.fail = {}, [], None
+
+            async def call(self, path, iface, member, signature="", body=None):
+                self.calls.append((path, member))
+                if self.fail == member:
+                    raise OSError("org.bluez.Error.Failed")
+
+        async def go():
+            fb = FakeBle()
+            g = B.Guest(fb)
+            self.assertEqual(g.info(), {"state": "off", "visible_s": 0, "guest": False})
+            self.assertIn("isn't running", await g.visible(True))                    # no BlueZ yet: said, nothing asked of it
+            self.assertEqual(fb.calls, [])
+            g.chr, g.adapter, g.state = Chr(), "/org/bluez/hci0", "ready"
+            adv = B.GUEST_PATH + "/adv0"
+            # visible: advertised, counted down, and off again by itself
+            old = B.BLE_VISIBLE_S
+            B.BLE_VISIBLE_S = 0.3
+            try:
+                self.assertIsNone(await g.visible(True))
+                self.assertEqual((fb.calls, g.adv_on), ([("/org/bluez/hci0", "RegisterAdvertisement")], True))
+                await aio.sleep(0.5)
+                self.assertEqual((fb.calls[-1], g.adv_on, g.info()["visible_s"]), (("/org/bluez/hci0", "UnregisterAdvertisement"), False, 0))
+            finally:
+                B.BLE_VISIBLE_S = old
+            del fb.calls[:]
+            self.assertIsNone(await g.visible(True))
+            self.assertTrue(170 < g.info()["visible_s"] <= 180)
+            self.assertIsNone(await g.visible(True))                                 # pressed again: from the start, one advertisement
+            self.assertEqual([m for _, m in fb.calls], ["RegisterAdvertisement", "UnregisterAdvertisement", "RegisterAdvertisement"])
+            self.assertIsNone(await g.visible(False))
+            self.assertEqual((fb.calls[-1][1], g.adv_on, g.timer), ("UnregisterAdvertisement", False, None))
+            fb.fail = "RegisterAdvertisement"
+            self.assertIn("won't advertise", await g.visible(True))
+            self.assertEqual((g.adv_on, g.timer, g.info()["visible_s"]), (False, None, 0))
+            fb.fail = None
+
+            # a device turns notifications on: one more port; its packets arrive, ours go out at its packet size
+            g.chr.notifying = True
+            g.open()
+            link = fb.links[B.GUEST_PATH]
+            self.assertEqual((link.key, g.info()["guest"]), ("ble:guest", True))
+            fd = os.open(link.path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)
+            g.packet(bytes.fromhex("80 80 903c64 81 3e64"), 185)
+            await aio.sleep(0.05)
+            self.assertEqual((os.read(fd, 100), g.mtu), (bytes.fromhex("903c64 3e64"), 185))
+            os.write(fd, bytes.fromhex("903c01 f04700f7"))
+            await aio.sleep(0.1)
+            self.assertEqual([B.ble_decode(p) for p in g.chr.out], [bytes.fromhex("903c01 f04700f7")])
+            # notifications off (it left): the port goes, nothing is sent after it, and it can come back
+            g.chr.notifying = False
+            g.left()
+            self.assertEqual((fb.links, link.closed, g.info()["guest"]), ({}, True, False))
+            os.close(fd)
+            self.assertFalse(g.write_midi(b"\x80\x80\xf8"))
+            g.packet(bytes.fromhex("80 80 904040"), 0)                               # a write without notifications: a port again
+            link2 = fb.links[B.GUEST_PATH]
+            self.assertEqual((link2 is not link, g.mtu), (True, 185))
+            g.left()
         aio.run(go())
 
 
@@ -3277,6 +3361,20 @@ class SettingsTest(unittest.TestCase):
         code, out = asyncio.run(b.sys_do(b'{"cmd": "scan"}', True))
         self.assertEqual((code, out["helper"]), (503, False))
 
+    def test_s2b_visible_needs_the_pin(self):
+        """VISIBLE opens the box to whoever is in reach: the helper checks the PIN before the bridge advertises.
+        (This bridge runs without Bluetooth MIDI, so with the right PIN it says that.)"""
+        if not self.state()["pin_set"]:
+            self.assertEqual(self.post("/sys/do", {"cmd": "pin_set", "new": "2468"}), (200, {"ok": True}))
+        code, out = self.post("/sys/do", {"cmd": "bt_visible", "on": True})
+        self.assertEqual((code, "box" in out), (400, False), out)
+        code, out = self.post("/sys/do", {"cmd": "bt_visible", "on": True, "pin": "0000"})
+        self.assertEqual((code, out["error"]), (400, "wrong PIN"))
+        code, out = self.post("/sys/do", {"cmd": "bt_visible", "on": True, "pin": "2468"})
+        self.assertEqual((code, out["error"]), (400, "Bluetooth MIDI isn't running on the box"))
+        self.assertEqual(json.loads(BridgeTest.get("/health")[2])["ble_midi"]["box"], {"state": "off", "visible_s": 0, "guest": False})
+        self.assertNotIn("bt_visible", open(self.calls).read() if os.path.exists(self.calls) else "")   # never the helper's job
+
     def test_s3_the_page(self):
         try:
             from playwright.sync_api import sync_playwright
@@ -3299,6 +3397,15 @@ class SettingsTest(unittest.TestCase):
                     out = pg.evaluate("""() => [...document.querySelectorAll('section.on button, section.on input, nav button')].filter(e => {
                         const r = e.getBoundingClientRect(); return r.width && !e.closest('.ir') && (r.right > innerWidth + 1 || r.bottom > innerHeight + 1 || r.left < -1); }).map(e => e.id || e.textContent)""")
                     self.assertEqual(out, [], (w_, h_, s_))                 # (.ir, the remote's button list, scrolls inside its box)
+                # Bluetooth > VISIBLE: off while the bridge has no Bluetooth MIDI; with it, the minutes left on the button
+                pg.goto(url + "?s=bt")
+                pg.wait_for_function("document.getElementById('c-helper').textContent === 'helper: running'")
+                self.assertTrue(pg.locator("#b-vis").is_disabled())
+                out = pg.evaluate("""() => { st.bt = Object.assign({}, st.bt, { tool: true, on: true, powered: true });
+                    st.bridge = Object.assign({}, st.bridge, { ble_midi: { state: "running", paired: 0, connected: [], away: [], box: { state: "ready", visible_s: 170, guest: false } } }); draw();
+                    const b = document.getElementById("b-vis"), r = b.getBoundingClientRect();
+                    return [b.textContent, b.disabled, r.left >= -1 && r.right <= innerWidth + 1, document.documentElement.scrollWidth > innerWidth + 1, document.documentElement.scrollHeight > innerHeight + 1]; }""")
+                self.assertEqual(out, ["VISIBLE 2:50", False, True, False, False], (w_, h_))
                 pg.goto(url)
                 pg.wait_for_function("document.getElementById('n-now').textContent === 'Home Net'")
                 pg.click("#n-scan")

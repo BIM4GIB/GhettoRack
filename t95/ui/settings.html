@@ -119,7 +119,7 @@ header a{white-space:nowrap}
       <p id="h-text"></p>
     </section>
     <section id="s-bt">
-      <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-scan" class="act">SCAN</button><button id="b-toggle" class="act">TURN ON</button></div>
+      <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-vis">VISIBLE</button><button id="b-scan" class="act">SCAN</button><button id="b-toggle" class="act">TURN ON</button></div>
       <div id="b-banner" class="banner"></div>
       <div id="b-list" class="list"></div>
       <p id="b-text"></p>
@@ -323,12 +323,15 @@ function draw() {
   $("n-now").textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?";
   $("n-ip").textContent = h && w.ip ? w.ip : "";
   if (document.activeElement !== $("n-host") && h) $("n-host").value = st.hostname || "";
-  const b = st.bt || {};
+  const b = st.bt || {}, br0 = st.bridge || {};
   $("b-now").textContent = !h ? "?" : !b.tool ? "not set up" : b.on ? (b.powered ? "on" : "on, radio starting") : "off";
   $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
-  $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box." :
+  $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box. SCAN and PAIR are for keyboards and adapters. VISIBLE is for an iPad, phone or Mac: for 3 minutes the box shows up as a Bluetooth MIDI device in the app there; no pairing." :
     "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
   $("b-scan").disabled = !b.on || !b.powered || !!btbusy; drawBt();
+  const bx = (br0.ble_midi || {}).box || {}, vs = bx.visible_s || 0;
+  $("b-vis").textContent = vs ? "VISIBLE " + Math.floor(vs / 60) + ":" + String(vs % 60).padStart(2, "0") : "VISIBLE"; $("b-vis").className = vs ? "act" : "";
+  $("b-vis").disabled = !b.on || !b.powered || bx.state !== "ready";
   const hs = st.hotspot || {};
   $("h-now").textContent = !h ? "?" : hs.on ? "on: " + hs.ssid : "off";
   $("h-addr").textContent = h && hs.on ? hs.clients + (hs.clients === 1 ? " device on it" : " devices on it") + (hs.by === "itself" ? ", started by itself" : "") : "";
@@ -468,6 +471,8 @@ $("h-toggle").onclick = async () => { if (!needPin("h-banner")) return; const hs
   sure = ""; const o = await sys("hotspot", { on }, true);
   banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid + " on this device" : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : "note"); poll(); };
 $("b-scan").onclick = btScan;
+$("b-vis").onclick = async () => { const on = !(((st.bridge || {}).ble_midi || {}).box || {}).visible_s; if (on && !needPin("b-banner")) return;
+  const o = await sys("bt_visible", { on }, on); banner("b-banner", o.error || (on ? "Visible for 3 minutes: pick " + (st.hostname || "the box") + " in the app's Bluetooth MIDI devices" : "Not visible any more"), o.error ? "bad" : on ? "note" : "good"); poll(); };
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
   banner("b-banner", on ? "Starting Bluetooth, up to 20 s" : "");
   const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth starting, about 10 s" : "Bluetooth off"), o.error ? "bad" : "good"); poll(); };

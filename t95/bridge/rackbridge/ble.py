@@ -24,6 +24,12 @@ Pairing is not done here: that changes the box, so it is the helper's
 the encryption here uses. BlueZ (D-Bus, `python3-dbus-fast`) is asked only which
 devices are paired, and for the scan.
 
+The other way round, the box as a Bluetooth MIDI device that an iPad or Mac finds
+and connects to (`Guest`): BlueZ serves the MIDI characteristic for the bridge
+(GattManager1) and advertises it while Settings > Bluetooth > VISIBLE is on. No
+pairing in that direction: whoever is in reach during those minutes can connect,
+which is why it is a button with a PIN and a time limit, and off otherwise.
+
 Seen on the rig with one device (an iPad, 2026-11-24): reconnect, encryption, MIDI
 both ways. No Bluetooth MIDI keyboard or adapter has been tried.
 """
@@ -47,6 +53,8 @@ BLE_SETTLE_S = 3.0         # link up -> ask for encryption (see above; shorter i
 BLE_ENC_S = 10.0
 BLE_MTU_MIN = 23
 BLE_MTU = 247
+BLE_VISIBLE_S = 180        # how long VISIBLE advertises the box
+GUEST_PATH = "/org/ghettorack/midi"
 ATT_CID = 4
 SOL_BLUETOOTH, BT_SECURITY, BT_SEC_LOW, BT_SEC_MEDIUM = 274, 4, 1, 2
 AF_BLUETOOTH = 31
@@ -276,6 +284,11 @@ class BleLink:
         self.att = Att(sock, self.from_radio, lambda: self.close(True))
         return self.att
 
+    def attach_radio(self, radio):
+        """Anything with mtu, value (None until it can be written), dropped, write_midi(), close()"""
+        self.att = radio
+        return radio
+
     def from_radio(self, pkt):
         data = ble_decode(pkt)
         try:
@@ -319,6 +332,193 @@ class BleLink:
             self.on_gone(self)
 
 
+class Guest:
+    """The box as a Bluetooth MIDI device. BlueZ holds the link and calls us for every packet; whoever
+    turns notifications on becomes one more controller port. All D-Bus: none of the radio's faults at the
+    top of this file are on this path (the other side connects and encrypts, if it wants to)."""
+
+    def __init__(self, ble):
+        self.ble = ble
+        self.state = "off"          # off / ready / the reason it isn't
+        self.link = None
+        self.mtu = BLE_MTU_MIN
+        self.value = 1              # "can be written": BleLink asks
+        self.dropped = 0
+        self.until = 0.0            # advertising until then
+        self.adv_on = False
+        self.chr = self.adv = None
+        self.timer = None
+
+    def info(self):
+        return {"state": self.state, "visible_s": max(0, int(self.until - now())) if self.adv_on else 0,
+                "guest": self.link is not None and not self.link.closed}
+
+    # --- what BleLink needs of a radio ---
+    def write_midi(self, pkt):
+        if self.chr is None or not self.chr.notifying:
+            return False
+        self.chr.notify(pkt)
+        return True
+
+    def close(self):
+        pass
+
+    # --- called by BlueZ ---
+    def packet(self, pkt, mtu):
+        if mtu:
+            self.mtu = max(BLE_MTU_MIN, min(BLE_MTU, mtu))
+        if self.link is None or self.link.closed:
+            self.open()
+        self.link.from_radio(pkt)
+
+    def open(self):
+        if self.link is not None and not self.link.closed:
+            return
+        self.link = BleLink("ble:guest", "Bluetooth guest", self.gone)
+        self.link.attach_radio(self)
+        self.ble.links[GUEST_PATH] = self.link
+        log.info("Bluetooth MIDI: a device connected to the box")
+
+    def left(self):
+        if self.link is not None and not self.link.closed:
+            self.link.close()
+            self.ble.links.pop(GUEST_PATH, None)
+            log.info("Bluetooth MIDI: the device connected to the box left")
+        self.link = None
+
+    def gone(self, link):
+        self.ble.links.pop(GUEST_PATH, None)
+
+    # --- our side ---
+    async def register(self, adapter):
+        """Offer the MIDI service. BlueZ keeps it until the bridge leaves the bus."""
+        from dbus_fast import Variant
+        from dbus_fast.service import ServiceInterface, method, dbus_property, PropertyAccess
+        guest = self
+
+        class Service(ServiceInterface):
+            def __init__(self):
+                super().__init__("org.bluez.GattService1")
+
+            @dbus_property(access=PropertyAccess.READ)
+            def UUID(self) -> "s":
+                return MIDI_SERVICE
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Primary(self) -> "b":
+                return True
+
+        class Characteristic(ServiceInterface):
+            def __init__(self):
+                super().__init__("org.bluez.GattCharacteristic1")
+                self.notifying = False
+                self.last = b""
+
+            @dbus_property(access=PropertyAccess.READ)
+            def UUID(self) -> "s":
+                return MIDI_CHAR
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Service(self) -> "o":
+                return GUEST_PATH + "/service0"
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Flags(self) -> "as":
+                return ["read", "write-without-response", "notify"]
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Value(self) -> "ay":
+                return self.last
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Notifying(self) -> "b":
+                return self.notifying
+
+            @method()
+            def ReadValue(self, options: "a{sv}") -> "ay":
+                return b""                          # the spec: a read answers with no data
+
+            @method()
+            def WriteValue(self, value: "ay", options: "a{sv}"):
+                m = options.get("mtu")
+                guest.packet(bytes(value), getattr(m, "value", 0) if m is not None else 0)
+
+            @method()
+            def StartNotify(self):
+                self.notifying = True
+                guest.open()
+
+            @method()
+            def StopNotify(self):
+                self.notifying = False
+                guest.left()
+
+            def notify(self, pkt):
+                self.last = pkt
+                self.emit_properties_changed({"Value": pkt})
+
+        class Advertisement(ServiceInterface):
+            def __init__(self):
+                super().__init__("org.bluez.LEAdvertisement1")
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Type(self) -> "s":
+                return "peripheral"
+
+            @dbus_property(access=PropertyAccess.READ)
+            def ServiceUUIDs(self) -> "as":
+                return [MIDI_SERVICE]
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Includes(self) -> "as":
+                return ["local-name"]
+
+            @dbus_property(access=PropertyAccess.READ)
+            def Timeout(self) -> "q":
+                return BLE_VISIBLE_S
+
+            @method()
+            def Release(self):
+                guest.adv_on = False                # BlueZ took it down (its own timeout, or the radio went off)
+
+        if self.chr is None:
+            self.chr, self.adv = Characteristic(), Advertisement()
+            bus = self.ble.bus
+            bus.export(GUEST_PATH + "/service0", Service())
+            bus.export(GUEST_PATH + "/service0/char0", self.chr)
+            bus.export(GUEST_PATH + "/adv0", self.adv)
+        self.adapter = adapter
+        try:
+            await self.ble.call(adapter, "org.bluez.GattManager1", "RegisterApplication", "oa{sv}", [GUEST_PATH, {}])
+            self.state = "ready"
+        except (OSError, asyncio.TimeoutError) as e:
+            self.state = "BlueZ won't take the MIDI service (%s)" % e
+            log.info("Bluetooth MIDI: %s", self.state)
+
+    async def visible(self, on):
+        """Advertise the box for BLE_VISIBLE_S, or stop. Returns an error text, or None."""
+        if self.state != "ready":
+            return "Bluetooth MIDI isn't running on the box" if self.state == "off" else self.state
+        if self.timer is not None:
+            self.timer.cancel()
+            self.timer = None
+        if self.adv_on:                             # again: from the start
+            self.adv_on = False
+            try:
+                await self.ble.call(self.adapter, "org.bluez.LEAdvertisingManager1", "UnregisterAdvertisement", "o", [GUEST_PATH + "/adv0"])
+            except (OSError, asyncio.TimeoutError):
+                pass
+        if not on:
+            return None
+        try:
+            await self.ble.call(self.adapter, "org.bluez.LEAdvertisingManager1", "RegisterAdvertisement", "oa{sv}", [GUEST_PATH + "/adv0", {}])
+        except (OSError, asyncio.TimeoutError) as e:
+            return "the radio won't advertise (%s)" % e
+        self.adv_on, self.until = True, now() + BLE_VISIBLE_S
+        self.timer = asyncio.get_running_loop().call_later(BLE_VISIBLE_S, lambda: asyncio.ensure_future(self.visible(False)))
+        return None
+
+
 class Ble:
     """Asks BlueZ which paired devices offer MIDI and keeps a BleLink per one in reach"""
 
@@ -330,12 +530,13 @@ class Ble:
         self.state = "off"          # off / no dbus-fast / no BlueZ / running
         self.seen = 0               # paired MIDI devices BlueZ knows
         self.bus = None
+        self.guest = Guest(self)
 
     def info(self):
         return {"state": self.state, "paired": self.seen,
                 "connected": [{"name": l.name, "dropped_in": l.dropped_in, "dropped_out": l.dropped_out + l.att.dropped}
                               for l in self.links.values()],
-                "away": sorted(set(self.why.values()))}
+                "away": sorted(set(self.why.values())), "box": self.guest.info()}
 
     def candidates(self):
         return {l.key: (l.path, l.name) for l in self.links.values() if not l.closed}
@@ -402,8 +603,12 @@ class Ble:
             if d is not None and val(d, "Paired", False) and MIDI_SERVICE in [u.lower() for u in val(d, "UUIDs", [])]:
                 devs[path] = d
         self.seen = len(devs)
-        for path in [p for p in self.links if p not in devs]:      # forgotten in Settings
+        for path in [p for p in self.links if p not in devs and p != GUEST_PATH]:      # forgotten in Settings
             self.links.pop(path).close()
+        if self.guest.state == "off":
+            adapter = next((p for p, ifs in objs.items() if "org.bluez.GattManager1" in ifs), None)
+            if adapter:
+                await self.guest.register(adapter)
         for gone in [p for p in self.why if p not in devs]:
             del self.why[gone]
         for path, d in devs.items():
@@ -454,6 +659,7 @@ class Ble:
                 for l in list(self.links.values()):
                     l.close()
                 self.links.clear()
+                self.guest = Guest(self)            # a new bus: the service has to be offered again
                 try:
                     if self.bus is not None:
                         self.bus.disconnect()

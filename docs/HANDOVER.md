@@ -35,7 +35,7 @@ is stale; it is a snapshot, not a rule book.
   bridge now runs as the fixed user `apcbox-bridge` with `--ble`. Before that:
   `6f5377d` (Settings banners: one short line, 3 or 6 s; the bridge stops in
   half a second instead of 90 s and a kill).
-- `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 92 tests, 2 skipped
+- `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 100 tests, 2 skipped
   for want of `aalink` and `ffmpeg`). The fake Daisy's reader gave up at once
   there (macOS reads end of file from a pseudo-terminal nobody has opened yet,
   Linux an error), and the Mac wakes a timed wait up to 10 ms late, so the two
@@ -93,6 +93,8 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
    `t95/bridge/rackbridge/ble.py` why it avoids BlueZ's GATT calls). To watch the
    radio on the box: `sudo btmon`. If a pairing fails with "it refused", the
    device still holds an old pairing for the box: forget the box there first.
+   The other way round (VISIBLE: the box as a device an iPad finds) is built and
+   has never met a device; `docs/BACKLOG.md` says what was seen.
 5. From before: rig checks of the looper (overdub, undo), one-shot sampling,
    kits, clock follow, lights of moved APC40 jobs; mapping for controllers
    other than the APC40. `docs/BACKLOG.md` has the rest.
@@ -113,5 +115,5 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
 - The whole bridge suite takes about 6 minutes
   (`cd t95/bridge && python3 test_bridge.py`); one class by name is quick
   (`python3 test_bridge.py SettingsTest`). Helper: `python3 t95/helper/test_helper.py`.
-- Not run in the cloud session: the Mac build (`daisy/mac/build.sh`) and
-  `daisy/link_test.cpp`. The Mac can do both.
+- The Mac build (`daisy/mac/build.sh`) builds and `daisy/link_test.cpp` passes
+  (24 Nov, on the Mac, v13.18 sources). The Mac build was not started.

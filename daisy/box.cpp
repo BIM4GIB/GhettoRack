@@ -1394,7 +1394,12 @@ void LooperUndoTake(bool redo = false)
     }
     if(!LooperCan(redo))
     {
-        Popup(redo ? "nothing to redo" : "nothing to undo");
+        /* the last take was an overdub whose loop didn't fit the undo memory (a long loop) */
+        if(!redo && lundo.track >= 0 && lundo.mode == Engine::kRecOverdub && !lundo.data
+           && slot_gen[lundo.track] == lundo.gen)
+            Popup("overdub on long loop: no undo");
+        else
+            Popup(redo ? "nothing to redo" : "nothing to undo");
         return;
     }
     int t = lundo.track;
@@ -3649,13 +3654,14 @@ void BoxPoll(uint32_t now)
                 /* no undo for a take in a spare block, nor when what it replaced
                    was a recording too long to keep */
                 lundo.valid = mode == Engine::kRecOverdub
-                              || (!lng && (lundo.data || !(lundo.loop || IsRecPath(lundo.path))));
+                                  ? lundo.data // a long loop wasn't kept: its overdub stays
+                                  : (!lng && (lundo.data || !(lundo.loop || IsRecPath(lundo.path))));
                 lundo.redo  = false;
                 lundo.gen   = slot_gen[t];
             }
             if(mode == Engine::kRecOverdub)
             {
-                Popup("overdub %d done", t + 1);
+                Popup(lundo.track == t && !lundo.valid ? "overdub %d done (no undo)" : "overdub %d done", t + 1);
                 Log("overdubbed the loop on track %d", t + 1);
             }
             else

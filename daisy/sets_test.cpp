@@ -2052,9 +2052,11 @@ int main()
         CHECK(until(idle, 2600));
         Tick(40);
         CHECK(SpareOf(T) == blk && s.length == long_len && e.IsLoop(T));
+        CHECK(!LooperCan(false) && strstr(popup, "no undo")); // said when the overdub ends, and no undo offered
         BoxUiCommand("lrec undo", now_ms);
         Tick(40);
         CHECK(SpareOf(T) == blk && s.length == long_len && e.IsLoop(T) && !LooperCan(false) && !LooperCan(true));
+        CHECK(!strcmp(popup, "overdub on long loop: no undo")); // not "take undone": nothing changed
 
         /* no block free: a chosen length that doesn't fit is refused before anything is armed */
         fill();

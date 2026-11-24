@@ -168,7 +168,7 @@ class WebMixin:
 
     # ---- Settings: the bridge has no rights; it asks the helper (t95/helper) ----
     SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "bt_scan", "bt_pair", "bt_forget", "restart_bridge", "reboot", "poweroff",
-                "pin_set", "pin_check", "hotspot", "hotspot_set"}
+                "pin_set", "pin_check", "hotspot", "hotspot_set", "bt_visible"}
 
     def helper_ask(self, d, timeout=90):
         """One request to the settings helper. Blocking: call it from an executor"""
@@ -199,6 +199,15 @@ class WebMixin:
             return 400, {"error": "unknown settings command"}
         if not secure and any(k in d for k in ("pin", "psk", "old", "new")):
             return 400, {"error": "PINs and passwords only over the https:// address of this page", "https": True}
+        if d["cmd"] == "bt_visible":
+            # The bridge's own (it offers the MIDI service; no root in it), but it opens the box to whoever is
+            # in reach: the helper checks the PIN first. Switching it off needs none.
+            if d.get("on"):
+                out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, {"cmd": "pin_check", "pin": d.get("pin")})
+                if "error" in out:
+                    return (503 if out.get("helper") is False else 400), out
+            why = await self.ble.guest.visible(bool(d.get("on")))
+            return (400, {"error": why}) if why else (200, {"ok": True, "box": self.ble.guest.info()})
         out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, d)
         return (200 if "error" not in out else 503 if out.get("helper") is False else 400), out
 

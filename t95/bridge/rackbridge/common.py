@@ -54,6 +54,10 @@ CLOCK_BEND_N = 12
 CLOCK_BEND = 0.01
 CLOCK_BEND_SE = 0.55
 CLOCK_BEND_RUN = 7
+# A run of late ticks looks like a tempo change at first. The window from before is held for
+# CLOCK_HELD_N ticks; CLOCK_BACK_RUN ticks back on its line (one off it costs two), at its slope: it is taken back
+CLOCK_HELD_N = 48
+CLOCK_BACK_RUN = 8
 CLOCK_LOST_S = 0.5        # no incoming tick for this long: hold the last tempo
 CLOCK_SPIN_S = 0.0005     # sleep to this close to a tick, then spin
 PING_KEEP = 300

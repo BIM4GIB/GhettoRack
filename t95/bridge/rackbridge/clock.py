@@ -72,6 +72,8 @@ class Clock:
         self.model = None                      # (a, b) while locked
         self.off_line = 0
         self.bend = 0                          # ticks running whose recent slope is not the line's
+        self.held = None                       # (a, b, limit, the window, tick it was set aside at)
+        self.back = 0                          # ticks running that are on the held line again
         # the Daisy: following it (CL lines) and what it says about following us (CK)
         self.d_tick = 0
         self.d_sent_playing = False
@@ -141,7 +143,7 @@ class Clock:
                 self.source = s
                 self.d_playing = False          # the Daisy's next step report starts us if it's playing
                 self.in_ticks.clear()
-                self.model = None
+                self.model = self.held = None
                 self.in_bpm = None
                 if self.playing:                # the new source starts it again
                     self.cmds.append(b"\xfc")
@@ -187,6 +189,7 @@ class Clock:
         if s == 0xF8:
             if self.in_last is not None and t - self.in_last > CLOCK_LOST_S:
                 self.in_ticks.clear()           # a gap: don't fit across it
+                self.held = None
             self.in_n += 1
             self.in_last = t
             if self.model is not None and len(self.in_ticks) >= 24:
@@ -196,6 +199,7 @@ class Clock:
                 if err > max(0.004, 4 * (self.in_jitter_ms or 0) / 1000.0):
                     self.off_line += 1
                     if self.off_line >= 4:
+                        self.hold()
                         keep = list(self.in_ticks)[-3:]
                         self.in_ticks.clear()
                         self.in_ticks.extend(keep)
@@ -213,15 +217,43 @@ class Clock:
                 if f and abs(f[1] - b) > max(CLOCK_BEND * b, CLOCK_BEND_SE * max(f[2], 0.0002)):
                     self.bend += 1
                     if self.bend >= CLOCK_BEND_RUN:
+                        self.held = None            # a slope that changed: nothing to come back to
                         keep = list(self.in_ticks)[-CLOCK_BEND_N:]
                         self.in_ticks.clear()
                         self.in_ticks.extend(keep)
                         self.bend = self.off_line = 0
                 else:
                     self.bend = 0
+            # Not a tempo change after all: the ticks are back on the line they left (they were
+            # late for a while). The window from before comes back, without the late ones.
+            if self.held is not None:
+                a, b, limit, window, at = self.held
+                if self.in_n - at > CLOCK_HELD_N:
+                    self.held, self.back = None, 0
+                elif abs(t - (a + b * self.in_n)) <= limit:
+                    self.back += 1
+                    if self.back >= CLOCK_BACK_RUN:
+                        new = [(i, x) for i, x in self.in_ticks if i > at and abs(x - (a + b * i)) <= limit]
+                        off = [(i, x) for i, x in self.in_ticks if abs(x - (a + b * i)) > limit]
+                        f = fit_line(new)
+                        # The ones off the line tell the two apart, given enough of them: late ticks
+                        # run alongside it, a new tempo crosses it (and is only passing through now).
+                        g = fit_line(off) if len(off) >= 8 else None
+                        if g and abs(g[1] - b) > max(CLOCK_BEND * b, 4 * max(g[2], 0.0002) / (len(off) ** 3 / 12.0) ** 0.5):
+                            self.held, self.back = None, 0
+                        elif f and abs(f[1] - b) <= max(CLOCK_BEND * b, CLOCK_BEND_SE * max(f[2], 0.0002)):
+                            self.in_ticks.clear()
+                            self.in_ticks.extend(window + new)
+                            self.model = (a, b)
+                            self.off_line = self.bend = 0
+                            self.held, self.back = None, 0
+                        # else: on the line but not at its slope yet; more of them will tell
+                else:
+                    self.back = max(0, self.back - 2)   # one of them off it by jitter doesn't start the count again
             # No new fit while ticks are off the line: fitted in, they bend the line and raise
             # its residual, and the test above (4x the residual) then never calls a tempo change.
-            if len(self.in_ticks) >= 12 and self.off_line == 0:
+            # Nor while they are coming back onto a held one: that fit would mix late ticks and these.
+            if len(self.in_ticks) >= 12 and self.off_line == 0 and self.back == 0:
                 f = fit_line(list(self.in_ticks))
                 if f and f[1] > 0:
                     bpm = 60.0 / (f[1] * CLOCK_PPQ)
@@ -232,6 +264,12 @@ class Clock:
         elif s in (0xFA, 0xFB, 0xFC, 0xF2):
             self.cmds.append(bytes(msg))        # passed on in order, before the next tick
             self.wake.set()
+
+    def hold(self):
+        """Set the window aside before it is cut: what looks like a tempo change may be late ticks"""
+        if self.held is None and self.model is not None:
+            limit = max(0.004, 4 * (self.in_jitter_ms or 0) / 1000.0)
+            self.held, self.back = (self.model[0], self.model[1], limit, list(self.in_ticks)[:-4], self.in_n), 0
 
     def lost_s(self):
         return 2.0 if self.source == "daisy" else CLOCK_LOST_S     # the Daisy reports every other sixteenth
