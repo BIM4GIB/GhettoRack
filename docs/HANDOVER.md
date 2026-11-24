@@ -33,11 +33,12 @@ is stale; it is a snapshot, not a rule book.
 - Bridge, kiosk, settings helper, Bluetooth unit installed from `main` at
   `6f5377d` (Settings banners: one short line, 3 or 6 s; the bridge stops in
   half a second instead of 90 s and a kill).
-- `t95/bridge/test_bridge.py` on the Mac: 16 tests fail there with or without
-  a change (MidiTest, RouterTest, SampleTest and a few more: the fake Daisy
-  never sees what the bridge writes to it). Not looked into. The suite was
-  only ever green on Linux; it was not run on the box, where a test bridge
-  could find the rig's real controllers and remote.
+- `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 92 tests, 2 skipped
+  for want of `aalink` and `ffmpeg`). The fake Daisy's reader gave up at once
+  there (macOS reads end of file from a pseudo-terminal nobody has opened yet,
+  Linux an error), and the Mac wakes a timed wait up to 10 ms late, so the two
+  clock smoothness bounds are wider there (`TIMER_SLACK_MS`). Not run on the
+  box, where a test bridge could find the rig's real controllers and remote.
 - On the Mac: Playwright is installed, so the page tests in
   `t95/bridge/test_bridge.py` run. A plain `git push` gets a 403 (the active
   `gh` login is another account); the `BIM4GIB` login in `gh` works.

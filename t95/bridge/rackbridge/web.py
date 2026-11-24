@@ -379,10 +379,13 @@ class WebMixin:
                     c.need_snapshot = False
                     snap = b"".join(sse_data(l) for l in self.cache.snapshot())
                     writer.write(sse_event("bridge", self.status()) + snap)
-                while c.q:
-                    chunk = c.q.popleft()
-                    c.qbytes -= len(chunk)
-                    writer.write(chunk)
+                if c.q:
+                    # one write for all of it: asyncio sends the first write at once (no Nagle),
+                    # so line by line the first line went out as a packet of its own
+                    out = b"".join(c.q)
+                    c.q.clear()
+                    c.qbytes = 0
+                    writer.write(out)
                 # Only this browser's task waits here; the serial reader never does
                 await asyncio.wait_for(writer.drain(), 30)
                 if now() - last_ping > 15:

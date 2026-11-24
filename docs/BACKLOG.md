@@ -162,6 +162,12 @@ them one on the map (REC still arms a loop).
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.
 - MIDI clock following: tempo ramps lag by the fit window (4 beats).
+- Clock follower: a source that pauses for under half a second and comes back
+  at another tempo is fitted with one line through both (seen in the bridge
+  tests on the Mac, 2026-11-24: 125 then 110 BPM, held tempo 113, fit residual
+  16 ms). The check that should catch it allows four times the fit's own
+  residual, and a bad fit raises that. It clears once 96 new ticks are in.
+  Not tried with a real sequencer.
 
 ## T95 and pages
 

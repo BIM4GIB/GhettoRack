@@ -45,6 +45,12 @@ def free_port():
     return p
 
 
+# macOS wakes a timed wait up to 10 ms late (measured: Event.wait(18 ms) 7 ms late on
+# average, 0.1 ms on Linux), so the clock thread's ticks are that uneven there. The
+# smoothness bounds are for the T95; on a Mac they only catch something badly wrong.
+TIMER_SLACK_MS = 4.0 if sys.platform == "darwin" else 0.0
+
+
 class FakeDaisy:
     """The master side of a pty, with the slave reachable through a symlink"""
 
@@ -392,27 +398,31 @@ class RespondingDaisy(FakeDaisy):
         self.frames = []
         self.reading = True
         self.alive = True
-        threading.Thread(target=self._run, args=(self.master,), daemon=True).start()
+        self.gone = threading.Event()   # one per plug: the fd number comes back
+        threading.Thread(target=self._run, args=(self.master, self.gone), daemon=True).start()
 
     def unplug(self):
         self.alive = False
+        self.gone.set()
         super().unplug()
 
-    def _run(self, fd):
+    def _run(self, fd, gone):
         buf = b""
-        while self.alive:
+        while not gone.is_set():
             if not self.reading:
                 time.sleep(0.05)
                 continue
             try:
                 d = os.read(fd, 65536)
             except OSError as e:
-                if e.errno == errno.EIO and self.alive:
+                if e.errno == errno.EIO and not gone.is_set():
                     time.sleep(0.02)  # no slave open yet (the bridge hasn't opened it)
                     continue
                 return
             if not d:
-                return
+                # macOS: a master with no slave open reads as end of file, not EIO
+                time.sleep(0.02)
+                continue
             buf += d
             while True:
                 i = buf.find(b"\x1b")
@@ -1186,7 +1196,7 @@ class ClockTest(unittest.TestCase):
         self.assertAlmostEqual(c["tempo"], 125.0, delta=0.4)
         self.assertEqual(self.rx.bytes_()[0], 0xFA)
         self.assertAlmostEqual(m, 20.0, delta=0.2)
-        self.assertLess(sd, 1.0)
+        self.assertLess(sd, 1.0 + TIMER_SLACK_MS)
         self.assertLess(abs(len(out) - n), 10)
         self.assertEqual(self.post("/clock/transport", {"cmd": "start"})[0], 400)   # transport is Cubase's
 
@@ -1210,6 +1220,9 @@ class ClockTest(unittest.TestCase):
 
     def test_c4_source_gone_holds_tempo(self):
         self.post("/clock", {"on": True, "source": "Cubase", "outputs": ["Synth"], "send_stopped": True})
+        # c3 ended at 125 a moment ago. Under half a second of silence and the bridge fits one
+        # line through both tempos (docs/BACKLOG.md, "MIDI and clock"); that is not this test.
+        time.sleep(0.7)
         self.play_clock(110, 1.5)
         self.assertTrue(self.clock()["locked"])
         self.rx.clear()
@@ -2303,7 +2316,7 @@ class ClockDaisyTest(unittest.TestCase):
         self.assertAlmostEqual(c["tempo"], 130.0, delta=0.01)
         self.assertEqual(self.rx.bytes_()[0], 0xFA)          # it started with the Daisy
         self.assertAlmostEqual(m, 60000 / (130 * 24), delta=0.15)
-        self.assertLess(sd, 1.5)
+        self.assertLess(sd, 1.5 + TIMER_SLACK_MS)
         do("stop")
         self.assertTrue(self.wait(lambda: self.rx.bytes_()[-1:] == b"\xfc", 3))
         self.assertFalse(self.clock()["playing"])
@@ -3389,6 +3402,9 @@ class HdmiAudioTest(unittest.TestCase):
         self.assertEqual(BridgeTest.health()["hdmi_audio"]["daisy_card"], False)
         os.makedirs(os.path.join(asound, "ApcBox"))          # the Daisy plugged in
         BridgeTest.wait_health(lambda h: h["hdmi_audio"]["running"], 6)
+        end = time.time() + 3                                # started is not yet "has written its line"
+        while not os.path.exists(log) and time.time() < end:
+            time.sleep(0.05)
         self.assertIn("-C plug:daisyshare -P plughw:CARD=HDMI -t 40000 -S 1", open(log).read())   # shared with listening
         os.rmdir(os.path.join(asound, "ApcBox"))             # unplugged: stops
         BridgeTest.wait_health(lambda h: not h["hdmi_audio"]["running"], 6)
