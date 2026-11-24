@@ -140,6 +140,9 @@ def main(argv=None):
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--http-port", type=int, default=8040)
     ap.add_argument("--https-port", type=int, default=8443, help="0 = no HTTPS")
+    ap.add_argument("--flush-ms", type=float, default=40,
+                    help="browsers on the network get their live lines in one write per this many ms (0 = each line at once)")
+    ap.add_argument("--flush-local", action="store_true", help="pace browsers on the box itself too (tests)")
     ap.add_argument("--serial", help="USB serial number of the Daisy to use (several connected)")
     ap.add_argument("--port", help="tty path instead of finding the Daisy by VID/PID")
     ap.add_argument("--midi", action="append", metavar="PATH=NAME",

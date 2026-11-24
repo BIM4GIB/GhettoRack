@@ -2499,6 +2499,69 @@ class IrTest(unittest.TestCase):
 
 
 
+class FlushTest(unittest.TestCase):
+    """Live lines to a browser on the network go out gathered, not one small packet per line"""
+
+    def run_one(self, extra):
+        d = tempfile.mkdtemp()
+        daisy = FakeDaisy(os.path.join(d, "daisy"))
+        http = free_port()
+        proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", daisy.link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+             "--http-port", str(http), "--ui", UI, "--no-midi", "--state", os.path.join(d, "state.json")] + extra,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            BridgeTest.http = http
+            BridgeTest.wait_health(lambda h: h["daisy"], 10)
+            s = socket.socket()
+            s.connect(("127.0.0.1", http))
+            s.sendall(b"GET /events HTTP/1.1\r\nHost: x\r\n\r\n")
+            s.settimeout(0.2)
+            box = {"reads": 0, "buf": b"", "stop": False}
+
+            def rd():
+                while not box["stop"]:
+                    try:
+                        c = s.recv(1 << 20)
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        return
+                    if not c:
+                        return
+                    box["reads"] += 1
+                    box["buf"] += c
+            th = threading.Thread(target=rd, daemon=True)
+            th.start()
+            time.sleep(0.6)                                      # header and snapshot are in
+            daisy.send("ZY first\n")
+            time.sleep(0.3)
+            r0 = box["reads"]
+            for i in range(150):                                 # 100 lines a second, as the Daisy does
+                daisy.send("ZZ %d\n" % i)
+                time.sleep(0.01)
+            end = time.time() + 3
+            while b"ZZ 149" not in box["buf"] and time.time() < end:
+                time.sleep(0.02)
+            box["stop"] = True
+            th.join(1)
+            s.close()
+            reads, buf = box["reads"] - r0, box["buf"]
+            got = [l for l in buf.decode().splitlines() if l.startswith("data: ZZ ")]
+            return reads, got
+        finally:
+            proc.kill()
+
+    def test_f1_gathered_for_the_network_whole_and_in_order(self):
+        want = ["data: ZZ %d" % i for i in range(150)]
+        reads, got = self.run_one(["--flush-local", "--flush-ms", "50"])
+        self.assertEqual(got, want)
+        self.assertLess(reads, 50, "150 lines in 1.5 s at 50 ms: about 30 writes")
+        reads0, got0 = self.run_one([])                          # the box's own screen: not paced
+        self.assertEqual(got0, want)
+        self.assertGreater(reads0, 2 * reads, (reads0, reads))
+
+
 class IrLircTest(IrTest):
     """The same remote tests through the lirc device (repeat-flagged frames),
     plus the noise seen on the T95: imon fakes and stray repeats"""

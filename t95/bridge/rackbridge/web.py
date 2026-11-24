@@ -360,6 +360,15 @@ class WebMixin:
             c.wake.set()
         eof = asyncio.create_task(watch_eof())
         log.info("browser %s connected (%d)", peer, len(self.clients))
+        # The Daisy reports around a hundred lines a second. Written as they come, that is a
+        # hundred small packets a second to every browser on the Wi-Fi, and on the T95 that
+        # alone took the link from a few ms to a second per packet (rig, 2026-11-24: one page
+        # open on a laptop, ping to the router 3 ms with the bridge stopped, 900 ms with it).
+        # So a browser on the network gets what has gathered every flush_ms in one write.
+        # The page on the box's own screen (loopback) is not paced.
+        host = str(peer[0]) if isinstance(peer, (tuple, list)) and peer else str(peer)
+        local = host.startswith("127.") or host in ("::1", "localhost")
+        pace = getattr(self.args, "flush_ms", 0) / 1000 if (not local or getattr(self.args, "flush_local", False)) else 0
         try:
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                          b"Cache-Control: no-store\r\nConnection: keep-alive\r\n"
@@ -379,6 +388,8 @@ class WebMixin:
                 if now() - last_ping > 15:
                     writer.write(b": ping\n\n")
                     last_ping = now()
+                if pace:
+                    await asyncio.sleep(pace)
                 c.wake.clear()
                 if not c.q and not c.need_snapshot and not c.closed:
                     try:
