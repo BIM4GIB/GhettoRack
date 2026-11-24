@@ -88,9 +88,11 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
    modules (he was asked what still bothers him there and has not said).
 4. **Settings > Devices** lists the sound cards and the box's SD card (built
    24 Nov, read-only; no card was in the slot when it went on the box). Built 24 Nov and not tried on the rig: the
-   PIN with the TV remote (a number pad), Bluetooth pairing (Settings >
-   Bluetooth: SCAN, PAIR, FORGET) and Bluetooth MIDI (`rackbridge/ble.py`;
-   nothing nearby offered MIDI, so no real device has been paired or heard).
+   PIN with the TV remote (a number pad). Bluetooth MIDI works with Rene's iPad
+   (24 Nov; `docs/BACKLOG.md` has what is still untried, the top of
+   `t95/bridge/rackbridge/ble.py` why it avoids BlueZ's GATT calls). To watch the
+   radio on the box: `sudo btmon`. If a pairing fails with "it refused", the
+   device still holds an old pairing for the box: forget the box there first.
 5. From before: rig checks of the looper (overdub, undo), one-shot sampling,
    kits, clock follow, lights of moved APC40 jobs; mapping for controllers
    other than the APC40. `docs/BACKLOG.md` has the rest.

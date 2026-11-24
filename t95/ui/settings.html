@@ -190,7 +190,7 @@ async function get(u) { try { return await (await fetch(u, { cache: "no-store", 
 /* risky: sends the PIN along. Returns the helper's answer ({error} on failure) */
 async function sys(cmd, extra, risky) {
   const d = Object.assign({ cmd }, extra || {}); if (risky) d.pin = $("pin").value;
-  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d), signal: tmo(cmd === "bt_pair" ? 80000 : cmd === "scan" || cmd === "bt_scan" ? 25000 : 12000) }); return await r.json(); }
+  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d), signal: tmo(cmd === "bt_pair" ? 95000 : cmd === "scan" || cmd === "bt_scan" ? 25000 : 12000) }); return await r.json(); }
   catch (e) { return { error: "the box isn't answering", gone: true }; }
 }
 function needPin(id) {
@@ -248,7 +248,7 @@ function drawBt() {
     const sig = d.rssi == null ? 0 : (d.rssi + 95) * 2.5;
     for (let i = 0; i < 4; i++) { const x = el("i", sig > i * 25 ? "on" : ""); x.style.height = (4 + i * 4) + "px"; bars.appendChild(x); }
     if (!d.paired) { const j = el("button", "act", btbusy === d.addr ? "PAIRING" : "PAIR"); j.disabled = !!btbusy;
-      j.onclick = async () => { if (!needPin("b-banner")) return; btbusy = d.addr; banner("b-banner", "Pairing with " + name + ", up to a minute"); draw();
+      j.onclick = async () => { if (!needPin("b-banner")) return; btbusy = d.addr; banner("b-banner", "Pairing with " + name + ": if it shows a code, confirm it there"); draw();
         const o = await sys("bt_pair", { addr: d.addr }, true); btbusy = "";
         banner("b-banner", o.error || "Paired with " + name, o.error ? "bad" : "good"); if (!o.error && btseen) btseen = btseen.filter(x => x.addr !== d.addr); poll(); };
       acts.appendChild(j); }

@@ -22,7 +22,7 @@ Python 3 standard library only (Bluetooth MIDI and Link each need one package an
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (Bluetooth MIDI devices as ports; needs `python3-dbus-fast`), `devices` (the sound cards and the SD card, for Settings > Devices), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (paired Bluetooth MIDI devices as ports, over its own ATT channel; asks BlueZ which devices are paired, for which it needs `python3-dbus-fast`), `devices` (the sound cards and the SD card, for Settings > Devices), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |

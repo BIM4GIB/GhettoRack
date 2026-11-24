@@ -53,6 +53,7 @@ import secrets
 import socket
 import socketserver
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -64,7 +65,7 @@ ATTACH = "/usr/local/bin/hciattach_opi"
 BT_UNIT = "ghettorack-bluetooth.service"
 BT_ADDR_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 BT_MIDI_UUID = "03b80e5a-ede8-4b33-a751-6ce34ec4c700"      # the Bluetooth LE MIDI service
-BT_WHY = {"AuthenticationFailed": "it refused (wrong mode, or it is paired to something else)", "AuthenticationCanceled": "it gave up",
+BT_WHY = {"AuthenticationFailed": "it refused (if it was paired with the box before, forget the box on the device first)", "AuthenticationCanceled": "it gave up",
           "AuthenticationTimeout": "it didn't answer", "AuthenticationRejected": "it said no", "ConnectionAttemptFailed": "it didn't answer",
           "NotReady": "Bluetooth isn't ready yet", "InProgress": "it is busy, try again"}
 
@@ -717,42 +718,77 @@ class Helper:
         return {"ok": True, "devices": seen[:16]}
 
     def cmd_bt_pair(self, d):
+        """One bluetoothctl session, in the order that works with this radio (rig, 2026-11-24, an iPad):
+        connect while a scan runs (the radio only finds a private address then), stop the scan (the link
+        doesn't settle under one), then pair, and say yes to the code: the device shows the same one and
+        its owner confirms it there. Afterwards the device may be listed under another address (its real one)."""
         addr = d.get("addr")
         if not isinstance(addr, str) or not BT_ADDR_RE.match(addr):
             return {"error": "addr: a device from the scan"}
         if not self.bt()["on"]:
             return {"error": "Bluetooth is off"}
-        scan = None
+        before = set(self.bt_addrs("Paired"))
+        if addr in before:
+            return {"ok": True, "device": self.bt_info(addr)}
+        log = tempfile.TemporaryFile()
         try:
-            scan = subprocess.Popen([self.a.bluetoothctl, "--timeout", "60", "scan", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            ctl = subprocess.Popen([self.a.bluetoothctl], stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT)
         except OSError:
-            pass
+            return {"error": "bluetoothctl isn't installed"}
+
+        def say(line):
+            try:
+                ctl.stdin.write(line.encode() + b"\n")
+                ctl.stdin.flush()
+            except OSError:
+                pass
+
+        def wait(what, seconds, each=None):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end:
+                r = what()
+                if r:
+                    return r
+                if each:
+                    each()
+                time.sleep(self.a.bt_step_s)
+            return what()
+        new, why = None, "no answer from it"
         try:
-            end = time.monotonic() + self.a.bt_find_s
-            info = self.bt_info(addr)
-            while info is None and time.monotonic() < end:
-                time.sleep(0.5)
-                info = self.bt_info(addr)
-            if info is None:
+            say("scan on")
+            if not wait(lambda: self.bt_info(addr), self.a.bt_find_s):
                 return {"error": "it isn't in reach any more: put it in pairing mode and scan again"}
-            out = "" if info["paired"] else self.btctl("--agent", "NoInputNoOutput", "--timeout", "25", "pair", addr, timeout=32)
-            info = self.bt_info(addr) or info
-            if info["paired"]:
-                self.btctl("trust", addr)
-                self.btctl("--timeout", "15", "connect", addr, timeout=20)       # a failure here is no failure to pair
-                info = self.bt_info(addr) or info
+            say("connect " + addr)
+            up = wait(lambda: (self.bt_info(addr) or {}).get("connected"), self.a.bt_connect_s)
+            say("scan off")
+            time.sleep(min(0.5, self.a.bt_step_s))
+            if up:
+                say("pair " + addr)
+
+                def paired():
+                    now = self.bt_addrs("Paired")
+                    return addr if addr in now else next((a for a in now if a not in before), None)
+
+                def failed():
+                    log.seek(0)
+                    return re.search(r"Failed to pair: org\.bluez\.Error\.(\w+)", log.read().decode(errors="replace"))
+                new = wait(lambda: paired() or failed(), self.a.bt_pair_s, lambda: say("yes"))
+                if new and not isinstance(new, str):
+                    new, why = None, BT_WHY.get(new.group(1), new.group(1))
+                if new:
+                    say("trust " + new)
+                    time.sleep(min(0.5, self.a.bt_step_s))
         finally:
-            if scan is not None:
-                scan.terminate()
-                try:
-                    scan.wait(3)
-                except subprocess.TimeoutExpired:
-                    scan.kill()
+            say("quit")
+            try:
+                ctl.wait(3)
+            except subprocess.TimeoutExpired:
+                ctl.kill()
+            log.close()
             self.bt_cache = None
-        if not info["paired"]:
-            m = re.search(r"org\.bluez\.Error\.(\w+)", out)
-            return {"error": "it didn't pair: " + (BT_WHY.get(m.group(1), m.group(1)) if m else "no answer from it")}
-        return {"ok": True, "device": info}
+        if not new:
+            return {"error": "it didn't pair: " + why}
+        return {"ok": True, "device": self.bt_info(new) or {"addr": new, "name": "", "midi": False, "paired": True, "connected": False, "rssi": None}}
 
     def cmd_bt_forget(self, d):
         addr = d.get("addr")
@@ -857,6 +893,9 @@ def main():
     ap.add_argument("--bt-wait-s", type=float, default=20)
     ap.add_argument("--bt-scan-s", type=float, default=8, help="how long a Bluetooth scan listens")
     ap.add_argument("--bt-find-s", type=float, default=12, help="pairing: how long to look for the device first")
+    ap.add_argument("--bt-connect-s", type=float, default=20.0, help="how long a device gets to connect before pairing")
+    ap.add_argument("--bt-pair-s", type=float, default=45.0, help="how long a pairing may take (its owner has to confirm on the device)")
+    ap.add_argument("--bt-step-s", type=float, default=1.0, help="how often a pairing looks whether the device has moved on")
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
                        ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl"),
                        ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq")):

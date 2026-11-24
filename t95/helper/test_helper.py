@@ -37,11 +37,14 @@ case "$(basename "$0") $*" in
      awk -F'|' -v a="$2" '$1 == a { f = 1; print "Device " a " (random)"; if ($2 != "") print "\\tName: " $2; print "\\tPaired: " $4; print "\\tConnected: " $5
        if ($3 == "yes") print "\\tUUID: Vendor specific           (03b80e5a-ede8-4b33-a751-6ce34ec4c700)"; print "\\tRSSI: 0xffffffc4 (" $6 ")" }
        END { if (!f) print "Device " a " not available" }' "$FAKEDIR/btdev" ;;
-  "bluetoothctl --agent NoInputNoOutput --timeout 25 pair "*) for x; do a=$x; done
-     [ -f "$FAKEDIR/bt-refuse" ] && { echo "Failed to pair: org.bluez.Error.AuthenticationFailed"; exit 1; }
-     awk -F'|' -v OFS='|' -v a="$a" '$1 == a { $4 = "yes" } { print }' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
-  "bluetoothctl --timeout 15 connect "*) for x; do a=$x; done
-     awk -F'|' -v OFS='|' -v a="$a" '$1 == a { $5 = "yes" } { print }' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
+  "bluetoothctl ") want=""                      # a session: commands on its input, as the helper pairs
+     set_field() { awk -F'|' -v OFS='|' -v a="$1" -v n="$2" -v v="$3" '$1 == a { $n = v } { print }' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev"; }
+     while read c a; do echo "bluetoothctl> $c $a" >> "$FAKELOG"; case "$c" in
+       connect) [ -f "$FAKEDIR/bt-away" ] || set_field "$a" 5 yes ;;
+       pair) if [ -f "$FAKEDIR/bt-refuse" ]; then echo "Failed to pair: org.bluez.Error.AuthenticationFailed"; else want="$a"; echo "[agent] Confirm passkey 123456 (yes/no):"; fi ;;
+       yes) [ -n "$want" ] && { set_field "$want" 4 yes; [ -f "$FAKEDIR/bt-newaddr" ] && set_field "$want" 1 "$(cat "$FAKEDIR/bt-newaddr")"; echo "Pairing successful"; want=""; } ;;
+       quit) exit 0 ;;
+     esac; done ;;
   "bluetoothctl remove "*) awk -F'|' -v a="$2" '$1 != a' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
 esac
 exit 0
@@ -176,7 +179,7 @@ class HelperTest(unittest.TestCase):
              "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--select-s", "0.05", "--connect-s", "1.5", "--watch-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"],
              "--keep-s", "0.05", "--auto-s", "0.6", "--hot-trial-s", "1.2", "--rescan-s", "0.5", "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
-             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1", "--bt-scan-s", "0.1", "--bt-find-s", "1",
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1", "--bt-scan-s", "0.1", "--bt-find-s", "1", "--bt-connect-s", "1", "--bt-pair-s", "3", "--bt-step-s", "0.1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
              "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
             env=env, stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "helper.log"), "w"))
@@ -391,12 +394,24 @@ class HelperTest(unittest.TestCase):
         self.assertTrue(self.ask(cmd="bt_pair", addr=ad[2]).get("pin"))     # changing the box needs the PIN
         self.assertIn("addr", self.ask(cmd="bt_pair", pin=P, addr="WIDI Jack; reboot")["error"])
         self.assertIn("in reach", self.ask(cmd="bt_pair", pin=P, addr=":".join(["EE"] * 6))["error"])
+        open(os.path.join(self.dir, "bt-away"), "w").close()                # seen in the scan, doesn't connect
+        self.assertEqual(self.ask(cmd="bt_pair", pin=P, addr=ad[2])["error"], "it didn't pair: no answer from it")
+        os.unlink(os.path.join(self.dir, "bt-away"))
         open(os.path.join(self.dir, "bt-refuse"), "w").close()
-        self.assertEqual(self.ask(cmd="bt_pair", pin=P, addr=ad[2])["error"], "it didn't pair: it refused (wrong mode, or it is paired to something else)")
+        self.assertIn("it didn't pair: it refused", self.ask(cmd="bt_pair", pin=P, addr=ad[2])["error"])
         os.unlink(os.path.join(self.dir, "bt-refuse"))
+        # the order that works on the T95: connect under a scan, scan off, pair, yes to the code
+        real = ":".join(["%02X" % 0xA5] * 6)                                # a phone or tablet shows its real address once paired
+        with open(os.path.join(self.dir, "bt-newaddr"), "w") as f:
+            f.write(real)
+        n = len(self.calls())
         out = self.ask(cmd="bt_pair", pin=P, addr=ad[2])
-        self.assertEqual((out["ok"], out["device"]["name"], out["device"]["paired"], out["device"]["connected"]), (True, "WIDI Jack", True, True))
-        self.assertIn("bluetoothctl trust " + ad[2], self.calls())
+        self.assertEqual((out["ok"], out["device"]["addr"], out["device"]["name"], out["device"]["paired"], out["device"]["connected"]),
+                         (True, real, "WIDI Jack", True, True))
+        said = [c.split("> ", 1)[1].strip() for c in self.calls()[n:] if c.startswith("bluetoothctl> ")]
+        said = [c for i, c in enumerate(said) if c != "yes" or said[i - 1] != "yes"]
+        self.assertEqual(said, ["scan on", "connect " + ad[2], "scan off", "pair " + ad[2], "yes", "trust " + real, "quit"])
+        ad[2] = real
         self.assertEqual(sorted(x["name"] for x in self.ask(cmd="status")["bt_devices"]), ["Old Keys", "WIDI Jack"])
         self.assertTrue(self.ask(cmd="bt_forget", addr=ad[3]).get("pin"))
         self.assertEqual(self.ask(cmd="bt_forget", pin=P, addr=ad[3]), {"ok": True})

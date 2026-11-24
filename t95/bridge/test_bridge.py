@@ -2319,29 +2319,85 @@ class BleMidiTest(unittest.TestCase):
             self.assertEqual(b"".join(ble_decode(p) for p in pk), h("903c64") + sx + h("803c00"), mtu)
 
     def test_b2_a_device_is_a_port(self):
+        """The bridge's own ATT channel against a made-up device: finds the MIDI characteristic, turns
+        notifications on, answers what the device asks, and is a pty to the rest of the bridge"""
         import asyncio as aio
-        from rackbridge.ble import BleLink, ble_decode
+        import struct
+        from rackbridge.ble import BleLink, ble_decode, MIDI_CHAR_LE
 
         async def go():
-            radio, ours = socket.socketpair()                # one packet at a time here, so a stream keeps their edges
+            radio, ours = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)       # keeps packets whole, as the ATT channel does
+            radio.setblocking(False); ours.setblocking(False)
+            loop = aio.get_running_loop()
+            seen, got = [], []
+
+            def device():
+                p = radio.recv(600)
+                seen.append(p[0])
+                if p[0] == 0x02:
+                    radio.send(struct.pack("<BHH", 0x12, 0x000B, 2))                 # it asks first: a write of its own
+                    radio.send(struct.pack("<BHHH", 0x08, 1, 0xFFFF, 0x2A00))        # and a question we have no answer to
+                    radio.send(struct.pack("<BH", 0x03, 185))
+                elif p[0] == 0x08:
+                    start = struct.unpack_from("<H", p, 1)[0]
+                    if start <= 0x10:
+                        radio.send(struct.pack("<BBHBHH", 0x09, 7, 0x10, 0x02, 0x11, 0x2A19))
+                    elif start <= 0x3A:
+                        radio.send(struct.pack("<BBHBH", 0x09, 21, 0x3A, 0x96, 0x3B) + MIDI_CHAR_LE)
+                    elif start <= 0x40:
+                        radio.send(struct.pack("<BBHBHH", 0x09, 7, 0x40, 0x02, 0x41, 0x2A29))
+                    else:
+                        radio.send(struct.pack("<BBHB", 0x01, 0x08, start, 0x0A))
+                elif p[0] == 0x04:
+                    radio.send(struct.pack("<BBHHHH", 0x05, 1, 0x3C, 0x2900, 0x3D, 0x2902))
+                elif p[0] == 0x12:
+                    got.append(("ccc", p[1:]))
+                    radio.send(b"\x13")
+                else:
+                    got.append(p)
+            loop.add_reader(radio.fileno(), device)
             gone = []
-            link = BleLink("ble:dev_X", "WIDI Jack", os.dup(ours.fileno()), os.dup(ours.fileno()), 23, gone.append)
-            ours.close()
-            fd = os.open(link.path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)             # what the bridge does with a controller
-            radio.send(bytes.fromhex("80 80 903c64 81 3e64"))
+            link = BleLink("ble:dev_X", "WIDI Jack", gone.append)
+            await link.attach(ours).open_midi()
+            self.assertEqual((link.att.mtu, link.att.value), (185, 0x3B))
+            self.assertIn(("ccc", struct.pack("<HH", 0x3D, 1)), got)                 # notifications on, at the right handle
+            await aio.sleep(0.05)
+            self.assertIn(b"\x13", got)                                              # its write was answered
+            self.assertIn(struct.pack("<BBHB", 0x01, 0x08, 1, 0x0A), got)            # and its question: "not found"
+            del got[:]
+            fd = os.open(link.path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)         # what the bridge does with a controller
+            radio.send(struct.pack("<BH", 0x1B, 0x3B) + bytes.fromhex("80 80 903c64 81 3e64"))
+            radio.send(struct.pack("<BH", 0x1B, 0x11) + bytes.fromhex("80 80 904040"))   # a notification of something else
             await aio.sleep(0.1)
             self.assertEqual(os.read(fd, 100), bytes.fromhex("903c64 3e64"))
-            os.write(fd, bytes.fromhex("903c01 f04700f7"))                               # LEDs and a sysex back
+            os.write(fd, bytes.fromhex("903c01 f04700f7"))                           # LEDs and a sysex back
             await aio.sleep(0.1)
-            radio.setblocking(False)
-            pkt = radio.recv(100)
-            self.assertEqual((pkt[0] & 0xC0, ble_decode(pkt)), (0x80, bytes.fromhex("903c01 f04700f7")))
+            self.assertEqual(len(got), 1)
+            pkt = got[0]
+            self.assertEqual((pkt[:3], pkt[3] & 0xC0, ble_decode(pkt[3:])), (struct.pack("<BH", 0x52, 0x3B), 0x80, bytes.fromhex("903c01 f04700f7")))
             with self.assertRaises(BlockingIOError):
-                os.read(fd, 100)                                                         # nothing echoed back to the bridge
-            radio.close()                                                                # the device left
+                os.read(fd, 100)                                                     # nothing echoed back to the bridge
+            loop.remove_reader(radio.fileno())
+            radio.close()                                                            # the device left
+            os.write(fd, bytes.fromhex("903c00"))                                    # found out at the next thing sent
             await aio.sleep(0.1)
             self.assertEqual((gone, link.closed), ([link], True))
             os.close(fd)
+
+            # a device without the MIDI characteristic is refused, with the reason
+            radio, ours = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+            radio.setblocking(False); ours.setblocking(False)
+
+            def other():
+                p = radio.recv(600)
+                radio.send(struct.pack("<BH", 0x03, 23) if p[0] == 0x02 else struct.pack("<BBHB", 0x01, p[0], 1, 0x0A))
+            loop.add_reader(radio.fileno(), other)
+            link = BleLink("ble:dev_Y", "Speaker", gone.append)
+            with self.assertRaisesRegex(OSError, "no MIDI characteristic"):
+                await link.attach(ours).open_midi()
+            link.close()
+            loop.remove_reader(radio.fileno())
+            radio.close()
         aio.run(go())
 
 
@@ -3095,7 +3151,7 @@ class SettingsTest(unittest.TestCase):
              "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--select-s", "0.05", "--connect-s", "6", "--scan-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"], "--keep-s", "0.1",
              "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
-             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-scan-s", "0.1", "--bt-find-s", "1",
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-scan-s", "0.1", "--bt-find-s", "1", "--bt-connect-s", "1", "--bt-pair-s", "3", "--bt-step-s", "0.1",
              "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],
              "--bluetoothctl", tools["bluetoothctl"]],
             env=dict(os.environ, FAKELOG=cls.calls, FAKEDIR=cls.dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

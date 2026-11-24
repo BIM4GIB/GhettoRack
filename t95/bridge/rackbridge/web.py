@@ -170,7 +170,7 @@ class WebMixin:
     SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "bt_scan", "bt_pair", "bt_forget", "restart_bridge", "reboot", "poweroff",
                 "pin_set", "pin_check", "hotspot", "hotspot_set"}
 
-    def helper_ask(self, d, timeout=75):
+    def helper_ask(self, d, timeout=90):
         """One request to the settings helper. Blocking: call it from an executor"""
         import socket
         try:

@@ -157,15 +157,20 @@ them one on the map (REC still arms a loop).
 
 - DIN MIDI when the parts arrive (UART4 on D1/D2; D13/D14 are the screen's).
   USB-to-DIN cables as ports meanwhile.
-- Bluetooth MIDI, built 2026-11-24, NOT tried with a real device: pair in
-  Settings > Bluetooth (helper: scan, pair, forget), and the bridge makes a
-  controller port of every paired device that offers the MIDI service
-  (`rackbridge/ble.py`, BlueZ over D-Bus, `--ble`). To try: a Bluetooth MIDI
-  keyboard or adapter in pairing mode, SCAN, PAIR, then Devices should name it
-  and its notes should reach the Daisy like the LPK25's. Unknown until then:
-  whether this chip pairs at all, the delay, what the Wi-Fi does meanwhile.
-- Bluetooth MIDI before that: the T95's own radio works (scan found 21 devices on the
-  rig); pairing and BLE MIDI are the next experiment.
+- Bluetooth MIDI (2026-11-24): works on the rig with one device, an iPad running a
+  synth app that advertises Bluetooth MIDI. Pair in Settings > Bluetooth; the bridge
+  makes a controller port of every paired device that offers the MIDI service
+  (`rackbridge/ble.py`, its own ATT channel, `--ble`) and reaches it again by itself
+  (seen: 8 s after a restart). Notes sent from the box played on the iPad, and the iPad's MIDI
+  reached ApcBox (Rene, same day). The T95's
+  radio needed three ways round (top of `rackbridge/ble.py`, `t95/README.md`).
+  Not tried: PAIR from the Settings page with the
+  new sequence (it was done by hand in that order), a Bluetooth MIDI keyboard or
+  adapter, the delay, what the Wi-Fi does meanwhile, a wait shorter than 3 s before
+  encrypting. A device that wants a code typed is not handled. While a paired device
+  is away the bridge scans 6 s in every 20 for it.
+- The box as a Bluetooth MIDI device that an iPad or Mac finds (the other way round):
+  not built. Its Bluetooth is not visible to others.
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.
 - MIDI clock following: tempo ramps lag by the fit window (4 beats).
