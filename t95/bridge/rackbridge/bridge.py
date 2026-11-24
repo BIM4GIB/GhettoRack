@@ -37,6 +37,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.serial_dropped = 0
         self.ctl = 0                     # Daisy control protocol version (P line)
         self.p_line = None
+        self.firmware = None             # what the Daisy calls its firmware (VF line, report 17), e.g. "13.17"
         self.daisy_ports = set()         # port numbers announced to the Daisy (routed to it)
         self.ports = {}                  # num -> MidiPort
         self.pings = {}                  # id -> send time
@@ -98,6 +99,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "client_resyncs": self.client_resyncs + sum(c.resyncs for c in self.clients),
             "rejected_clients": self.rejected,
             "control": self.ctl,
+            "firmware": self.firmware,
             "serial_out_bytes": len(self.sout),
             "serial_dropped": self.serial_dropped,
             "controllers": [p.info(self.kinds()) for p in sorted(self.ports.values(), key=lambda p: p.num)],
@@ -116,6 +118,7 @@ async def main_async(args):
     server = await asyncio.start_server(b.handle_http, args.host, args.http_port, limit=16384)
     log.info("serving http://%s:%d/", args.host, args.http_port)
     servers = [server.serve_forever()]
+    tls = None
     if args.https_port:
         try:
             ctx = tls_context(os.path.dirname(args.state))
@@ -129,9 +132,18 @@ async def main_async(args):
     b.clock.start_thread()
     me = asyncio.current_task()
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
-    async with server:
+    try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
                              b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task())
+    finally:
+        # Stop taking connections, and don't wait for the open ones. `async with server` did:
+        # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
+        # page on the box's own screen never does, so a stop sat there until systemd's 90 s
+        # were up and it killed the bridge (rig, 2026-11-24: every restart that night).
+        # asyncio.run cancels the browsers' handlers once this returns; their finally blocks run.
+        server.close()
+        if tls:
+            tls.close()
 
 
 def main(argv=None):

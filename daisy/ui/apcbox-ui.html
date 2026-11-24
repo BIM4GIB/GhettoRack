@@ -251,7 +251,7 @@ body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
 "use strict";
 /* ---------------- state ---------------- */
 const NT = 16, NS = 16;
-const REPORT_VERSION = 16; // firmware sends "V 16"
+const REPORT_VERSION = 17; // firmware sends "V 17"
 const st = {
   link: false, demo: false, gotData: false,
   play: 0, step: 0, pat: 0, queued: -1, rec: 0, bpm: 0, metro: 0, sel: 0, page: 0, shift: 0, copy: 0,
@@ -336,6 +336,7 @@ function handleLine(line) {
     case "Q": { const a = rest.split(" "); const t = +a[1]; if (t >= 0 && t < NT && a[2] && a[2].length === NS * 2) st.notes[t] = a[2]; break; }
     case "A": { const a = nums(); if (a.length >= 9 && a[0] >= 0 && a[0] < NT) st.acid[a[0]] = a.slice(1, 9); break; }
     case "M": { const a = nums(); if (a.length >= 9) st.g = a; break; }
+    case "VF": if (rest !== st.fw) { st.fw = rest; log(`firmware v${rest}`); } break;
     case "V": { const v = +rest; if (v !== st.ver) { st.ver = v; if (v !== REPORT_VERSION) log(`firmware reports version ${v}, this page is ${REPORT_VERSION}: reload the page (or flash the matching firmware)`, "w"); } break; }
     case "B": st.browse = nums(); break;
     case "BF": st.folder = rest; break;

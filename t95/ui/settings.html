@@ -299,7 +299,7 @@ function draw() {
   $("y-old").style.display = st.pin_set ? "" : "none"; $("y-pin").textContent = st.pin_set ? "CHANGE PIN" : "SET PIN";
   $("y-pin-hint").textContent = st.pin_set ? "" : "4 to 8 digits. Whoever sets it first owns the box's settings.";
   for (const [id, k, t] of [["y-bridge", "bridge", "RESTART BRIDGE"], ["y-reboot", "reboot", "REBOOT"], ["y-off", "off", "SHUT DOWN"]]) $(id).textContent = sure === k ? "SURE?" : t;
-  kv("d-kv", [["Daisy", br.daisy ? "connected, control " + br.control : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
+  kv("d-kv", [["Daisy", br.daisy ? "connected" + (br.firmware ? ", firmware " + br.firmware : "") + ", control " + br.control : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
     ["Bluetooth", b.tool ? (b.on ? "on" : "off") : "not set up"]]);
   if (tab === "net") drawNets();
 }

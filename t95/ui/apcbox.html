@@ -1862,9 +1862,10 @@ function line(l) {
       for (const k in o) if (!isBusy("lp." + k)) st.lp[k] = o[k]; call("P"); call("S"); break; }
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); call("B"); break;
+    case "VF": st.fw = rest; break;      // the firmware's version (report 17)
   }
 }
-const REPORT_VERSION = 16;
+const REPORT_VERSION = 17;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

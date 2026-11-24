@@ -2863,7 +2863,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 16; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map)
+constexpr int kReportVersion = 17; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version)
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2971,6 +2971,7 @@ void Report(uint32_t now)
         rep_full_time = now;
         ForceFullReport();
         Out("V %d", kReportVersion); // the page checks it matches
+        Out("VF %s", kFirmware);     // which firmware this is, for whoever asks later than the start line
     }
 
     const int pat = eng->CurrentPattern();

@@ -87,7 +87,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 16 are separate version numbers.
+  version 17 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features

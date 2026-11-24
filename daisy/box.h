@@ -13,6 +13,9 @@
 
 namespace ab
 {
+/** The firmware's version: the start line of the log and the `VF` report line */
+constexpr char kFirmware[] = "13.17";
+
 /** One APC40 LED or knob ring: wanted value and last value confirmed sent */
 struct LedSlot
 {

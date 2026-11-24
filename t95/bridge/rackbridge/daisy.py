@@ -216,6 +216,8 @@ class DaisyMixin:
                 continue
             if t == "P":
                 self.on_p_line(line)
+            elif t == "VF":
+                self.firmware = line[3:].strip()[:16] or None
             elif t == "CL":                 # the Daisy's own steps: the clock module can follow them
                 self.clock.feed_daisy(line)
                 continue                    # 8 a second, for the bridge only: not for browsers
@@ -315,6 +317,7 @@ class DaisyMixin:
         loop = asyncio.get_running_loop()
         self.ctl = 0
         self.p_line = None
+        self.firmware = None
         self.sout.clear()
         self.sout_lo.clear()
         self.pings.clear()
@@ -360,6 +363,7 @@ class DaisyMixin:
             self.asm.skipping = True
             self.cache.clear()         # a different Daisy, or the same one rebooted
             self.ctl = 0               # until it sends a P line
+            self.firmware = None
             for c in self.clients:
                 c.q.clear(); c.qbytes = 0; c.need_snapshot = True; c.wake.set()
             self.lost.clear()

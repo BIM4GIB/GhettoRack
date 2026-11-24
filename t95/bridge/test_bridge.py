@@ -1374,6 +1374,9 @@ class EndToEndTest(unittest.TestCase):
     def test_e1_apc40_identified_driven_leds(self):
         c = SseClient(self.http)
         self.assertTrue(c.wait_for(lambda c: c.events))
+        # the real firmware says which version it is (VF line, report 17): /health has it
+        h = BridgeTest.wait_health(lambda h: h.get("firmware"), 5)
+        self.assertRegex(h["firmware"], r"^13\.\d+$")
         got = b""
         end = time.time() + 3
         while b"\xf0\x7e\x7f\x06\x01\xf7" not in got and time.time() < end:
@@ -2560,6 +2563,77 @@ class FlushTest(unittest.TestCase):
         reads0, got0 = self.run_one([])                          # the box's own screen: not paced
         self.assertEqual(got0, want)
         self.assertGreater(reads0, 2 * reads, (reads0, reads))
+
+
+class FirmwareVersionTest(unittest.TestCase):
+    """The Daisy's VF line (report 17) ends up in /health and /sys/state, and is forgotten when the Daisy goes"""
+
+    def test_v1_firmware_in_health(self):
+        d = tempfile.mkdtemp()
+        daisy = FakeDaisy(os.path.join(d, "daisy"))
+        http = free_port()
+        proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", daisy.link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+             "--http-port", str(http), "--ui", UI, "--no-midi", "--state", os.path.join(d, "state.json")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            BridgeTest.http = http
+            h = BridgeTest.wait_health(lambda h: h["daisy"], 10)
+            self.assertIsNone(h["firmware"])                      # an older firmware never says
+            daisy.send("V 17\nVF 13.17\n")
+            h = BridgeTest.wait_health(lambda h: h.get("firmware"), 5)
+            self.assertEqual(h["firmware"], "13.17")
+            c = SseClient(http)                                   # browsers get the line too, also late ones
+            self.assertTrue(c.wait_for(lambda c: "VF 13.17" in c.lines, 3))
+            c.close()
+        finally:
+            proc.kill()
+
+
+class StopTest(unittest.TestCase):
+    """A stop (systemd's SIGTERM) ends the bridge at once, also with browsers on the event stream.
+    It used to wait for them to leave; the page on the box's own screen never does, so every
+    restart took systemd's 90 s and a kill (rig, 2026-11-24)."""
+
+    def test_t1_stops_with_browsers_connected(self):
+        import signal
+        d = tempfile.mkdtemp()
+        daisy = FakeDaisy(os.path.join(d, "daisy"))
+        http = free_port()
+        proc = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", daisy.link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0",
+             "--http-port", str(http), "--ui", UI, "--no-midi", "--state", os.path.join(d, "state.json")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        socks = []
+        try:
+            BridgeTest.http = http
+            BridgeTest.wait_health(lambda h: h["daisy"], 10)
+            for _ in range(3):
+                s = socket.socket()
+                s.connect(("127.0.0.1", http))
+                s.sendall(b"GET /events HTTP/1.1\r\nHost: x\r\n\r\n")
+                socks.append(s)
+            BridgeTest.wait_health(lambda h: h["clients"] == 3, 5)
+            t0 = time.time()
+            proc.send_signal(signal.SIGTERM)
+            try:
+                proc.wait(5)
+            except subprocess.TimeoutExpired:
+                self.fail("still running 5 s after SIGTERM with 3 browsers connected")
+            self.assertLess(time.time() - t0, 2)
+            for s in socks:                                       # and the browsers were told: the stream ends
+                s.settimeout(2)
+                buf = b""
+                while True:
+                    c = s.recv(1 << 16)
+                    if not c:
+                        break
+                    buf += c
+                self.assertIn(b"text/event-stream", buf)
+        finally:
+            for s in socks:
+                s.close()
+            proc.kill()
 
 
 class IrLircTest(IrTest):

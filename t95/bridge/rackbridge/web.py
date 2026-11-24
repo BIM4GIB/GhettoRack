@@ -311,7 +311,7 @@ class WebMixin:
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["settings"])
             elif path == "/sys/state":
                 out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, {"cmd": "status"})
-                out["bridge"] = {"daisy": self.fd is not None, "control": self.ctl,
+                out["bridge"] = {"daisy": self.fd is not None, "control": self.ctl, "firmware": self.firmware,
                                  "controllers": [p.name for p in sorted(self.ports.values(), key=lambda p: p.num)],
                                  "autostart_s": self.state.data.get("autostart_s", 0)}
                 await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")
