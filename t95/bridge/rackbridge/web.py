@@ -167,7 +167,7 @@ class WebMixin:
         return 404, {"error": "not found"}
 
     # ---- Settings: the bridge has no rights; it asks the helper (t95/helper) ----
-    SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "restart_bridge", "reboot", "poweroff",
+    SYS_CMDS = {"scan", "join", "confirm", "forget", "hostname", "bt", "bt_scan", "bt_pair", "bt_forget", "restart_bridge", "reboot", "poweroff",
                 "pin_set", "pin_check", "hotspot", "hotspot_set"}
 
     def helper_ask(self, d, timeout=75):
@@ -313,7 +313,7 @@ class WebMixin:
                 out = await asyncio.get_running_loop().run_in_executor(None, self.helper_ask, {"cmd": "status"})
                 out["bridge"] = {"daisy": self.fd is not None, "control": self.ctl, "firmware": self.firmware,
                                  "controllers": [p.name for p in sorted(self.ports.values(), key=lambda p: p.num)],
-                                 "autostart_s": self.state.data.get("autostart_s", 0)}
+                                 "autostart_s": self.state.data.get("autostart_s", 0), "ble_midi": self.ble.info()}
                 await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/health":
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")

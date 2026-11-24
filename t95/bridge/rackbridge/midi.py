@@ -130,9 +130,10 @@ class PortsMixin:
     """Bridge methods for USB MIDI controllers"""
 
     def midi_candidates(self):
+        ble = self.ble.candidates()    # Bluetooth MIDI devices, each behind a pty (ble.py)
         if self.midi_paths:            # --midi: fixed paths (tests)
-            return {path: (path, name) for path, name in self.midi_paths.items() if os.path.exists(path)}
-        return find_midi()
+            return dict({path: (path, name) for path, name in self.midi_paths.items() if os.path.exists(path)}, **ble)
+        return dict(find_midi(), **ble)
 
     def attach_midi(self, key, path, name):
         free = [n for n in range(1, MAX_PORTS + 1) if n not in self.ports]

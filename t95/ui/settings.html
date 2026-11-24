@@ -78,12 +78,12 @@ header a{white-space:nowrap}
   header{padding:8px 10px;gap:8px}header h1{display:none}
   .kv{grid-template-columns:110px 1fr;font-size:13px}
   section{padding:10px}
-  #r-hint{display:none}
+  #r-hint,#b-chip{display:none}
 }
 @media (max-height:480px){
   header{padding:5px 10px}main{padding:6px 10px;gap:8px;grid-template-columns:120px 1fr}
   nav button{height:34px;font-size:13px}section{padding:8px 10px;gap:6px}button{height:30px}input{height:30px}#pad-keys button{height:34px}#pad .box{padding:8px;gap:5px}#pad-keys{gap:5px}#pad-val{height:24px;font-size:18px}
-  p{font-size:12px}.big{font-size:15px}.banner{height:28px}.banner.open{min-height:28px;padding:4px 12px}.banner .ba{height:22px}
+  #b-chip{display:none}p{font-size:12px}.big{font-size:15px}.banner{height:28px}.banner.open{min-height:28px;padding:4px 12px}.banner .ba{height:22px}
 }
 </style>
 </head>
@@ -116,10 +116,11 @@ header a{white-space:nowrap}
       <p id="h-text"></p>
     </section>
     <section id="s-bt">
-      <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-toggle" class="act">TURN ON</button></div>
+      <div class="row"><span class="big" id="b-now">?</span><span class="sp"></span><button id="b-scan" class="act">SCAN</button><button id="b-toggle" class="act">TURN ON</button></div>
       <div id="b-banner" class="banner"></div>
+      <div id="b-list" class="list"></div>
       <p id="b-text"></p>
-      <p class="dim">Pairing devices and Bluetooth MIDI come next. Bluetooth and Wi-Fi share one chip on this box: if the pages get slow with Bluetooth on, turn it off again.</p>
+      <p class="dim" id="b-chip">Bluetooth and Wi-Fi share one chip on this box: if the pages get slow with Bluetooth on, turn it off again.</p>
     </section>
     <section id="s-sys">
       <div class="kv" id="y-kv"></div>
@@ -185,7 +186,7 @@ async function get(u) { try { return await (await fetch(u, { cache: "no-store", 
 /* risky: sends the PIN along. Returns the helper's answer ({error} on failure) */
 async function sys(cmd, extra, risky) {
   const d = Object.assign({ cmd }, extra || {}); if (risky) d.pin = $("pin").value;
-  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d), signal: tmo(cmd === "scan" ? 25000 : 12000) }); return await r.json(); }
+  try { const r = await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d), signal: tmo(cmd === "bt_pair" ? 80000 : cmd === "scan" || cmd === "bt_scan" ? 25000 : 12000) }); return await r.json(); }
   catch (e) { return { error: "the box isn't answering", gone: true }; }
 }
 function needPin(id) {
@@ -225,6 +226,40 @@ function drawJoin() {
   $("n-join").style.display = joining ? "flex" : "none";
   if (!joining) return;
   $("n-join-name").textContent = joining.ssid; $("n-psk").style.display = $("n-show").style.display = joining.secure ? "" : "none";
+}
+/* Bluetooth devices: the paired ones (from the status) and what the last scan saw */
+let btseen = null, btbusy = "";
+function drawBt() {
+  const L = $("b-list"), b = (st && st.bt) || {};
+  const paired = (st && st.bt_devices) || [], have = new Set(paired.map(d => d.addr)), all = paired.concat((btseen || []).filter(d => !have.has(d.addr)));
+  const per = Math.max(1, Math.floor(L.clientHeight / 46)); L.style.gridTemplateRows = `repeat(${per},1fr)`;
+  const key = JSON.stringify([all, btbusy, sure, per, b.on, !!btseen]); if (L.dataset.k === key && L.firstChild) return; L.dataset.k = key;   // the poll redraws: keep the remote's cursor
+  L.textContent = "";
+  const say = t => { const d = el("div", "net"); d.appendChild(el("span", "dim", t)); L.appendChild(d); };
+  if (!b.on) return say(b.tool ? "Bluetooth is off." : "");
+  if (!all.length) return say(btseen ? "Nothing found. Put the device in pairing mode and SCAN again." : "No paired devices. SCAN shows what is in reach.");
+  for (const d of all.slice(0, per)) {
+    const name = d.name || "(no name)", r = el("div", "net" + (d.connected ? " cur" : "")), nm = el("span", "nm", name), bars = el("span", "bars"), acts = el("span", "acts");
+    nm.appendChild(el("span", "tag", [d.midi ? "MIDI" : "", d.connected ? "connected" : d.paired ? "paired" : ""].filter(Boolean).join(", ")));
+    const sig = d.rssi == null ? 0 : (d.rssi + 95) * 2.5;
+    for (let i = 0; i < 4; i++) { const x = el("i", sig > i * 25 ? "on" : ""); x.style.height = (4 + i * 4) + "px"; bars.appendChild(x); }
+    if (!d.paired) { const j = el("button", "act", btbusy === d.addr ? "PAIRING" : "PAIR"); j.disabled = !!btbusy;
+      j.onclick = async () => { if (!needPin("b-banner")) return; btbusy = d.addr; banner("b-banner", "Pairing with " + name + ", up to a minute"); draw();
+        const o = await sys("bt_pair", { addr: d.addr }, true); btbusy = "";
+        banner("b-banner", o.error || "Paired with " + name, o.error ? "bad" : "good"); if (!o.error && btseen) btseen = btseen.filter(x => x.addr !== d.addr); poll(); };
+      acts.appendChild(j); }
+    else { const k = "b:" + d.addr, f = el("button", sure === k ? "warn" : "", sure === k ? "SURE?" : "FORGET"); f.disabled = !!btbusy;
+      f.onclick = async () => { if (sure !== k) { sure = k; return drawBt(); } sure = ""; if (!needPin("b-banner")) return drawBt();
+        const o = await sys("bt_forget", { addr: d.addr }, true); banner("b-banner", o.error || "Forgot " + name, o.error ? "bad" : "good"); poll(); };
+      acts.appendChild(f); }
+    r.append(nm, bars, acts); L.appendChild(r);
+  }
+}
+async function btScan() {
+  $("b-scan").disabled = true; $("b-scan").textContent = "SCANNING"; btbusy = "scan";
+  const o = await sys("bt_scan"); btbusy = ""; $("b-scan").textContent = "SCAN";
+  if (o.error) banner("b-banner", o.error, "bad"); else btseen = o.devices;
+  draw();
 }
 async function scan() {
   $("n-scan").disabled = true; $("n-scan").textContent = "SCANNING";
@@ -289,6 +324,7 @@ function draw() {
   $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
   $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box." :
     "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
+  $("b-scan").disabled = !b.on || !b.powered || !!btbusy; drawBt();
   const hs = st.hotspot || {};
   $("h-now").textContent = !h ? "?" : hs.on ? "on: " + hs.ssid : "off";
   $("h-addr").textContent = h && hs.on ? hs.clients + (hs.clients === 1 ? " device on it" : " devices on it") + (hs.by === "itself" ? ", started by itself" : "") : "";
@@ -307,6 +343,8 @@ function draw() {
   $("y-pin-hint").textContent = st.pin_set ? "" : "4 to 8 digits. Whoever sets it first owns the box's settings.";
   for (const [id, k, t] of [["y-bridge", "bridge", "RESTART BRIDGE"], ["y-reboot", "reboot", "REBOOT"], ["y-off", "off", "SHUT DOWN"]]) $(id).textContent = sure === k ? "SURE?" : t;
   kv("d-kv", [["Daisy", br.daisy ? "connected" + (br.firmware ? ", firmware " + br.firmware : "") + ", control " + br.control : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
+    ["Bluetooth MIDI", !br.ble_midi ? "?" : br.ble_midi.state !== "running" ? ({ off: "off", "no dbus-fast": "not installed (python3-dbus-fast)", "no BlueZ": "Bluetooth is off" })[br.ble_midi.state] || br.ble_midi.state
+      : br.ble_midi.connected.length ? br.ble_midi.connected.map(x => x.name).join(", ") : br.ble_midi.paired ? br.ble_midi.paired + " paired, none in reach" : "none paired"],
     ["Bluetooth", b.tool ? (b.on ? "on" : "off") : "not set up"]]);
   if (tab === "net") drawNets();
 }
@@ -404,6 +442,7 @@ $("h-toggle").onclick = async () => { if (!needPin("h-banner")) return; const hs
   if (on && sure !== "hot") { sure = "hot"; return draw(); }
   sure = ""; const o = await sys("hotspot", { on }, true);
   banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid + " on this device" : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : "note"); poll(); };
+$("b-scan").onclick = btScan;
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
   banner("b-banner", on ? "Starting Bluetooth, up to 20 s" : "");
   const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth starting, about 10 s" : "Bluetooth off"), o.error ? "bad" : "good"); poll(); };
@@ -420,7 +459,7 @@ $("y-pin").onclick = async () => {
   if (!o.error) { $("pin").value = $("y-new").value; $("y-old").value = $("y-new").value = ""; await poll(); checkPin(); }
 };
 let pinT = null; $("pin").addEventListener("input", () => { clearTimeout(pinT); pinT = setTimeout(checkPin, 500); });
-addEventListener("resize", () => { if (tab === "net") drawNets(); });
+addEventListener("resize", () => { if (tab === "net") drawNets(); if (tab === "bt") drawBt(); });
 nav(); poll(); setInterval(poll, 2500);
 </script>
 </body>

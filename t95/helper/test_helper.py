@@ -32,6 +32,17 @@ case "$(basename "$0") $*" in
   "netplan generate") [ -f "$FAKEDIR/netplan-broken" ] && { echo "bad yaml"; exit 1; } ;;
   "systemctl start --no-block ghettorack-bluetooth.service") [ -f "$FAKEDIR/chip-dead" ] || mkdir -p "$FAKEDIR/btclass/hci0" ;;
   "bluetoothctl show") printf 'Controller XX:XX:XX:XX:XX:XX (public)\\n\\tPowered: yes\\n' ;;
+  "bluetoothctl devices"|"bluetoothctl devices Paired") [ -f "$FAKEDIR/btdev" ] && awk -F'|' -v w="$2" '(w == "" || $4 == "yes") { print "Device " $1 " " $2 }' "$FAKEDIR/btdev" ;;
+  "bluetoothctl info "*) [ -f "$FAKEDIR/btdev" ] || { echo "Device $2 not available"; exit 1; }
+     awk -F'|' -v a="$2" '$1 == a { f = 1; print "Device " a " (random)"; if ($2 != "") print "\\tName: " $2; print "\\tPaired: " $4; print "\\tConnected: " $5
+       if ($3 == "yes") print "\\tUUID: Vendor specific           (03b80e5a-ede8-4b33-a751-6ce34ec4c700)"; print "\\tRSSI: 0xffffffc4 (" $6 ")" }
+       END { if (!f) print "Device " a " not available" }' "$FAKEDIR/btdev" ;;
+  "bluetoothctl --agent NoInputNoOutput --timeout 25 pair "*) for x; do a=$x; done
+     [ -f "$FAKEDIR/bt-refuse" ] && { echo "Failed to pair: org.bluez.Error.AuthenticationFailed"; exit 1; }
+     awk -F'|' -v OFS='|' -v a="$a" '$1 == a { $4 = "yes" } { print }' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
+  "bluetoothctl --timeout 15 connect "*) for x; do a=$x; done
+     awk -F'|' -v OFS='|' -v a="$a" '$1 == a { $5 = "yes" } { print }' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
+  "bluetoothctl remove "*) awk -F'|' -v a="$2" '$1 != a' "$FAKEDIR/btdev" > "$FAKEDIR/btdev.new" && mv "$FAKEDIR/btdev.new" "$FAKEDIR/btdev" ;;
 esac
 exit 0
 """
@@ -165,7 +176,7 @@ class HelperTest(unittest.TestCase):
              "--netplan-dir", cls.netplan, "--trial-s", "1.5", "--select-s", "0.05", "--connect-s", "1.5", "--watch-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"],
              "--keep-s", "0.05", "--auto-s", "0.6", "--hot-trial-s", "1.2", "--rescan-s", "0.5", "--scan-s", "0.05", "--lock-s", "1.2", "--attach", cls.attach,
-             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1",
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-wait-s", "1", "--bt-scan-s", "0.1", "--bt-find-s", "1",
              "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"], "--netplan", tools["netplan"],
              "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
             env=env, stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "helper.log"), "w"))
@@ -363,6 +374,36 @@ class HelperTest(unittest.TestCase):
         self.assertIn("systemctl restart apcbox-bridge.service", self.calls())
         self.assertEqual(self.ask(cmd="poweroff")["error"], "wrong PIN")
         self.assertNotIn("systemctl poweroff", self.calls())
+
+    def test_4b_bluetooth_devices(self):
+        P = "4711"
+        self.assertEqual(self.ask(cmd="bt", pin=P, on=True), {"ok": True})
+        ad = [":".join(["%02X" % (0xC0 + i)] * 6) for i in range(4)]       # made here: no address-shaped text in the repo
+        dev = os.path.join(self.dir, "btdev")
+        with open(dev, "w") as f:
+            f.write("%s|TV in the next room|no|no|no|-80\n%s||no|no|no|-50\n%s|WIDI Jack|yes|no|no|-61\n%s|Old Keys|yes|yes|no|-90\n" % tuple(ad))
+        self.addCleanup(lambda: os.path.exists(dev) and os.unlink(dev))
+        out = self.ask(cmd="bt_scan")                                       # no PIN to look; MIDI first, the nameless one left out
+        self.assertEqual([(x["name"], x["midi"], x["paired"], x["rssi"]) for x in out["devices"]],
+                         [("Old Keys", True, True, -90), ("WIDI Jack", True, False, -61), ("TV in the next room", False, False, -80)])
+        time.sleep(4.1)
+        self.assertEqual([x["name"] for x in self.ask(cmd="status")["bt_devices"]], ["Old Keys"])
+        self.assertTrue(self.ask(cmd="bt_pair", addr=ad[2]).get("pin"))     # changing the box needs the PIN
+        self.assertIn("addr", self.ask(cmd="bt_pair", pin=P, addr="WIDI Jack; reboot")["error"])
+        self.assertIn("in reach", self.ask(cmd="bt_pair", pin=P, addr=":".join(["EE"] * 6))["error"])
+        open(os.path.join(self.dir, "bt-refuse"), "w").close()
+        self.assertEqual(self.ask(cmd="bt_pair", pin=P, addr=ad[2])["error"], "it didn't pair: it refused (wrong mode, or it is paired to something else)")
+        os.unlink(os.path.join(self.dir, "bt-refuse"))
+        out = self.ask(cmd="bt_pair", pin=P, addr=ad[2])
+        self.assertEqual((out["ok"], out["device"]["name"], out["device"]["paired"], out["device"]["connected"]), (True, "WIDI Jack", True, True))
+        self.assertIn("bluetoothctl trust " + ad[2], self.calls())
+        self.assertEqual(sorted(x["name"] for x in self.ask(cmd="status")["bt_devices"]), ["Old Keys", "WIDI Jack"])
+        self.assertTrue(self.ask(cmd="bt_forget", addr=ad[3]).get("pin"))
+        self.assertEqual(self.ask(cmd="bt_forget", pin=P, addr=ad[3]), {"ok": True})
+        self.assertEqual([x["name"] for x in self.ask(cmd="status")["bt_devices"]], ["WIDI Jack"])
+        self.ask(cmd="bt", pin=P, on=False)
+        self.assertEqual(self.ask(cmd="bt_scan")["error"], "Bluetooth is off")
+        self.assertEqual(self.ask(cmd="status")["bt_devices"], [])
 
     def test_45_hotspot(self):
         P, w = "4711", self.wpa

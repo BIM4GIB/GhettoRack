@@ -84,9 +84,11 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
    forget; learning a remote button in Settings > Remote; the TV remote
    walking the Settings page; the start screen after it was cut down to the
    modules (he was asked what still bothers him there and has not said).
-4. **Still to build in Settings**: Bluetooth pairing and Bluetooth MIDI, sound
-   cards and SD cards under Devices. The PIN with the TV remote is built (a
-   number pad, 24 Nov) and not yet tried with the real remote.
+4. **Still to build in Settings**: sound cards and SD cards under Devices (a
+   plan was shown to Rene 24 Nov). Built 24 Nov and not tried on the rig: the
+   PIN with the TV remote (a number pad), Bluetooth pairing (Settings >
+   Bluetooth: SCAN, PAIR, FORGET) and Bluetooth MIDI (`rackbridge/ble.py`;
+   nothing nearby offered MIDI, so no real device has been paired or heard).
 5. From before: rig checks of the looper (overdub, undo), one-shot sampling,
    kits, clock follow, lights of moved APC40 jobs; mapping for controllers
    other than the APC40. `docs/BACKLOG.md` has the rest.

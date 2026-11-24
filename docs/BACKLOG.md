@@ -128,8 +128,8 @@ them one on the map (REC still arms a loop).
   but parked: on the rig the phone joined it and the page at its address
   didn't load (not looked into; "by itself" is off by default until it
   works). The remote's buttons and TV sound moved from the start screen
-  to Settings (Remote, Devices); the TV remote walks the Settings page. Still to build: Bluetooth pairing and
-  Bluetooth MIDI, sound cards and SD cards under Devices, typing a PIN with the TV remote.
+  to Settings (Remote, Devices); the TV remote walks the Settings page. Built 2026-11-24, untried on the rig: Bluetooth pairing and
+  Bluetooth MIDI, the PIN with the TV remote (a number pad). Still to build: sound cards and SD cards under Devices.
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),
   but the error and info banners are ugly and stay too long. UI pass later.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
@@ -157,7 +157,14 @@ them one on the map (REC still arms a loop).
 
 - DIN MIDI when the parts arrive (UART4 on D1/D2; D13/D14 are the screen's).
   USB-to-DIN cables as ports meanwhile.
-- Bluetooth MIDI: the T95's own radio works (scan found 21 devices on the
+- Bluetooth MIDI, built 2026-11-24, NOT tried with a real device: pair in
+  Settings > Bluetooth (helper: scan, pair, forget), and the bridge makes a
+  controller port of every paired device that offers the MIDI service
+  (`rackbridge/ble.py`, BlueZ over D-Bus, `--ble`). To try: a Bluetooth MIDI
+  keyboard or adapter in pairing mode, SCAN, PAIR, then Devices should name it
+  and its notes should reach the Daisy like the LPK25's. Unknown until then:
+  whether this chip pairs at all, the delay, what the Wi-Fi does meanwhile.
+- Bluetooth MIDI before that: the T95's own radio works (scan found 21 devices on the
   rig); pairing and BLE MIDI are the next experiment.
 - RTP-MIDI recovery journal (none today: a lost packet is a lost message).
 - Link: start/stop sync and bar alignment when the T95 leads.

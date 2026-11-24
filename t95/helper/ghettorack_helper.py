@@ -57,11 +57,16 @@ import threading
 import time
 
 log = logging.getLogger("helper")
-RISKY = {"join", "forget", "hotspot", "hotspot_set", "hostname", "bt", "restart_bridge", "reboot", "poweroff"}
+RISKY = {"join", "forget", "hotspot", "hotspot_set", "hostname", "bt", "bt_pair", "bt_forget", "restart_bridge", "reboot", "poweroff"}
 HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$")
 PIN_RE = re.compile(r"^[0-9]{4,8}$")
 ATTACH = "/usr/local/bin/hciattach_opi"
 BT_UNIT = "ghettorack-bluetooth.service"
+BT_ADDR_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
+BT_MIDI_UUID = "03b80e5a-ede8-4b33-a751-6ce34ec4c700"      # the Bluetooth LE MIDI service
+BT_WHY = {"AuthenticationFailed": "it refused (wrong mode, or it is paired to something else)", "AuthenticationCanceled": "it gave up",
+          "AuthenticationTimeout": "it didn't answer", "AuthenticationRejected": "it said no", "ConnectionAttemptFailed": "it didn't answer",
+          "NotReady": "Bluetooth isn't ready yet", "InProgress": "it is busy, try again"}
 
 
 class Helper:
@@ -77,6 +82,7 @@ class Helper:
         self.hot = None             # {id, auto, since, seen, idle, scan, proc, clients}
         self.down_since = None      # since when the Wi-Fi has had no network
         self.fails, self.locked_until = 0, 0.0
+        self.bt_cache = None        # (when, the paired devices)
 
     # ---- running things ----
     def run(self, *cmd, timeout=20):
@@ -654,6 +660,96 @@ class Helper:
         self.run(self.a.systemctl, "start", "--no-block", "bluetooth.service", timeout=20)
         return {"ok": True}
 
+    # Bluetooth devices. bluetoothctl, one command per call; what it prints goes nowhere
+    # but through the patterns here. BlueZ forgets a device it only saw in a scan about
+    # half a minute after the scan ends, so pairing keeps a scan going until it is done.
+    def btctl(self, *args, timeout=8):
+        return self.run(self.a.bluetoothctl, *args, timeout=timeout)[1]
+
+    def bt_info(self, addr):
+        out = self.btctl("info", addr, timeout=4)
+        if "not available" in out or "Device " not in out:
+            return None
+
+        def f(k):
+            m = re.search(r"^\s*%s: (.*)$" % k, out, re.M)
+            return m.group(1).strip() if m else ""
+        m = re.search(r"RSSI: .*\((-?\d+)\)", out)
+        name = f("Name") or f("Alias")
+        if not name or name.replace("-", ":").upper() == addr:
+            name = ""
+        return {"addr": addr, "name": "".join(c for c in name if c.isprintable())[:40], "midi": BT_MIDI_UUID in out.lower(),
+                "paired": f("Paired") == "yes", "connected": f("Connected") == "yes", "rssi": int(m.group(1)) if m else None}
+
+    def bt_addrs(self, *which):
+        return [a for a in re.findall(r"^Device (\S+)", self.btctl("devices", *which), re.M) if BT_ADDR_RE.match(a)]
+
+    def bt_devices(self):
+        """The paired ones, for the status (asked every few seconds: kept for a moment)"""
+        now = time.monotonic()
+        if self.bt_cache and now - self.bt_cache[0] < 4:
+            return self.bt_cache[1]
+        out = [i for i in (self.bt_info(a) for a in self.bt_addrs("Paired")[:16]) if i]
+        self.bt_cache = (now, out)
+        return out
+
+    def cmd_bt_scan(self, d):
+        if not self.bt()["on"]:
+            return {"error": "Bluetooth is off"}
+        self.btctl("--timeout", str(int(self.a.bt_scan_s)), "scan", "on", timeout=self.a.bt_scan_s + 6)
+        seen = [i for i in (self.bt_info(a) for a in self.bt_addrs()[:48]) if i]
+        seen = [i for i in seen if i["name"] or i["midi"] or i["paired"]]         # the nameless ones are beacons and the like
+        seen.sort(key=lambda i: (not i["midi"], not i["paired"], -(i["rssi"] if i["rssi"] is not None else -200)))
+        return {"ok": True, "devices": seen[:16]}
+
+    def cmd_bt_pair(self, d):
+        addr = d.get("addr")
+        if not isinstance(addr, str) or not BT_ADDR_RE.match(addr):
+            return {"error": "addr: a device from the scan"}
+        if not self.bt()["on"]:
+            return {"error": "Bluetooth is off"}
+        scan = None
+        try:
+            scan = subprocess.Popen([self.a.bluetoothctl, "--timeout", "60", "scan", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+        try:
+            end = time.monotonic() + self.a.bt_find_s
+            info = self.bt_info(addr)
+            while info is None and time.monotonic() < end:
+                time.sleep(0.5)
+                info = self.bt_info(addr)
+            if info is None:
+                return {"error": "it isn't in reach any more: put it in pairing mode and scan again"}
+            out = "" if info["paired"] else self.btctl("--agent", "NoInputNoOutput", "--timeout", "25", "pair", addr, timeout=32)
+            info = self.bt_info(addr) or info
+            if info["paired"]:
+                self.btctl("trust", addr)
+                self.btctl("--timeout", "15", "connect", addr, timeout=20)       # a failure here is no failure to pair
+                info = self.bt_info(addr) or info
+        finally:
+            if scan is not None:
+                scan.terminate()
+                try:
+                    scan.wait(3)
+                except subprocess.TimeoutExpired:
+                    scan.kill()
+            self.bt_cache = None
+        if not info["paired"]:
+            m = re.search(r"org\.bluez\.Error\.(\w+)", out)
+            return {"error": "it didn't pair: " + (BT_WHY.get(m.group(1), m.group(1)) if m else "no answer from it")}
+        return {"ok": True, "device": info}
+
+    def cmd_bt_forget(self, d):
+        addr = d.get("addr")
+        if not isinstance(addr, str) or not BT_ADDR_RE.match(addr):
+            return {"error": "addr: a paired device"}
+        self.btctl("remove", addr)
+        self.bt_cache = None
+        if addr in self.bt_addrs("Paired"):
+            return {"error": "it is still there"}
+        return {"ok": True}
+
     def cmd_status(self, d):
         ssid, state, ip = self.wifi_now()
         with self.lock:
@@ -662,9 +758,11 @@ class Helper:
             trial = {"ssid": t["ssid"], "phase": t["phase"], "left_s": left} if t else None
             last = self.last
             hot = self.hot_status()
+        bt = self.bt()
         return {"ok": True, "wifi": {"ssid": ssid, "state": state, "ip": ip, "iface": self.a.iface},
                 "saved": sorted(self.saved()), "hostname": socket.gethostname(),
-                "trial": trial, "last": last, "hotspot": hot, "pin_set": self.pin_set_p(), "bt": self.bt()}
+                "trial": trial, "last": last, "hotspot": hot, "pin_set": self.pin_set_p(), "bt": bt,
+                "bt_devices": self.bt_devices() if bt["powered"] else []}
 
     def handle(self, d):
         cmd = d.get("cmd") if isinstance(d, dict) else None
@@ -743,6 +841,8 @@ def main():
     ap.add_argument("--rfkill-dir", default="/sys/class/rfkill")
     ap.add_argument("--bt-class-dir", default="/sys/class/bluetooth")
     ap.add_argument("--bt-wait-s", type=float, default=20)
+    ap.add_argument("--bt-scan-s", type=float, default=8, help="how long a Bluetooth scan listens")
+    ap.add_argument("--bt-find-s", type=float, default=12, help="pairing: how long to look for the device first")
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
                        ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl"),
                        ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq")):

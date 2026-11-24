@@ -12,6 +12,7 @@ from .router import *
 from .netmidi import *
 from .clock import Clock
 from .listen import Listen
+from .ble import Ble
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -72,6 +73,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.ir = IrReader(self)
         self.hdmi = HdmiAudio(self)
         self.listen = Listen(self)
+        self.ble = Ble(self)
         self.library = args.library or os.path.join(os.path.dirname(args.state), "samples")
         self.sdcard = args.sdcard
         self.sout_lo = bytearray()       # sample data: goes only when no MIDI is waiting
@@ -107,6 +109,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "ir": self.ir.info(),
             "samples": self.samples_info(),
             "hdmi_audio": self.hdmi.info(),
+            "ble_midi": self.ble.info(),
             "net": self.net_info(),
             "clock": self.clock.info(),
             "listen": self.listen.info(),
@@ -134,7 +137,7 @@ async def main_async(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task())
+                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task())
     finally:
         # Stop taking connections, and don't wait for the open ones. `async with server` did:
         # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
@@ -185,6 +188,7 @@ def main(argv=None):
     ap.add_argument("--library", help="sample library folder (default: next to the state file)")
     ap.add_argument("--alsaloop", default="/usr/bin/alsaloop", help="for the HDMI audio setting")
     ap.add_argument("--arecord", default="/usr/bin/arecord", help="for listening in a browser (/audio.pcm)")
+    ap.add_argument("--ble", action="store_true", help="Bluetooth MIDI: paired devices as controller ports (BlueZ over D-Bus)")
     ap.add_argument("--asound", default="/proc/asound", help="where the sound cards are listed by name")
     ap.add_argument("--daisy-card", default="ApcBox", help="the Daisy's USB audio card name")
     ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")

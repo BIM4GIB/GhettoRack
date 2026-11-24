@@ -17,12 +17,12 @@ APC40 / LPK25 / MPK249 --USB--> T95 hub --raw MIDI--+
 Daisy <-----USB serial------------'
 ```
 
-Python 3 standard library only. Files:
+Python 3 standard library only (Bluetooth MIDI and Link each need one package and are off without it). Files:
 
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (Bluetooth MIDI devices as ports; needs `python3-dbus-fast`), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |

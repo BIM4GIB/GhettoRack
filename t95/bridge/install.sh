@@ -51,6 +51,8 @@ install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
 # The box's own hotspot hands out addresses with dnsmasq (the program only: dnsmasq-base
 # installs no service). Without it Settings says what is missing.
 [ -x /usr/sbin/dnsmasq ] || apt-get install -y --no-install-recommends dnsmasq-base || echo "note: no dnsmasq; the hotspot stays off until 'sudo apt install dnsmasq-base' works"
+# Bluetooth MIDI (optional): the bridge talks to BlueZ over D-Bus. Without the package it says so and goes on.
+python3 -c 'import dbus_fast' 2>/dev/null || apt-get install -y --no-install-recommends python3-dbus-fast || echo "note: no python3-dbus-fast; Bluetooth MIDI stays off"
 install -m 644 "$REPO/t95/helper/ghettorack-helper.service" /etc/systemd/system/ghettorack-helper.service
 install -m 644 "$REPO/t95/helper/ghettorack-bluetooth.service" /etc/systemd/system/ghettorack-bluetooth.service
 # Ableton Link for the clock module (optional): a venv that also sees the system

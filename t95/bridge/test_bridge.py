@@ -2291,6 +2291,60 @@ class FollowerSimTest(unittest.TestCase):
             self.assertLess(worst, limit)
 
 
+class BleMidiTest(unittest.TestCase):
+    """Bluetooth MIDI: the packet code, and a device's link as the bridge sees it (a pty).
+    BlueZ itself is not in these tests."""
+
+    def test_b1_packets(self):
+        from rackbridge.ble import ble_decode, ble_encode
+        h = bytes.fromhex
+        self.assertEqual(ble_decode(h("80 80 903c64")), h("903c64"))
+        self.assertEqual(ble_decode(h("85 a1 903c64 a1 3e64 a3 803c00")), h("903c64 3e64 803c00"))      # running status, with a timestamp
+        self.assertEqual(ble_decode(h("85 a1 903c64 3e64")), h("903c64 3e64"))                          # and without one
+        self.assertEqual(ble_decode(h("80 80 b00740 81 f8 82 b00741")), h("b00740 f8 b00741"))          # a clock tick between
+        self.assertEqual(ble_decode(h("80 80 f0 4700 73")) + ble_decode(h("80 6000 0442 80 f7")), h("f0470073 60000442 f7"))   # sysex over two packets
+        self.assertEqual(ble_decode(b""), b"")
+        self.assertEqual(ble_decode(h("00 903c64")), b"")                                                # no header: not a MIDI packet
+        self.assertEqual(ble_decode(h("80 80")), b"")
+        # out: several messages share a packet while they fit; what comes back is what went in
+        msgs = [h("903c64"), h("b00a40"), h("f8"), h("c005")] * 5
+        pk = ble_encode(msgs, 23, 0x155)
+        self.assertTrue(all(len(p) <= 20 and p[0] == 0x82 and p[1] == 0xD5 for p in pk), [p.hex() for p in pk])
+        self.assertEqual(b"".join(ble_decode(p) for p in pk), b"".join(msgs))
+        self.assertLess(len(pk), 6)
+        sx = bytes([0xF0] + [i & 0x7F for i in range(100)] + [0xF7])
+        for mtu in (23, 27, 64, 185, 512):
+            pk = ble_encode([h("903c64"), sx, h("803c00")], mtu)
+            self.assertTrue(all(len(p) <= mtu - 3 for p in pk), mtu)
+            self.assertEqual(b"".join(ble_decode(p) for p in pk), h("903c64") + sx + h("803c00"), mtu)
+
+    def test_b2_a_device_is_a_port(self):
+        import asyncio as aio
+        from rackbridge.ble import BleLink, ble_decode
+
+        async def go():
+            radio, ours = socket.socketpair()                # one packet at a time here, so a stream keeps their edges
+            gone = []
+            link = BleLink("ble:dev_X", "WIDI Jack", os.dup(ours.fileno()), os.dup(ours.fileno()), 23, gone.append)
+            ours.close()
+            fd = os.open(link.path, os.O_RDWR | os.O_NONBLOCK | os.O_NOCTTY)             # what the bridge does with a controller
+            radio.send(bytes.fromhex("80 80 903c64 81 3e64"))
+            await aio.sleep(0.1)
+            self.assertEqual(os.read(fd, 100), bytes.fromhex("903c64 3e64"))
+            os.write(fd, bytes.fromhex("903c01 f04700f7"))                               # LEDs and a sysex back
+            await aio.sleep(0.1)
+            radio.setblocking(False)
+            pkt = radio.recv(100)
+            self.assertEqual((pkt[0] & 0xC0, ble_decode(pkt)), (0x80, bytes.fromhex("903c01 f04700f7")))
+            with self.assertRaises(BlockingIOError):
+                os.read(fd, 100)                                                         # nothing echoed back to the bridge
+            radio.close()                                                                # the device left
+            await aio.sleep(0.1)
+            self.assertEqual((gone, link.closed), ([link], True))
+            os.close(fd)
+        aio.run(go())
+
+
 class ClockDaisyTest(unittest.TestCase):
     """v13.11: the firmware's sequencer follows the T95's clock (ESC T), and the T95's clock follows the Daisy (CL)"""
 
@@ -3041,6 +3095,7 @@ class SettingsTest(unittest.TestCase):
              "--state-dir", os.path.join(cls.dir, "hstate"), "--netplan-dir", cls.netplan, "--trial-s", "6", "--select-s", "0.05", "--connect-s", "6", "--scan-s", "0.05",
              "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--ip", tools["ip"], "--dnsmasq", tools["dnsmasq"], "--keep-s", "0.1",
              "--attach", os.path.join(cls.dir, "hciattach_opi"), "--group", "no-such-group", "--wpa-cli", tools["wpa_cli"],
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"), "--bt-scan-s", "0.1", "--bt-find-s", "1",
              "--netplan", tools["netplan"], "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"],
              "--bluetoothctl", tools["bluetoothctl"]],
             env=dict(os.environ, FAKELOG=cls.calls, FAKEDIR=cls.dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -3270,6 +3325,37 @@ class SettingsTest(unittest.TestCase):
                 while open(self.calls).read().count("systemctl reboot") == n0 and time.time() < end:
                     time.sleep(0.1)
                 self.assertEqual(open(self.calls).read().count("systemctl reboot"), n0 + 1)
+                # Bluetooth with the radio there: scan, pair a MIDI device, forget it
+                bt = [os.path.join(self.dir, x) for x in ("hciattach_opi", "rfkill/rfkill1", "btclass/hci0", "btdev")]
+                os.makedirs(bt[1], exist_ok=True)
+                os.makedirs(bt[2], exist_ok=True)
+                for f_, t_ in ((bt[0], ""), (bt[1] + "/type", "bluetooth\n"), (bt[1] + "/soft", "0"),
+                               (bt[3], "%s|Speaker next door|no|no|no|-82\n%s|WIDI Jack|yes|no|no|-58\n" % tuple(":".join(["%02X" % (0xD0 + i)] * 6) for i in range(2)))):
+                    with open(f_, "w") as fh:
+                        fh.write(t_)
+                pg.locator("nav button", has_text=re.compile("Bluetooth|BT")).click()
+                pg.wait_for_function("document.getElementById('b-now').textContent === 'on'", timeout=8000)
+                pg.wait_for_function("document.getElementById('b-list').textContent.includes('No paired devices')")
+                pg.click("#b-scan")
+                pg.wait_for_selector("#b-list .net .act")
+                rows = pg.evaluate("[...document.querySelectorAll('#b-list .net .nm')].map(e => e.textContent)")
+                self.assertEqual(rows[0], "WIDI JackMIDI", rows)             # MIDI first
+                pg.locator("#b-list .net", has_text="WIDI Jack").locator("button").click()
+                pg.wait_for_function("document.getElementById('b-banner').textContent.includes('Paired with WIDI Jack')", timeout=8000)
+                pg.wait_for_function("document.querySelector('#b-list .net').textContent.includes('MIDI, connected')", timeout=8000)
+                self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, [...document.querySelectorAll('#s-bt button')].some(e => e.getBoundingClientRect().bottom > innerHeight + 1)]"),
+                                 [False, False], (w_, h_))
+                if (w_, h_) in ((1920, 1080), (390, 664)):
+                    pg.screenshot(path=os.path.join(self.dir, "settings-bt-%d.png" % w_))
+                f_ = pg.locator("#b-list .net", has_text="WIDI Jack").locator("button")
+                f_.click()
+                self.assertEqual(f_.text_content(), "SURE?")
+                pg.locator("#b-list .net", has_text="WIDI Jack").locator("button").click()
+                pg.wait_for_function("document.getElementById('b-banner').textContent.includes('Forgot WIDI Jack')", timeout=8000)
+                pg.wait_for_function("!document.getElementById('b-list').textContent.includes('connected')", timeout=8000)
+                for f_ in (bt[0], bt[3], bt[1] + "/type", bt[1] + "/soft"):
+                    os.unlink(f_)
+                os.rmdir(bt[2])
                 pg.close()
             b.close()
         self.assertEqual(errors, [])
