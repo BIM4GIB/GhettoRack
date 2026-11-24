@@ -129,7 +129,7 @@ them one on the map (REC still arms a loop).
   didn't load (not looked into; "by itself" is off by default until it
   works). The remote's buttons and TV sound moved from the start screen
   to Settings (Remote, Devices); the TV remote walks the Settings page. Built 2026-11-24, untried on the rig: Bluetooth pairing and
-  Bluetooth MIDI, the PIN with the TV remote (a number pad). Still to build: sound cards and SD cards under Devices.
+  Bluetooth MIDI, the PIN with the TV remote (a number pad). Sound cards and the box's SD card under Devices: built 2026-11-24 (read-only; no eject, and not the Daisy's own card).
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),
   but the error and info banners are ugly and stay too long. UI pass later.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and

@@ -3101,10 +3101,26 @@ class SettingsTest(unittest.TestCase):
             env=dict(os.environ, FAKELOG=cls.calls, FAKEDIR=cls.dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cls.addClassCleanup(cls.helper.kill)
         cls.http = free_port()
+        # the sound cards as the T95 lists them, and a card in its SD slot
+        cls.asound, cls.sd = os.path.join(cls.dir, "asound"), os.path.join(cls.dir, "sdcard")
+        cards = (("Codec", "sun4i-codec - H616 Audio Codec", ["pcm0p"]), ("SPDIF", "simple-card - SPDIF", ["pcm0p"]),
+                 ("ApcBox", "USB-Audio - ApcBox", ["pcm0c", "stream0"]), ("LPK25", "USB-Audio - LPK25", ["midi0"]),
+                 ("APC40", "USB-Audio - Akai APC40", ["midi0"]), ("HDMI", "HDMI - HDMI", ["pcm0c", "pcm0p"]))
+        for i, (cid, _, ents) in enumerate(cards):
+            os.makedirs(os.path.join(cls.asound, cid))
+            for e in ents + ["id"]:
+                os.makedirs(os.path.join(cls.asound, "card%d" % i, e))
+        with open(os.path.join(cls.asound, "cards"), "w") as f:
+            f.write("".join(" %d [%-15s]: %s\n                      %s\n" % (i, cid, name, cid) for i, (cid, name, _) in enumerate(cards)))
+        os.makedirs(os.path.join(cls.sd, "kit"))
+        os.makedirs(os.path.join(cls.sd, ".hidden"))
+        for n in ("kick.wav", "snare.WAV", "notes.txt", ".hidden/x.wav", "kit/hat.flac"):
+            open(os.path.join(cls.sd, n), "w").close()
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
-             "--helper-socket", cls.sock],
+             "--helper-socket", cls.sock, "--asound", cls.asound, "--sdcard", cls.sd, "--sdcard-any",
+             "--sysblock", os.path.join(cls.dir, "block"), "--alsaloop", "/nonexistent/alsaloop"],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.addClassCleanup(cls.proc.kill)
         BridgeTest.http = cls.http
@@ -3121,6 +3137,54 @@ class SettingsTest(unittest.TestCase):
 
     def state(self):
         return json.loads(BridgeTest.get("/sys/state")[2])
+
+    def test_s0_devices(self):
+        """Settings > Devices: the sound cards with what the box uses each for, the SD card"""
+        BridgeTest.http = self.http
+        BridgeTest.wait_health(lambda h: len(h["devices"]["cards"]) == 6 and h["devices"]["sd"]["state"] == "ready", 10)
+        dev = json.loads(BridgeTest.get("/state")[2])["devices"]
+        self.assertEqual([(c["num"], c["id"], c["name"], c["use"]) for c in dev["cards"]],
+                         [(0, "Codec", "H616 Audio Codec", ""), (1, "SPDIF", "SPDIF", ""), (2, "ApcBox", "ApcBox", "daisy"),
+                          (3, "LPK25", "LPK25", "midi"), (4, "APC40", "Akai APC40", "midi"), (5, "HDMI", "HDMI", "tv")])
+        self.assertEqual([(c["play"], c["rec"]) for c in dev["cards"]],
+                         [(True, False), (True, False), (False, True), (False, False), (False, False), (True, True)])
+        sd = dev["sd"]
+        self.assertEqual((sd["samples"], sd["samples_more"]), (3, False))      # not the text file, not what's in a hidden folder
+        self.assertTrue(sd["bytes"] > sd["free"] > 0)
+        os.rename(self.sd, self.sd + ".out")                                    # the card pulled
+        BridgeTest.wait_health(lambda h: h["devices"]["sd"] == {"state": "none"}, 10)
+        os.makedirs(os.path.join(self.dir, "block", "mmcblk0", "device"))      # one the box can't read (not FAT)
+        with open(os.path.join(self.dir, "block", "mmcblk0", "device", "type"), "w") as f:
+            f.write("SD\n")
+        BridgeTest.wait_health(lambda h: h["devices"]["sd"] == {"state": "unreadable"}, 10)
+        os.rename(self.sd + ".out", self.sd)
+        BridgeTest.wait_health(lambda h: h["devices"]["sd"]["state"] == "ready", 10)
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        want = ["H616 Audio Codec|out, not used", "SPDIF|out, not used", "ApcBox|the Daisy's sound", "LPK25|MIDI only", "Akai APC40|MIDI only", "HDMI|TV sound"]
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            for w_, h_ in ((1920, 1080), (390, 664), (844, 390)):
+                pg = b.new_page(viewport={"width": w_, "height": h_})
+                pg.goto("http://127.0.0.1:%d/settings?s=dev" % self.http)
+                pg.wait_for_function("document.querySelectorAll('#d-cards .card').length === 6 && document.getElementById('d-kv').textContent.includes('3 samples')")
+                self.assertEqual(pg.evaluate("[...document.querySelectorAll('#d-cards .card')].map(r => r.children[0].textContent + '|' + r.children[1].textContent)"), want)
+                self.assertRegex(pg.inner_text("#d-kv"), r"box SD card\s+[\d.]+ (GB|MB)( \w+)?, [\d.]+ (GB|MB) free, 3 samples")
+                # everything is on the page: the list shows at least 3 cards without scrolling, the button and the kv are whole
+                fit = pg.evaluate("""() => { const v = e => { const r = e.getBoundingClientRect(), s = document.getElementById('s-dev').getBoundingClientRect();
+                        return r.height > 0 && r.top >= s.top - 1 && r.bottom <= s.bottom + 1 && r.right <= innerWidth + 1; };
+                    const L = document.getElementById('d-cards').getBoundingClientRect();
+                    return [v(document.getElementById('d-kv')), v(document.getElementById('d-hdmi')), v(document.getElementById('d-cards')),
+                        [...document.querySelectorAll('#d-cards .card')].filter(r => r.getBoundingClientRect().bottom <= L.bottom + 1).length,
+                        document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]; }""")
+                self.assertEqual(fit[:3] + fit[4:], [True, True, True, False, False], (w_, h_, fit))
+                self.assertGreaterEqual(fit[3], 3, (w_, h_))
+                pg.screenshot(path=os.path.join(self.dir, "settings-devices-%d.png" % w_))
+                print("shot:", os.path.join(self.dir, "settings-devices-%d.png" % w_))
+                pg.close()
+            b.close()
 
     def test_s1_state_and_commands_pass_through(self):
         st = self.state()

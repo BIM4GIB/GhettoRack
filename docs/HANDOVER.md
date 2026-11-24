@@ -86,8 +86,8 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
    forget; learning a remote button in Settings > Remote; the TV remote
    walking the Settings page; the start screen after it was cut down to the
    modules (he was asked what still bothers him there and has not said).
-4. **Still to build in Settings**: sound cards and SD cards under Devices (a
-   plan was shown to Rene 24 Nov). Built 24 Nov and not tried on the rig: the
+4. **Settings > Devices** lists the sound cards and the box's SD card (built
+   24 Nov, read-only; no card was in the slot when it went on the box). Built 24 Nov and not tried on the rig: the
    PIN with the TV remote (a number pad), Bluetooth pairing (Settings >
    Bluetooth: SCAN, PAIR, FORGET) and Bluetooth MIDI (`rackbridge/ble.py`;
    nothing nearby offered MIDI, so no real device has been paired or heard).

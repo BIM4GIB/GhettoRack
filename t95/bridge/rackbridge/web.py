@@ -92,7 +92,7 @@ class WebMixin:
                                  missing=[n for n in m["needs"] if not have.get(n)]) for m in MODULES],
                 "module": self.module()["id"], "last": self.state.data["last"],
                 "autostart_s": self.state.data["autostart_s"],
-                "hdmi_audio": self.hdmi.info(),
+                "hdmi_audio": self.hdmi.info(), "devices": self.devices.info(),
                 "ir": {"profiles": self.state.data["ir"], "actions": IR_ACTIONS,
                        "profile_names": IR_PROFILES, **self.ir.info()}}
 

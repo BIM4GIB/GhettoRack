@@ -13,6 +13,7 @@ from .netmidi import *
 from .clock import Clock
 from .listen import Listen
 from .ble import Ble
+from .devices import Devices
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -74,6 +75,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.hdmi = HdmiAudio(self)
         self.listen = Listen(self)
         self.ble = Ble(self)
+        self.devices = Devices(self)
         self.library = args.library or os.path.join(os.path.dirname(args.state), "samples")
         self.sdcard = args.sdcard
         self.sout_lo = bytearray()       # sample data: goes only when no MIDI is waiting
@@ -110,6 +112,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "samples": self.samples_info(),
             "hdmi_audio": self.hdmi.info(),
             "ble_midi": self.ble.info(),
+            "devices": self.devices.info(),
             "net": self.net_info(),
             "clock": self.clock.info(),
             "listen": self.listen.info(),
@@ -137,7 +140,7 @@ async def main_async(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task())
+                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task())
     finally:
         # Stop taking connections, and don't wait for the open ones. `async with server` did:
         # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
@@ -193,6 +196,7 @@ def main(argv=None):
     ap.add_argument("--daisy-card", default="ApcBox", help="the Daisy's USB audio card name")
     ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
+    ap.add_argument("--sysblock", default="/sys/block", help="where the block devices are listed (is a card in the SD slot)")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")
     ap.add_argument("--rtp-port", type=int, default=5004, help="network MIDI control port (data is +1); 0 = off")
     ap.add_argument("--net-name", help="the name other devices see (default GhettoRack)")

@@ -40,5 +40,5 @@ the page at the box's address didn't load; not looked into yet, so "by
 itself" is off by default. Not seen there: the helper doing it, the address
 staying on wlan0 next to systemd-networkd, dnsmasq handing out addresses, the
 pages over it, starting by itself, scanning as an access point, the way back.
-Not built yet: pairing, sound cards and SD cards under
-Devices.
+Sound cards and the SD card under Devices are the bridge's (read-only, no helper:
+`t95/bridge/rackbridge/devices.py`).

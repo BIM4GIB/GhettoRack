@@ -22,7 +22,7 @@ Python 3 standard library only (Bluetooth MIDI and Link each need one package an
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (Bluetooth MIDI devices as ports; needs `python3-dbus-fast`), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (Bluetooth MIDI devices as ports; needs `python3-dbus-fast`), `devices` (the sound cards and the SD card, for Settings > Devices), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
@@ -278,6 +278,7 @@ The clock module (`/clock`): one tempo for everything.
 | `POST /ir/forget`, `/ir/cancel` | remove a binding, stop learning |
 | `GET /samples?src=lib\|sd&path=` | folders and audio files (paths can't leave the library or the card) |
 | `/settings` | The Settings page (`t95/ui/settings.html`): network, hotspot, Bluetooth, system, devices |
+| `/state` | Modules, the remote's buttons, TV sound, and `devices`: `cards` (from `/proc/asound`: `num`, `id`, `name`, `play`, `rec`, `midi`, `use` = `daisy` / `tv` / `midi` / empty, `busy` while TV sound runs) and `sd` (`state` = `none` / `unreadable` (a card in the slot that isn't mounted: not FAT or exFAT) / `ready`, then `fs`, `bytes`, `free`, `samples`; the count is redone every 30 s and stops at 20000 files, `samples_more`). Read every 3 s in a thread; nothing here changes the box |
 | `/sys/state` | What the settings helper reports (Wi-Fi, address, name, saved networks, trial, hotspot, PIN set, Bluetooth) plus the bridge's own (Daisy, controllers, start-up delay). `{"helper": false}` when the helper isn't running |
 | `POST /sys/do` | `{"cmd": ...}` passed to the settings helper (`t95/helper/README.md`): `scan`, `join`, `confirm`, `forget`, `hotspot`, `hotspot_set`, `hostname`, `bt`, `restart_bridge`, `reboot`, `poweroff`, `pin_set`, `pin_check`. A request carrying a PIN or a password is refused unless it came over HTTPS or from the box itself |
 | `POST /samples/send` | `{"src", "path", "track"}`: convert and send to the Daisy. Optional `"start"`, `"end"` (0-1) and `"norm": true`: trim and normalise first |
