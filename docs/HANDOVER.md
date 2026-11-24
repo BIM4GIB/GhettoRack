@@ -24,10 +24,17 @@ is stale; it is a snapshot, not a rule book.
 
 ## What runs on the rig
 
-- Daisy firmware v13.15, control protocol 10, report version 16. Rene: boots,
-  plays, sound and the APC40 map are fine.
+- Daisy firmware v13.16 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
+  for long loops. Control protocol 10, report version 16. It boots and the
+  bridge talks to it; no long take has been recorded on the rig yet
+  (`docs/BACKLOG.md` has what to try). v13.15 was the last one Rene played.
 - Bridge, kiosk, settings helper, Bluetooth unit installed from `main` at
-  `6a81b67` or later.
+  `c491fb9` (the Settings banners: one short line, 3 or 6 s).
+- On the Mac: Playwright is installed, so the page tests in
+  `t95/bridge/test_bridge.py` run. A plain `git push` gets a 403 (the active
+  `gh` login is another account); the `BIM4GIB` login in `gh` works.
+- The box has no compiler: `daisy/t95sim.cpp` for `EndToEndTest` was built on
+  the Mac with a `pty.h` shim (`#include <util.h>`) outside the repo.
 
 ## Seen working on the rig (23 and 24 Nov)
 
@@ -61,8 +68,8 @@ Quick check: `ping -c 10 -q <router>` on the box, with and without
    `journalctl -u ghettorack-helper`. "By itself" defaults to off, but Rene
    saved his hotspot password while the default was on, so it may be on for
    him: look at Settings > Hotspot.
-2. **Settings banners**: Rene finds the error and info banners ugly and too
-   long on screen. UI pass wanted.
+2. **Settings banners**: done 24 Nov (`d1bb148`, `c491fb9`). Rene has not said
+   yet whether the new look is right.
 3. **Not seen on the rig yet**: a join with the right password, confirm and
    forget; learning a remote button in Settings > Remote; the TV remote
    walking the Settings page; the start screen after it was cut down to the
