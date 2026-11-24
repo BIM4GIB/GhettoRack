@@ -93,7 +93,7 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `I p hex` | MIDI the Daisy got from a T95 keyboard on port *p* (for the page log) |
 | `P ver att apc keys active` | T95 control protocol version (2 from v13.7), then hex port masks (bit 0 = port 1): attached, identified as APC40, keyboards; then who drives the box: -1 none, 0 the Daisy's USB-A, 1-8 a T95 port. On change and every second |
 | `Y id` | Answer to `ESC P id` |
-| `FO id ok capacity` / `FO id err why` | Sample transfer started (track slot capacity in samples) or refused: `busy`, `set-busy`, `track`, `too-big` |
+| `FO id ok capacity` / `FO id err why` | Sample transfer started (`capacity`: how many samples of it will be kept; a track's slot, or from v13.21 the longest free piece of spare memory if that is more, see `SM`) or refused: `busy`, `set-busy`, `track`, `too-big` |
 | `FA id seq ok` / `FA id seq err why` | Chunk stored, or not: `crc`, `length`, `range`, `stale` (no such transfer) |
 | `FC id ok` / `FC id err why` | Commit accepted (loading), or `missing N`, `stale`, `set-busy`, `aborted` |
 | `FL id ok\|err` | The loader finished with it: in the track, or not a playable WAV |

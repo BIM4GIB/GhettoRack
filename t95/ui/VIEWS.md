@@ -113,6 +113,9 @@ live, with markers and bar lines), pad, list row with waveform.
   at 100 BPM (19 s, longest free 10 s)" before a take is armed and dims REC
   LOOP, and "room for 13" during a take that runs until stopped; System >
   Links has a "loop memory" line, amber when no piece of 32 s is free.
+- v13.21: a sample longer than 16 s goes into the same memory whole (from the
+  card, a kit, a set or the T95's library, which sends up to 98 s). No page
+  change: "(cut to fit)" after a send now only shows when there was no room.
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

@@ -491,7 +491,8 @@ void     StagePlace(Job& j);
    in one piece (the audio callback only ever sees a pointer and a capacity).
    Free space is the gaps between claims; a new claim takes the lowest gap it
    fits. Nothing here allocates, and all of it runs in the main loop.
-   A take of a chosen length and a loaded loop claim what they need, a take
+   A take of a chosen length and a loaded sound (a loop or a plain sample
+   longer than a slot) claim what they need, a take
    that runs until stopped claims two slots (spare_block), and a kept take
    gives back what it didn't use. A track's slot points at its claim while the
    long loop is on it. A claim is free again as soon as
@@ -850,30 +851,26 @@ void StageBegin()
         SetsJobDone(j, false, 0, 1.f, false);
         return;
     }
-    /* longer than a slot: a loop goes straight into spare memory, as much as
-       the file needs (no staging, no copy afterwards). No room for it while
-       the old set's long loops are still there: it loads after the switch,
-       when they are gone, late but whole. Anything else is cut. */
+    /* longer than a slot (a loop or a plain sample): straight into spare
+       memory, as much as the file needs (no staging, no copy afterwards). No
+       room for it while the old set's long sounds are still there: it loads
+       after the switch, when they are gone, late but whole (and cut to the
+       slot then, if there is still no room). */
     uint32_t want = wav.TotalFrames();
     if(want > eng->SlotCapacity())
     {
-        if(j.loop_bars)
+        const int b = SpareClaim(j.track, want);
+        if(b < 0)
         {
-            const int b = SpareClaim(j.track, want);
-            if(b < 0)
-            {
-                plat->FileClose();
-                Log("set: track %d long loop loads after the switch (no room before)", j.track + 1);
-                SetsJobDone(j, true, 0, 1.f, true);
-                return;
-            }
-            j.dst = SpareBase(b); // held until the switch has happened (AfterSwap)
-            j.cap = SpareCap(b);
-            load_state = kLoadRead;
+            plat->FileClose();
+            Log("set: track %d long sound loads after the switch (no room before)", j.track + 1);
+            SetsJobDone(j, true, 0, 1.f, true);
             return;
         }
-        want = eng->SlotCapacity();
-        Log("set: track %d sound cut to %d s", j.track + 1, (int)eng->SlotSeconds());
+        j.dst = SpareBase(b); // held until the switch has happened (AfterSwap)
+        j.cap = SpareCap(b);
+        load_state = kLoadRead;
+        return;
     }
     if(want > j.cap) // too big for what's left: load it after the switch
     {
@@ -959,15 +956,15 @@ void LoaderStep(uint32_t now)
                 FinishJob(false);
                 return;
             }
-            /* a saved loop longer than a slot: into spare memory if there is room, else cut */
-            if(cur_job.loop_bars && wav.TotalFrames() > eng->SlotCapacity())
+            /* longer than a slot (a loop or a plain sample): into spare memory if there is room, else cut */
+            if(wav.TotalFrames() > eng->SlotCapacity())
             {
                 SpareSweep(); // what this track held until now is free for it
                 load_block = SpareClaim(t, wav.TotalFrames());
                 if(load_block >= 0)
                     eng->SlotPoint(t, SpareBase(load_block), SpareCap(load_block));
                 else
-                    Log("track %d: no room for a long loop, cut to %d s", t + 1, (int)eng->SlotSeconds());
+                    Log("track %d: no room for a long sound, cut to %d s", t + 1, (int)eng->SlotSeconds());
             }
             load_state = kLoadRead;
             break;
@@ -1324,6 +1321,13 @@ void LooperExchange(bool keep)
     /* the same loop with other sound in it (an overdub): it keeps running */
     const bool same = lundo.data && lundo.loop && cur.loop && lundo.length == cur.length
                       && lundo.bars == cur.bars;
+    /* what comes back fits the slot and the track is on a long sound in spare
+       memory (which reloads from its file): back into the slot, the claim frees itself */
+    if(lundo.data && !cur.data && SpareOf(t) >= 0)
+    {
+        s.length = 0;
+        SpareHome(t);
+    }
     if(lundo.data && cur.data)
     {
         uint32_t n = lundo.length > cur.length ? lundo.length : cur.length;

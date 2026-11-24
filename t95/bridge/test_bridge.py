@@ -1503,6 +1503,27 @@ class EndToEndTest(unittest.TestCase):
             t["bytes"] // 1024, t["seconds"], t["kb_per_s"]))
         c.close()
 
+    def test_e2e_long_sample_whole(self):
+        """v13.20: a sample longer than a track's slot (16 s) goes into spare
+        memory whole: not marked as cut, and the SM line shows the claim"""
+        lib = os.path.join(os.path.dirname(os.path.join(self.dir, "state.json")), "samples", "t")
+        os.makedirs(lib, exist_ok=True)
+        make_wav(os.path.join(lib, "long tone.wav"), 18.0)
+        c = SseClient(self.http, path="/events?view=apcbox")
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("SM ") for l in c.lines)))
+        sm = lambda: [int(x) for x in [l for l in c.lines if l.startswith("SM ")][-1].split()[1:]]
+        free = sm()[1]
+        code, out = SampleTest.post(self, "/samples/send", {"src": "lib", "path": "t/long tone.wav", "track": 5})
+        self.assertEqual(code, 200, out)
+        t = SampleTest.wait_xfer(self, out["id"], 90)
+        self.assertEqual(t["state"], "done", t)
+        self.assertFalse(t["cut"], t)
+        self.assertTrue(c.wait_for(lambda c: "N 4 long_tone.wav" in c.lines), [l for l in c.lines if l.startswith("N 4")])
+        self.assertTrue(c.wait_for(lambda c: sm()[3] == 1 and sm()[1] == free - 53 * 16384, 5), sm())   # 864000 samples: 53 granules
+        z = [l for l in c.lines if l.startswith("Z 4 ")]
+        self.assertTrue(c.wait_for(lambda c: any(l.startswith("Z 4 864000 ") for l in c.lines), 5), z[-1:] )
+        c.close()
+
     def test_e2e_record_in_the_page(self):
         """The page's record button with Chromium's fake microphone: record,
         upload, convert (ffmpeg), send to the selected track, firmware loads it"""

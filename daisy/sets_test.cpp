@@ -2220,28 +2220,87 @@ int main()
         kit(T);
         CHECK(SpareFree() == 8);
 
-        /* a plain sample longer than a slot is cut, loaded straight in or with a set */
-        WriteSine("samples/test/verylong.wav", 900000, 330.f); // 18.75 s
+        /* a plain sample longer than a slot goes into spare memory whole, loaded
+           straight in or with a set; with no room there it is cut to the slot */
+        WriteSine("samples/test/verylong.wav", 900000, 330.f); // 18.75 s: 55 granules
         const int V = 8;
         kit(V);
         kit(V + 1);
         std::vector<int16_t> nextv(e.HomeData(V + 1), e.HomeData(V + 1) + 4096);
+        std::vector<int16_t> whole(900000);
+        {
+            FILE* f = fopen((root + "/samples/test/verylong.wav").c_str(), "rb");
+            fseek(f, 44, SEEK_SET);
+            CHECK(fread(whole.data(), 2, whole.size(), f) == whole.size());
+            fclose(f);
+        }
+        const Slot& sv = e.GetSlot(V);
         QueueLoad(V, "samples/test/verylong.wav", false);
         WaitIdle();
         Tick(5);
-        CHECK(e.GetSlot(V).length == cap && e.GetSlot(V).data == e.HomeData(V) && SpareFree() == 8);
+        CHECK(sv.length == 900000 && SpareOf(V) >= 0 && sv.capacity == 55 * kSpareGran && SpareFree() == 7);
+        CHECK(!e.IsLoop(V) && !memcmp(sv.data, whole.data(), whole.size() * 2));
         CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
         const int slot2 = FirstFreeSlot();
         U("set new long sample");
         WaitIdle();
         CHECK(slot2 >= 0 && set_exists[slot2]);
-        kit(V);
+        kit(V); // another sound on the track: back in the slot, the claim free
+        Tick(5);
+        CHECK(sv.data == e.HomeData(V) && sv.capacity == cap && SpareFree() == 8);
         snprintf(cmd, sizeof(cmd), "set load %d", slot2 + 1);
         U(cmd);
         WaitIdle();
         Tick(50);
-        CHECK(e.GetSlot(V).length == cap && e.GetSlot(V).data == e.HomeData(V) && SpareFree() == 8);
+        CHECK(sv.length == 900000 && SpareOf(V) >= 0 && sv.capacity == 55 * kSpareGran && SpareFree() == 7);
+        CHECK(!e.IsLoop(V) && !memcmp(sv.data, whole.data(), whole.size() * 2));
         CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
+        /* no room: cut, straight in and with the set (which tries again after the switch) */
+        kit(V);
+        Tick(5);
+        fill();
+        QueueLoad(V, "samples/test/verylong.wav", false);
+        WaitIdle();
+        Tick(5);
+        CHECK(sv.length == cap && sv.data == e.HomeData(V) && sv.capacity == cap);
+        CHECK(!memcmp(sv.data, whole.data(), (size_t)cap * 2));
+        CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
+        kit(V);
+        U(cmd);
+        WaitIdle();
+        Tick(200);
+        WaitIdle();
+        Tick(50);
+        CHECK(sv.length == cap && sv.data == e.HomeData(V) && sv.capacity == cap);
+        CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
+        unfill();
+        /* a take that is undone after a long sample was browsed over it comes
+           back into the slot, and the sample's claim is free */
+        kit(V);
+        Tick(5);
+        CHECK(SpareFree() == 8);
+        U("lrec len 1");
+        test_in_amp = 0.3f;
+        U("lrec arm 9");
+        CHECK(until(rec, 2600));
+        CHECK(until(idle, 2600));
+        Tick(40);
+        test_in_amp = 0.f;
+        CHECK(e.IsLoop(V) && sv.data == e.HomeData(V) && sv.length > 0 && sv.length <= cap);
+        const uint32_t      take_len = sv.length;
+        std::vector<int16_t> took(sv.data, sv.data + 4096);
+        BrowseBackup(V);
+        QueueLoad(V, "samples/test/verylong.wav", false);
+        WaitIdle();
+        Tick(50);
+        CHECK(SpareOf(V) >= 0 && sv.length == 900000 && !e.IsLoop(V) && SpareFree() == 7 && LooperCan(false));
+        U("lrec undo");
+        WaitIdle();
+        Tick(50);
+        CHECK(sv.data == e.HomeData(V) && sv.capacity == cap && sv.length == take_len && e.IsLoop(V));
+        CHECK(!memcmp(sv.data, took.data(), took.size() * 2) && SpareFree() == 8);
+        kit(V);
+        Tick(5);
 
         /* a one-shot over a long loop goes into the slot; the loop's block is free once it's kept */
         U("lrec len 8");

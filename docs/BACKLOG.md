@@ -4,6 +4,27 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.21: long plain samples in spare memory (built 2026-11-24, NOT flashed, nothing tried on the rig)
+
+`daisy/release/ApcBox.bin` is v13.21. Control protocol 10, report 18, SDRAM
+95.9%, all as v13.20. Desktop tests and the bridge against the firmware
+simulator only.
+
+- A plain sample longer than a slot (16 s) claims the length of its file in
+  spare memory and plays whole: loaded from the card, with a kit, with a set
+  (after the switch if there is no room before), or sent from the T95's
+  library (the staging pool limits that to 98 s). No piece that long free: cut
+  to the slot, as before.
+- `FO ... capacity` tells the bridge the room there really is, so "(cut to
+  fit)" only shows when it was cut.
+- A take brought back by undo after a long sample was browsed over it goes back
+  into the slot; the sample's memory is free again.
+- Not looked at: how long a 60 s sample takes to load from the real card, and
+  what one long sample does to the room for loops in practice (one of 98 s
+  takes over a third of the 262 s).
+- Still not built: a fixed claim for a guitar effects module; moving claims
+  together.
+
 ## v13.20: spare memory as one region with claims by size (on the rig, flashed 2026-11-24, no take tried there)
 
 `daisy/release/ApcBox.bin` is v13.20. Control protocol 10 as before, report 18

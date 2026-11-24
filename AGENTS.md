@@ -80,8 +80,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   memory is one region handed out as claims by size (`Spare...` in
   `daisy/box.cpp`), not 8 fixed blocks. Verify against the current
   build with `arm-none-eabi-size -A` before adding buffers. 64 MB total SDRAM is
-  not 64 MB available for incoming samples. A sound longer than a slot is cut on
-  load; only a recorded loop can go into spare memory.
+  not 64 MB available for incoming samples. From v13.21 a sound longer than a
+  slot (a loop or a plain sample) loads into spare memory whole when a piece
+  that long is free, and is cut to the slot when not.
 - The screen (SunFounder 3.5", ST7796U behind shift registers) needs 16-bit
   command words; `tft.h` defaults to that, encoder held at power-up switches.
 

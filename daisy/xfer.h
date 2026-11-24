@@ -139,7 +139,11 @@ void XferOpen(const char* t, uint32_t now)
     xfer_time   = now;
     xfer_state  = kXferRecv;
     memset(xfer_got, 0, sizeof(xfer_got));
-    Out("FO %d ok %lu", id, (unsigned long)eng->SlotCapacity());
+    /* what a sample has room for: the slot, or the longest free piece of spare memory if that is more */
+    uint32_t total = 0, fr = 0, big = 0;
+    int      claims = 0;
+    SpareStat(&total, &fr, &big, &claims);
+    Out("FO %d ok %lu", id, (unsigned long)(big > eng->SlotCapacity() ? big : eng->SlotCapacity()));
 }
 
 void XferData(const char* t, uint32_t now)
