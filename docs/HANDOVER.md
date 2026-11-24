@@ -24,7 +24,9 @@ is stale; it is a snapshot, not a rule book.
 
 ## What runs on the rig
 
-- Daisy firmware v13.17 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
+- Daisy firmware v13.19 since 24 Nov, evening (v13.18: the undo message after an
+  overdub on a long loop; v13.19: looper and quantise settings kept on the card).
+  Before it v13.17 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
   for long loops (that part is v13.16), and it says its version
   (`curl -s localhost:8040/health | grep firmware`). Control protocol 10,
   report version 17. It boots and the bridge talks to it; no long take has

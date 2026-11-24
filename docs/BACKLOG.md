@@ -4,7 +4,7 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## v13.19: looper and quantise settings survive a power cycle (built 2026-11-24, NOT flashed)
+## v13.19: looper and quantise settings survive a power cycle (on the rig, flashed 2026-11-24)
 
 `daisy/release/ApcBox.bin`. Control protocol 10 and report 17 as before; SDRAM
 95.9% as before (`arm-none-eabi-size -A`).
@@ -15,10 +15,12 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   APC40), and read at power-up and when a card goes in. No card: as before.
 - The input monitor is left out on purpose: it starts off, so the box never
   comes up feeding its input to the speakers. Say if it should be kept too.
-- Desktop test only (`daisy/sets_test.cpp`). Not tried on the Seed: the write
-  to the real card, and whether it is heard (it waits for a take, a set
-  operation or a load to finish, but it is a card write while playing, like the
-  button map's).
+- Desktop test (`daisy/sets_test.cpp`), and on the rig once: take length 4 and
+  pattern quantise "step" set through the bridge, the Seed restarted by
+  flashing it again, both were back (`LP` line); then put back to what they
+  were. Not tried: whether the write is heard while playing (it waits for a
+  take, a set operation or a load to finish, but it is a card write, like the
+  button map's), a change made from the APC40, a real power cycle.
 
 ## v13.17 on the rig (flashed 2026-11-24): v13.16 plus the firmware's version in the report
 
