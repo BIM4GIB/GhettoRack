@@ -3558,13 +3558,15 @@ class SettingsTest(unittest.TestCase):
                 self.assertEqual(pg.evaluate("[document.getElementById('pad').classList.contains('on'), document.getElementById('pin').value, location.pathname]"),
                                  [False, "2601", "/settings"])
                 pg.evaluate("document.getElementById('pin').value = ''")
-                # the start screen: modules and the way to Settings, nothing else
+                # the start screen: modules, the jam recorder and the way to Settings, nothing else
                 pg.goto("http://127.0.0.1:%d/" % self.http)
                 pg.wait_for_selector(".module")
                 self.assertEqual(pg.evaluate("[!!document.getElementById('binds'), !!document.getElementById('autostart'), !!document.getElementById('hdmi'), [...document.querySelectorAll('h2')].map(e => e.textContent)]"),
                                  [False, False, False, ["Modules"]])
                 for _ in range(12):
                     pg.keyboard.press("ArrowUp")
+                self.assertEqual(pg.evaluate("document.activeElement.id"), "jam")
+                pg.keyboard.press("ArrowDown")
                 self.assertEqual(pg.evaluate("document.activeElement.id"), "settings")
                 if (w_, h_) == (1920, 1080):
                     pg.screenshot(path=os.path.join(self.dir, "start.png"))
