@@ -1926,6 +1926,56 @@ int main()
         printf("button map: buttons, SHIFT layer, lights, knobs, card ok\n");
     }
 
+    /* Looper and quantise settings go onto the card by themselves and are there again after a power
+       cycle; the input monitor is not among them */
+    {
+        auto U = [](const char* c) { CHECK(BoxUiCommand(c, now_ms)); };
+        int was[kLset];
+        LsetRead(was);
+        U("lrec len 4");
+        U("lrec count 1");
+        U("quant rec 1");
+        U("quant pat 2");
+        U("quant mute 1");
+        U("quant fx 0");
+        U("ingain 100");
+        Tick(1700);
+        CHECK(Exists("apcbox/looper.txt"));
+        float g = e.in_gain;
+        e.lr_len_bars = 0, e.lr_countin = false, e.quant_rec = 0, e.quant_pat = 0, e.quant_mute = 0, e.quant_fx = 1;
+        in_gain_ui = 64, e.in_gain = 1.f;
+        e.input_monitor = false;
+        LsetLoad(); // as at power-up
+        CHECK(e.lr_len_bars == 4 && e.lr_countin && e.quant_rec == 1 && e.quant_pat == 2 && e.quant_mute == 1 && e.quant_fx == 0);
+        CHECK(in_gain_ui == 100 && e.in_gain == g && g > 1.f && !e.input_monitor);
+        /* a setting changed from the APC40 side (no command) is seen too; one change, one write */
+        e.quant_pat = 1;
+        Tick(1000);
+        e.lr_len_bars = 8; // still being changed: not yet
+        Tick(1000);
+        e.quant_pat = 0, e.lr_len_bars = 0;
+        LsetLoad();
+        CHECK(e.quant_pat == 2 && e.lr_len_bars == 4);
+        e.quant_pat = 1, e.lr_len_bars = 8;
+        Tick(1700);
+        e.quant_pat = 0, e.lr_len_bars = 0;
+        LsetLoad();
+        CHECK(e.quant_pat == 1 && e.lr_len_bars == 8);
+        /* a file with nonsense in it: what is in range is taken, the rest stays */
+        const char bad[] = "LPS1\nlen 3\nfx 9\ngain 500\nmute 2\nwhat 1\n";
+        CHECK(plat->WriteFile("apcbox", "apcbox/looper.txt", bad, sizeof(bad) - 1));
+        LsetLoad();
+        CHECK(e.lr_len_bars == 8 && e.quant_fx == 0 && in_gain_ui == 100 && e.quant_mute == 2 && e.quant_pat == 1);
+        const char other[] = "nope\nlen 1\n";
+        CHECK(plat->WriteFile("apcbox", "apcbox/looper.txt", other, sizeof(other) - 1));
+        LsetLoad();
+        CHECK(e.lr_len_bars == 8);
+        for(int i = 0; i < kLset; i++)
+            LsetApply(i, was[i]);
+        Tick(1700);
+        printf("looper settings: saved by themselves, back after a power cycle ok\n");
+    }
+
     /* A performance FX held from a page lets go when the T95 goes quiet,
        even with no controller attached */
     T95Frame("\x1bK\x1bU fx 3 1\n");

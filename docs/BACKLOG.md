@@ -4,6 +4,22 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.19: looper and quantise settings survive a power cycle (built 2026-11-24, NOT flashed)
+
+`daisy/release/ApcBox.bin`. Control protocol 10 and report 17 as before; SDRAM
+95.9% as before (`arm-none-eabi-size -A`).
+
+- Take length, count-in, the four quantise settings (take start, pattern,
+  mute/solo, FX) and the input level are written to `apcbox/looper.txt` on the
+  Daisy's card 1.5 s after the last change, whoever changed them (a page or the
+  APC40), and read at power-up and when a card goes in. No card: as before.
+- The input monitor is left out on purpose: it starts off, so the box never
+  comes up feeding its input to the speakers. Say if it should be kept too.
+- Desktop test only (`daisy/sets_test.cpp`). Not tried on the Seed: the write
+  to the real card, and whether it is heard (it waits for a take, a set
+  operation or a load to finish, but it is a card write while playing, like the
+  button map's).
+
 ## v13.17 on the rig (flashed 2026-11-24): v13.16 plus the firmware's version in the report
 
 Report version 17: a `VF` line with the firmware's version. `/health` on the
@@ -73,8 +89,7 @@ Left out on purpose, say if wanted: auto-stop of a one-shot on silence, a
 pre-roll for one-shots (the first fraction of a millisecond below the
 threshold is lost).
 
-Known limits: looper and quantise settings are not saved over a power cycle.
-A loop that started on a beat goes back to the bar line when its set is
+Known limits (looper and quantise settings not being kept: fixed in v13.19). A loop that started on a beat goes back to the bar line when its set is
 loaded again. Undo is one take deep (undo and redo go back and forth). On
 the APC40 one-shot sampling and kit save have no button until you give
 them one on the map (REC still arms a loop).
@@ -146,8 +161,8 @@ them one on the map (REC still arms a loop).
   built. Needs: the card writable only while a recording runs (the udev rule
   mounts it read-only so pulling it is always safe), an eject under Settings >
   Devices, a record button on the page, files split or flushed so a pulled
-  card loses seconds, not the take. Open: exFAT in this slot is untested (read
-  or write), write speed and dropouts while the bridge and MIDI run are
+  card loses seconds, not the take. Open: exFAT in this slot reads (2026-11-24,
+  `t95/README.md`), writing is untested; write speed and dropouts while the bridge and MIDI run are
   unmeasured, what happens when the card is full. Recording must not run in
   the bridge's own loop. Later with a writable card: set and kit backups, the
   library on the card.
@@ -169,7 +184,7 @@ them one on the map (REC still arms a loop).
 - Undo for a sample sent from the T95.
 - Kit names from a page are 16 characters, lower case (the command line to
   the Daisy is 31 characters).
-- Looper: settings saved with the project; more than one undo; one-shot on
+- Looper: more than one undo; one-shot on
   an APC40 button; learn for keyboard knobs.
 
 ## MIDI and clock

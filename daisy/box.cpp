@@ -1523,6 +1523,99 @@ void ReleaseAllHeld()
 #include "kits.h"
 #include "apcmap.h"
 
+/* ------------------------------------------------------------------ */
+/* Looper and quantise settings on the card (apcbox/looper.txt), so    */
+/* they are there again after a power cycle. Whatever changes one      */
+/* (a page, the APC40) is seen by comparing; written 1.5 s after the   */
+/* last change. The input monitor is left out: it starts off, so the   */
+/* box never comes up feeding its input to the speakers.               */
+
+const int kLset = 7;
+const char* const lset_name[kLset] = {"len", "count", "rec", "pat", "mute", "fx", "gain"};
+int      lset_saved[kLset];
+int      lset_seen[kLset];
+bool     lset_known = false; // the card was asked: from here on changes are written
+uint32_t lset_changed_at;
+
+void LsetRead(int* v)
+{
+    v[0] = eng->lr_len_bars;
+    v[1] = eng->lr_countin ? 1 : 0;
+    v[2] = eng->quant_rec;
+    v[3] = eng->quant_pat;
+    v[4] = eng->quant_mute;
+    v[5] = eng->quant_fx;
+    v[6] = in_gain_ui;
+}
+
+/** One setting from the card; anything out of range is left as it is */
+void LsetApply(int i, int a)
+{
+    if(i == 0 && (a == 0 || a == 1 || a == 2 || a == 4 || a == 8))
+        eng->lr_len_bars = (uint8_t)a;
+    else if(i == 1 && a >= 0 && a <= 1)
+        eng->lr_countin = a == 1;
+    else if(i == 2 && a >= 0 && a <= 1)
+        eng->quant_rec = (uint8_t)a;
+    else if(i == 3 && a >= 0 && a <= 2)
+        eng->quant_pat = (uint8_t)a;
+    else if(i == 4 && a >= 0 && a <= 2)
+        eng->quant_mute = (uint8_t)a;
+    else if(i == 5 && a >= 0 && a <= 2)
+        eng->quant_fx = (uint8_t)a;
+    else if(i == 6 && a >= 0 && a <= 127)
+        in_gain_ui = a, eng->in_gain = a == 64 ? 1.f : a * (2.f / 127.f) * a * (2.f / 127.f);
+}
+
+/** At power-up and when a card goes in */
+void LsetLoad()
+{
+    char    txt[160];
+    int32_t n = plat->ReadFile("apcbox/looper.txt", txt, sizeof(txt) - 1);
+    if(n >= 5 && !strncmp(txt, "LPS1", 4))
+    {
+        txt[n]     = 0;
+        char* line = strchr(txt, '\n');
+        while(line && *++line)
+        {
+            char w[8];
+            int  a;
+            if(sscanf(line, "%7s %d", w, &a) == 2)
+                for(int i = 0; i < kLset; i++)
+                    if(!strcmp(w, lset_name[i]))
+                        LsetApply(i, a);
+            line = strchr(line, '\n');
+        }
+        Log("looper and quantise settings from the card");
+    }
+    LsetRead(lset_saved);
+    LsetRead(lset_seen);
+    lset_known = true;
+}
+
+void LsetPoll(uint32_t now)
+{
+    if(!lset_known)
+        return;
+    int v[kLset];
+    LsetRead(v);
+    if(memcmp(v, lset_seen, sizeof(v)))
+    {
+        memcpy(lset_seen, v, sizeof(v));
+        lset_changed_at = now;
+    }
+    if(!memcmp(v, lset_saved, sizeof(v)) || now - lset_changed_at <= 1500 || !sd_ok || set_op || num_jobs
+       || load_state != kLoadIdle || eng->LiveRecBusy())
+        return;
+    char txt[160];
+    int  n = snprintf(txt, sizeof(txt), "LPS1\n");
+    for(int i = 0; i < kLset; i++)
+        n += snprintf(txt + n, sizeof(txt) - n, "%s %d\n", lset_name[i], v[i]);
+    memcpy(lset_saved, v, sizeof(v)); // one try per change: a card that can't be written isn't asked every loop
+    if(!plat->WriteFile("apcbox", "apcbox/looper.txt", txt, (uint32_t)n))
+        Log("looper settings: can't write them to the card");
+}
+
 /** Knobs of one track back to default; fader, mute and solo stay */
 void ResetTrackKnobs(int t)
 {
@@ -3503,6 +3596,7 @@ void BoxStorageReady(bool load_project)
     ReadSetList();
     TouchLoadCal();
     MapLoad();
+    LsetLoad();
     if(load_project && !LoadLastSet())
         LoadProject();
 }
@@ -3709,6 +3803,7 @@ void BoxPoll(uint32_t now)
     UpdateLeds(now);
     MapLeds();
     MapPoll(now);
+    LsetPoll(now);
     static uint32_t last = 0;
     if(now - last >= 33)
     {
