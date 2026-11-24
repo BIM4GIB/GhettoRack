@@ -11,8 +11,8 @@ Pairing is not done here: that changes the box, so it is the helper's
 paired is.
 
 Not tried against a real Bluetooth MIDI device yet (2026-11-24): the packet code
-and the link are covered by tests, the BlueZ side only as far as "runs on the T95
-and finds nothing".
+and the link are covered by tests, the BlueZ side only as far as "on the T95 it
+gets BlueZ's device list and finds no MIDI device in it".
 """
 import errno
 import tty

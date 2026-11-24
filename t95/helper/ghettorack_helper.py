@@ -696,8 +696,22 @@ class Helper:
     def cmd_bt_scan(self, d):
         if not self.bt()["on"]:
             return {"error": "Bluetooth is off"}
-        self.btctl("--timeout", str(int(self.a.bt_scan_s)), "scan", "on", timeout=self.a.bt_scan_s + 6)
-        seen = [i for i in (self.bt_info(a) for a in self.bt_addrs()[:48]) if i]
+        scan = None
+        try:                                    # read while it still scans: BlueZ drops the signal figure when it stops
+            scan = subprocess.Popen([self.a.bluetoothctl, "--timeout", str(int(self.a.bt_scan_s) + 20), "scan", "on"],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
+        try:
+            time.sleep(self.a.bt_scan_s)
+            seen = [i for i in (self.bt_info(a) for a in self.bt_addrs()[:48]) if i]
+        finally:
+            if scan is not None:
+                scan.terminate()
+                try:
+                    scan.wait(3)
+                except subprocess.TimeoutExpired:
+                    scan.kill()
         seen = [i for i in seen if i["name"] or i["midi"] or i["paired"]]         # the nameless ones are beacons and the like
         seen.sort(key=lambda i: (not i["midi"], not i["paired"], -(i["rssi"] if i["rssi"] is not None else -200)))
         return {"ok": True, "devices": seen[:16]}

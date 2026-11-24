@@ -30,7 +30,9 @@ is stale; it is a snapshot, not a rule book.
   report version 17. It boots and the bridge talks to it; no long take has
   been recorded on the rig yet (`docs/BACKLOG.md` has what to try). v13.15
   was the last one Rene played.
-- Bridge, kiosk, settings helper, Bluetooth unit installed from `main` at
+- Bridge, kiosk, settings helper, Bluetooth unit installed from `main` as of
+  24 Nov, evening (`git -C ~/GhettoRack log -1` on the box says which). The
+  bridge now runs as the fixed user `apcbox-bridge` with `--ble`. Before that:
   `6f5377d` (Settings banners: one short line, 3 or 6 s; the bridge stops in
   half a second instead of 90 s and a kill).
 - `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 92 tests, 2 skipped
