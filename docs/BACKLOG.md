@@ -4,7 +4,24 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## v13.21: long plain samples in spare memory (built 2026-11-24, NOT flashed, nothing tried on the rig)
+## USB audio under load (v13.21 rebuilt 2026-11-24, on the rig)
+
+`daisy/release/ApcBox.bin` is v13.21 with this in it (the version number did
+not move: the Seed runs exactly this binary). Found with a 33 minute jam take.
+
+- At about 72 % CPU the Daisy sent 3 % fewer USB audio packets: gaps in the
+  browser, the TV sound and the jam take (11 s short of the clock). libDaisy
+  has every interrupt at priority 0, so USB waited behind the audio callback.
+  The audio interrupt is now one level down (`daisy/main.cpp`).
+- Seen on the rig: 90 s at 76 % average CPU, 48012 frames/s, no skipped or
+  missed packets. Not yet listened to by Rene.
+- Open: with 8 sample tracks and 8 303s on every step the Seed stopped
+  reporting and taking commands (audio and USB audio went on) until reset. Not
+  known whether any build does that. Nothing resets it by itself.
+- Open: one 303 with 8 busy sample tracks takes single blocks to 124 % CPU.
+- The half-hour seam of a take is sample-continuous (seen in that take).
+
+## v13.21: long plain samples in spare memory (built 2026-11-24, on the rig with the USB audio change, long samples not tried there)
 
 `daisy/release/ApcBox.bin` is v13.21. Control protocol 10, report 18, SDRAM
 95.9%, all as v13.20. Desktop tests and the bridge against the firmware
