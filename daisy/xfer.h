@@ -139,7 +139,7 @@ void XferOpen(const char* t, uint32_t now)
     xfer_time   = now;
     xfer_state  = kXferRecv;
     memset(xfer_got, 0, sizeof(xfer_got));
-    Out("FO %d ok %lu", id, (unsigned long)eng->GetSlot(xfer_track).capacity);
+    Out("FO %d ok %lu", id, (unsigned long)eng->SlotCapacity());
 }
 
 void XferData(const char* t, uint32_t now)

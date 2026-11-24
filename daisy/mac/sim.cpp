@@ -230,9 +230,15 @@ class MacPlatform : public Platform
     }
     int16_t* UndoMem(uint32_t* n) override
     {
-        static std::vector<int16_t> u(1536 * 1024);
+        static std::vector<int16_t> u(768 * 1024);
         *n = (uint32_t)u.size();
         return u.data();
+    }
+    int16_t* SpareMem(uint32_t* n) override // like the Daisy's: 8 blocks of two slots
+    {
+        static std::vector<int16_t> sp(8 * 1536 * 1024);
+        *n = (uint32_t)sp.size();
+        return sp.data();
     }
     int16_t* Staging(uint32_t* samples) override
     {
@@ -692,7 +698,7 @@ int main(int argc, char** argv)
     page_path       = dir + "/../../ui/apcbox-ui.html";
 
     /* Engine memory, same sizes as the Daisy */
-    const uint32_t kSlotCap = 1536u * 1024u; // same as the Daisy
+    const uint32_t kSlotCap = 768u * 1024u; // same as the Daisy
     static std::vector<int16_t> slots((size_t)kSlotCap * kTracks);
     static std::vector<float>   dl(96000), dr(96000), cl(192000), cr(192000);
     Memory mem;

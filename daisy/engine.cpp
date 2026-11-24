@@ -698,12 +698,16 @@ void Engine::HandleRequests()
             }
             else
             {
-                slots_[lr_track_].length = 0;
-                lr_state_                = 0;
+                if(!LiveRecRestore())
+                    slots_[lr_track_].length = 0;
+                lr_state_ = 0;
             }
         }
         else if(lr_state_ == 1)
+        {
+            LiveRecRestore();
             lr_state_ = 0;
+        }
         for(int t = 0; t < kTracks; t++) // let 303 notes end, keep live keys
             if(live_n_[t] == 0)
             {
@@ -779,6 +783,8 @@ void Engine::HandleRequests()
             int t = lr_req_track_;
             if(t >= 0 && t < kTracks)
             {
+                lr_prev_loop_  = loop_on_[t];
+                lr_prev_synth_ = synth_[t];
                 lr_track_  = t;
                 lr_mode_   = kRecLoop;
                 lr_state_  = 1;
@@ -787,6 +793,7 @@ void Engine::HandleRequests()
                 loop_on_[t] = false;
                 synth_[t]  = false; // a 303 track becomes a sample track
                 voices_[t][0].active = voices_[t][1].active = false;
+                LiveRecBuffer(t);
                 if(!playing_)
                 {
                     play_req_ = true; // start now: the bar line is right away
@@ -814,6 +821,8 @@ void Engine::HandleRequests()
             int t = lr_req_track_;
             if(t >= 0 && t < kTracks)
             {
+                lr_prev_loop_  = loop_on_[t];
+                lr_prev_synth_ = synth_[t];
                 lr_track_   = t;
                 lr_mode_    = kRecShot;
                 lr_state_   = 1;
@@ -821,6 +830,7 @@ void Engine::HandleRequests()
                 loop_on_[t] = false;
                 synth_[t]   = false;
                 voices_[t][0].active = voices_[t][1].active = false;
+                LiveRecBuffer(t);
             }
         }
         else if(r == 2 && lr_state_ == 2 && lr_mode_ == kRecShot)
@@ -836,10 +846,14 @@ void Engine::HandleRequests()
         else if(r == 2 && lr_state_ == 2)
             lr_stop_ = true;
         else if(r == 2 && lr_state_ == 1)
+        {
+            LiveRecRestore();
             lr_state_ = 0; // stop before it started = cancel
+        }
         else if(r == 3)
         {
-            if(lr_state_ == 2 && lr_track_ >= 0 && lr_mode_ != kRecOverdub)
+            if(lr_state_ != 0 && !LiveRecRestore() && lr_state_ == 2 && lr_track_ >= 0
+               && lr_mode_ != kRecOverdub)
                 slots_[lr_track_].length = 0; // half a take is no use
             lr_state_ = 0;
         }
@@ -1230,9 +1244,55 @@ void Engine::LiveRecStep(int s)
     }
 }
 
+/** A take starts on track t: point its slot at the buffer asked for. If that
+ *  isn't where the track's sound is, the sound stays there untouched. */
+void Engine::LiveRecBuffer(int t)
+{
+    Slot&    s   = slots_[t];
+    int16_t* buf = lr_req_buf_;
+    lr_swapped_  = false;
+    if(!buf || buf == s.data)
+        return;
+    lr_prev_data_ = s.data;
+    lr_prev_cap_  = s.capacity;
+    lr_prev_len_  = s.length;
+    s.length      = 0;
+    __sync_synchronize();
+    s.data     = buf;
+    s.capacity = lr_req_cap_;
+    lr_swapped_ = true;
+}
+
+/** A take that isn't kept: the track is back on what it held (true), if the
+ *  take had a buffer of its own */
+bool Engine::LiveRecRestore()
+{
+    if(!lr_swapped_ || lr_track_ < 0)
+        return false;
+    Slot& s     = slots_[lr_track_];
+    lr_swapped_ = false;
+    s.length    = 0;
+    __sync_synchronize();
+    s.data     = lr_prev_data_;
+    s.capacity = lr_prev_cap_;
+    __sync_synchronize();
+    s.length = lr_prev_len_;
+    /* a loop comes back in from its top on its bar, a 303 track is one again */
+    const int t = lr_track_;
+    synth_[t]   = lr_prev_synth_;
+    if(lr_prev_loop_ && loop_bars_[t] > 0 && rl_len_[t] > 0 && rl_len_[t] <= lr_prev_len_)
+    {
+        rl_pos_[t]  = (double)rl_len_[t];
+        tail_[t]    = 0;
+        loop_on_[t] = true;
+    }
+    return true;
+}
+
 /** A one-shot take ends: a short fade so it doesn't click */
 void Engine::ShotFinish()
 {
+    lr_swapped_ = false; // it's kept
     const int t = lr_track_;
     Slot&     s = slots_[t];
     uint32_t  n = lr_pos_, f = n < 240 ? n : 240;
@@ -1252,6 +1312,7 @@ void Engine::ShotFinish()
 
 void Engine::LiveRecFinish()
 {
+    lr_swapped_ = false; // it's kept
     const int t = lr_track_;
     Slot&     s = slots_[t];
     s.rate      = 1.f;
@@ -1294,7 +1355,10 @@ void Engine::ApplySwap()
             __sync_synchronize();
             s.length = sw->data[t] ? sw->length[t] : 0;
             if(lr_state_ != 0 && lr_track_ == t)
-                lr_state_ = 0;
+            {
+                lr_state_   = 0;
+                lr_swapped_ = false;
+            }
         }
         synth_[t] = sw->synth[t];
         if(sw->loop_bars[t] && slots_[t].length)
@@ -1871,7 +1935,10 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
                 {
                     /* recorded loop: locked to the bar, not to steps */
                     double p = rl_pos_[t];
-                    if(!playing_ || p >= (double)rl_len_[t] - 1.0)
+                    /* (never past the memory the slot has now: a load may have
+                       moved it a block before the loop is told to stop) */
+                    if(!playing_ || p >= (double)rl_len_[t] - 1.0
+                       || p >= (double)slots_[t].capacity - 1.0)
                     {
                         if(!filt_on_[t] || tail_[t] == 0)
                             continue;

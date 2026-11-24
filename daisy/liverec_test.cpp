@@ -10,7 +10,7 @@ using namespace ab;
 int main()
 {
     const float sr = 48000.f; const size_t B = 48;
-    const uint32_t cap = 1536 * 1024;
+    const uint32_t cap = 768 * 1024;
     static std::vector<int16_t> slots(cap * kTracks);
     static std::vector<float> dl(96000), dr(96000), cl(192000), cr(192000);
     static daisysp::ReverbSc rv;

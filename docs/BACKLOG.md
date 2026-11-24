@@ -4,6 +4,30 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.16: 16 s slots and spare blocks (built, desktop-tested, NOT flashed, not in `daisy/release/`)
+
+Control protocol 10 and report 16 as before. SDRAM 95.9% in the build
+(`make -C daisy`, 2026-11-24).
+
+- A track's slot holds 16 s (was 32 s); the looper's undo memory shrinks with it.
+- 8 spare blocks of 32 s. The looper takes one only when the chosen take length
+  doesn't fit a slot at the tempo (8 bars below about 117 BPM). None free: it
+  says "no room" and arms nothing. A take with no chosen length gets a block if
+  one is free and moves into the slot afterwards if it fits; else it records
+  into the slot and ends at 16 s.
+- A block is free again when its track gets any other sound.
+- No undo for a take that stays in a block, nor for an overdub on one. A
+  dropped take puts the track back on what it held, long loop included.
+- Sets: a long loop is saved whole and loads back into a block; with none free
+  it is cut to 16 s. Any other sound over 16 s is cut on load (sets saved
+  before this included). One-shot sampling ends at 16 s.
+- Fixed on the way: a set with a sound longer than a slot wrote past the slot
+  when it was copied home after the switch.
+- To try on the rig: an 8 bar take at 100 BPM (record, play past 16 s, cancel
+  one, save and reload a set with it), and the "no room" message with all 8
+  blocks in use. Possible later: undo for long takes (the old sound is still
+  in the slot, only redo needs memory).
+
 ## In the firmware to flash (v13.15, built, desktop-tested, NOT flashed)
 
 `daisy/release/ApcBox.bin`. Control protocol 10, report 16.

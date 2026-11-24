@@ -75,9 +75,11 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   hot-swap, sync set switching on the real card). Say so.
 - `box.cpp` is shared by the firmware and the Mac build: no Daisy-only calls
   there; Daisy specifics go in `main.cpp`, `tft.h`, `usbdev.cpp`.
-- SDRAM is ~98% used from v13.12 (slots, staging pool, one slot of looper undo). Verify against the current
+- SDRAM is ~96% used from v13.16 (16 slots of 16 s, 8 spare blocks of 32 s for
+  long loops, staging pool, one slot of looper undo). Verify against the current
   build with `arm-none-eabi-size -A` before adding buffers. 64 MB total SDRAM is
-  not 64 MB available for incoming samples.
+  not 64 MB available for incoming samples. A sound longer than a slot is cut on
+  load; only a recorded loop can take a spare block (`Spare...` in `daisy/box.cpp`).
 - The screen (SunFounder 3.5", ST7796U behind shift registers) needs 16-bit
   command words; `tft.h` defaults to that, encoder held at power-up switches.
 

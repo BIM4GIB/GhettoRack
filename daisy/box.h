@@ -72,6 +72,14 @@ class Platform
         return nullptr;
     }
 
+    /** Spare memory for loops that don't fit a track's slot (samples; nullptr
+     *  = none). The box cuts it into blocks of two slots each. */
+    virtual int16_t* SpareMem(uint32_t* samples)
+    {
+        *samples = 0;
+        return nullptr;
+    }
+
     /* Status for the monitor */
     virtual float    CpuAvg()            = 0; // 0..1
     virtual float    CpuMax()            = 0;

@@ -486,6 +486,90 @@ void     SetsJobDone(const Job& j, bool ok, uint32_t len, float rate, bool defer
 void     SetsTrackLoaded(int t);
 void     StagePlace(Job& j);
 
+/* ---- long loops: spare blocks for what doesn't fit a track's slot ----
+   A block is two slots long. A track's slot points at its block while the long
+   loop is on it. A block is free again as soon as the slot points somewhere
+   else, whoever moved it (a load, a kit, a set switch, a new take): the sweep
+   in BoxPoll finds that out, nobody has to hand a block back. */
+constexpr int kSpareMax = 16;
+int16_t*      spare_mem   = nullptr;
+uint32_t      spare_block = 0;       // samples in a block
+int           spare_n     = 0;
+int8_t        spare_owner[kSpareMax]; // the track, -1 = free
+bool          spare_held[kSpareMax];  // claimed for a take or a load still under way: not swept
+int           take_block   = -1;      // the block the take under way records into
+int           take_prev    = -1;      // the block the track's long loop is in meanwhile (a dropped take goes back to it)
+bool          take_swapped = false;   // that take has its own buffer: what the track held is untouched
+int           load_block   = -1;      // the block the load under way fills
+
+void SpareInit()
+{
+    uint32_t n  = 0;
+    spare_mem   = plat->SpareMem(&n);
+    spare_block = eng->SlotCapacity() * 2;
+    spare_n     = spare_mem && spare_block ? (int)(n / spare_block) : 0;
+    if(spare_n > kSpareMax)
+        spare_n = kSpareMax;
+    for(int b = 0; b < kSpareMax; b++)
+    {
+        spare_owner[b] = -1;
+        spare_held[b]  = false;
+    }
+    take_block = take_prev = load_block = -1;
+    take_swapped                        = false;
+}
+int16_t* SpareBase(int b) { return spare_mem + (size_t)b * spare_block; }
+/** The block `p` is the start of, -1 = not one */
+int SpareIndex(const int16_t* p)
+{
+    for(int b = 0; b < spare_n; b++)
+        if(p == SpareBase(b))
+            return b;
+    return -1;
+}
+/** The block track t's sound is in, -1 = it's in its own slot */
+int SpareOf(int t) { return SpareIndex(eng->GetSlot(t).data); }
+int SpareFree()
+{
+    int n = 0;
+    for(int b = 0; b < spare_n; b++)
+        n += spare_owner[b] < 0;
+    return n;
+}
+/** A free block for track t, held until whoever asked lets go; -1 = none */
+int SpareClaim(int t)
+{
+    for(int b = 0; b < spare_n; b++)
+        if(spare_owner[b] < 0)
+        {
+            spare_owner[b] = (int8_t)t;
+            spare_held[b]  = true;
+            return b;
+        }
+    return -1;
+}
+/** Track t's slot is empty or locked and gets another sound: back to its own memory */
+void SpareHome(int t)
+{
+    if(eng->GetSlot(t).data != eng->HomeData(t))
+        eng->SlotPoint(t, eng->HomeData(t), eng->SlotCapacity());
+}
+void SpareSweep()
+{
+    if((take_block >= 0 || take_prev >= 0) && !eng->LiveRecBusy())
+    {
+        /* kept or dropped: the slot says which of the two is in use now */
+        if(take_block >= 0)
+            spare_held[take_block] = false;
+        if(take_prev >= 0)
+            spare_held[take_prev] = false;
+        take_block = take_prev = -1;
+    }
+    for(int b = 0; b < spare_n; b++)
+        if(spare_owner[b] >= 0 && !spare_held[b] && eng->GetSlot(spare_owner[b]).data != SpareBase(b))
+            spare_owner[b] = -1;
+}
+
 constexpr int kMaxJobs = 16;
 Job           jobs[kMaxJobs];
 int           num_jobs = 0;
@@ -598,6 +682,11 @@ bool PlatSkip(void* ctx, uint32_t n)
 void FinishJob(bool ok)
 {
     int t = cur_job.track;
+    if(load_block >= 0)
+    {
+        spare_held[load_block] = false; // the slot points at it, or it's free again
+        load_block             = -1;
+    }
     if(cur_job.stage)
     {
         load_state = kLoadIdle;
@@ -659,12 +748,30 @@ void StageBegin()
         SetsJobDone(j, false, 0, 1.f, false);
         return;
     }
-    if(wav.TotalFrames() > j.cap) // too big for what's left: load it after the switch
+    /* longer than a slot: a loop goes straight into a spare block (no staging,
+       no copy afterwards); anything else, or a loop with no block free, is cut */
+    uint32_t want = wav.TotalFrames();
+    if(want > eng->SlotCapacity())
+    {
+        const int b = j.loop_bars ? SpareClaim(j.track) : -1;
+        if(b >= 0)
+        {
+            j.dst = SpareBase(b); // held until the switch has happened (AfterSwap)
+            j.cap = spare_block;
+            load_state = kLoadRead;
+            return;
+        }
+        want = eng->SlotCapacity();
+        Log("set: track %d sound cut to %d s%s", j.track + 1, (int)eng->SlotSeconds(),
+            j.loop_bars ? " (no room for a long loop)" : "");
+    }
+    if(want > j.cap) // too big for what's left: load it after the switch
     {
         plat->FileClose();
         SetsJobDone(j, true, 0, 1.f, true);
         return;
     }
+    j.cap      = want;
     load_state = kLoadRead;
 }
 
@@ -710,6 +817,7 @@ void LoaderStep(uint32_t now)
                 return;
             Slot& s  = eng->GetSlot(t);
             s.length = 0;
+            SpareHome(t); // a long loop it held is gone with this; its block frees itself
             if(IsSynthPath(cur_job.path))
             {
                 eng->SetSynth(t, true);
@@ -740,6 +848,15 @@ void LoaderStep(uint32_t now)
                 eng->RenderBuiltInSound(t, BuiltInKitFor(t));
                 FinishJob(false);
                 return;
+            }
+            /* a saved loop longer than a slot: into a spare block if one is free, else cut */
+            if(cur_job.loop_bars && wav.TotalFrames() > eng->SlotCapacity())
+            {
+                load_block = SpareClaim(t);
+                if(load_block >= 0)
+                    eng->SlotPoint(t, SpareBase(load_block), spare_block);
+                else
+                    Log("track %d: no room for a long loop, cut to %d s", t + 1, (int)eng->SlotSeconds());
             }
             load_state = kLoadRead;
             break;
@@ -775,6 +892,7 @@ void LoaderStep(uint32_t now)
                          (unsigned)wav.Bits());
             if(wav.Written() == 0)
             {
+                SpareHome(t);
                 eng->RenderBuiltInSound(t, BuiltInKitFor(t));
                 FinishJob(false);
                 return;
@@ -1069,7 +1187,8 @@ void BrowseBackup(int t)
         return;
     }
     LooperBackup(t, kUndoBrowse);
-    lundo.valid = true;
+    /* a recording that didn't fit the undo memory (a long loop) can't come back */
+    lundo.valid = lundo.data || !(lundo.loop || IsRecPath(lundo.path));
     lundo.await = true;
 }
 
@@ -1169,9 +1288,51 @@ bool LooperStart(int t, int mode)
             return false;
         }
     }
+    /* where the take goes: the track's own slot, or a spare block when the
+       chosen length doesn't fit a slot at this tempo. No block free: say so now,
+       before anything is armed. A take with no chosen length gets a block if
+       there is one (it moves into the slot afterwards if it fits) and the slot
+       if not. */
+    int16_t* buf = eng->HomeData(t);
+    uint32_t cap = eng->SlotCapacity();
+    int      blk = -1;
+    if(mode == Engine::kRecLoop)
+    {
+        const int      bars = eng->lr_len_bars;
+        const uint32_t need = (uint32_t)bars * eng->BarSamples();
+        if(bars == 0 || need + need / 64 > cap)
+        {
+            blk = SpareClaim(t);
+            if(blk >= 0)
+            {
+                buf = SpareBase(blk);
+                cap = spare_block;
+            }
+            else if(SpareOf(t) >= 0) // over its own long loop, in place
+            {
+                buf = eng->GetSlot(t).data;
+                cap = eng->GetSlot(t).capacity;
+            }
+            else if(bars)
+            {
+                Popup("no room: %d bars at %d BPM", bars, (int)(eng->global.bpm + 0.5f));
+                Log("looper: no spare block free for %d bars at %d BPM on track %d", bars,
+                    (int)(eng->global.bpm + 0.5f), t + 1);
+                return false;
+            }
+        }
+    }
     if(t == sel_track)
         ReleaseKeys();
     LooperBackup(t, mode);
+    if(mode != Engine::kRecOverdub)
+    {
+        take_block   = blk;
+        take_swapped = buf != eng->GetSlot(t).data;
+        take_prev    = take_swapped ? SpareOf(t) : -1;
+        if(take_prev >= 0)
+            spare_held[take_prev] = true;
+    }
     const char* q = eng->quant_rec ? "beat" : "bar";
     if(mode == Engine::kRecOverdub)
     {
@@ -1180,12 +1341,12 @@ bool LooperStart(int t, int mode)
     }
     else if(mode == Engine::kRecShot)
     {
-        eng->LiveRecShot(t);
+        eng->LiveRecShot(t, buf, cap);
         Popup("sample %d: waiting for sound", t + 1);
     }
     else
     {
-        eng->LiveRecArm(t);
+        eng->LiveRecArm(t, buf, cap);
         Popup("rec %d: from the %s", t + 1, q);
     }
     return true;
@@ -1195,7 +1356,14 @@ void LooperCancel()
 {
     if(eng->LiveRecState() == 0)
         return;
+    const bool own = take_swapped && eng->LiveRecMode() != Engine::kRecOverdub;
     eng->LiveRecCancel();
+    if(own) // the take had its own buffer: the engine puts the track back on what it held
+    {
+        take_swapped = false;
+        lundo.valid  = false;
+        return;
+    }
     LooperExchange(false); // arming already took the track's sound away
     Popup("rec cancelled");
 }
@@ -3309,6 +3477,7 @@ void BoxInit(Platform* p, Engine* e)
         snprintf(slot_path[t], kPathLen, "@k%d", builtin_kit_pg[t / 8]);
         eng->RenderBuiltInSound(t, builtin_kit_pg[t / 8]); // 1-8 808, 9-16 909
     }
+    SpareInit();
     BuiltInKitNames();
     BuildLedTable();
     MapLedMeta();
@@ -3465,9 +3634,21 @@ void BoxPoll(uint32_t now)
         if(eng->TakeLiveRecDone(&t, &bars, &mode))
         {
             slot_gen[t]++;
+            /* a take in a spare block that turned out to fit the slot moves there */
+            bool lng = SpareOf(t) >= 0;
+            if(lng && mode != Engine::kRecOverdub && eng->GetSlot(t).length <= eng->SlotCapacity())
+            {
+                const uint32_t len = eng->GetSlot(t).length;
+                memcpy(eng->HomeData(t), eng->GetSlot(t).data, (size_t)len * sizeof(int16_t));
+                eng->SlotHome(t, len);
+                lng = false;
+            }
             if(lundo.track == t)
             {
-                lundo.valid = true;
+                /* no undo for a take in a spare block, nor when what it replaced
+                   was a recording too long to keep */
+                lundo.valid = mode == Engine::kRecOverdub
+                              || (!lng && (lundo.data || !(lundo.loop || IsRecPath(lundo.path))));
                 lundo.redo  = false;
                 lundo.gen   = slot_gen[t];
             }
@@ -3493,11 +3674,13 @@ void BoxPoll(uint32_t now)
                 else
                 {
                     Popup("loop %d: %d bar%s", t + 1, bars, bars == 1 ? "" : "s");
-                    Log("recorded a %d bar loop into track %d", bars, t + 1);
+                    Log("recorded a %d bar loop into track %d%s", bars, t + 1,
+                        lng ? " (long: in a spare block, no undo)" : "");
                 }
             }
         }
     }
+    SpareSweep();
     static uint32_t last_screen = 0;
     if(now - last_screen >= 50)
     {

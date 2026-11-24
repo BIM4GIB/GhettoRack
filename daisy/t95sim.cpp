@@ -153,9 +153,15 @@ class SimPlat : public Platform
     bool     AudioRunning() override { return true; }
     int16_t* UndoMem(uint32_t* n) override
     {
-        static std::vector<int16_t> u(1536 * 1024);
+        static std::vector<int16_t> u(768 * 1024);
         *n = (uint32_t)u.size();
         return u.data();
+    }
+    int16_t* SpareMem(uint32_t* n) override // like the Daisy's: 8 blocks of two slots
+    {
+        static std::vector<int16_t> sp(8 * 1536 * 1024);
+        *n = (uint32_t)sp.size();
+        return sp.data();
     }
     int16_t* Staging(uint32_t* n) override // like the Daisy's (SDRAM there)
     {
@@ -202,13 +208,13 @@ int main(int argc, char** argv)
     g_fd = master;
     fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK);
 
-    static std::vector<int16_t> slots(1536 * 1024 * (size_t)kTracks);
+    static std::vector<int16_t> slots(768 * 1024 * (size_t)kTracks);
     static std::vector<float>   dl(4800), dr(4800), cl(4800), cr(4800);
     static daisysp::ReverbSc    rv;
     Memory                      mem;
     for(int k = 0; k < kTracks; k++)
-        mem.slot_mem[k] = slots.data() + (size_t)k * 1536 * 1024;
-    mem.slot_capacity = 1536 * 1024;
+        mem.slot_mem[k] = slots.data() + (size_t)k * 768 * 1024;
+    mem.slot_capacity = 768 * 1024;
     mem.delay_l = dl.data(), mem.delay_r = dr.data(), mem.delay_len = 4800;
     mem.capture_l = cl.data(), mem.capture_r = cr.data(), mem.capture_len = 4800;
     mem.reverb = &rv;

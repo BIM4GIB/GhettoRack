@@ -118,9 +118,15 @@ class TestPlat : public Platform
     bool Rename(const char* a, const char* b) override { return ::rename(Full(a).c_str(), Full(b).c_str()) == 0; }
     int16_t* UndoMem(uint32_t* n) override
     {
-        static std::vector<int16_t> u(1536 * 1024);
+        static std::vector<int16_t> u(768 * 1024);
         *n = (uint32_t)u.size();
         return u.data();
+    }
+    int16_t* SpareMem(uint32_t* n) override // like the Daisy's: 8 blocks of two slots
+    {
+        static std::vector<int16_t> sp(8 * 1536 * 1024);
+        *n = (uint32_t)sp.size();
+        return sp.data();
     }
     int16_t* Staging(uint32_t* n) override
     {
@@ -275,13 +281,13 @@ int main()
     WriteSine("samples/test/tone b.wav", 12000, 660.f);
     WriteSine("samples/test/long.wav", 600000, 220.f); // 12.5 s
 
-    static std::vector<int16_t> slots(1536 * 1024 * (size_t)kTracks);
+    static std::vector<int16_t> slots(768 * 1024 * (size_t)kTracks);
     static std::vector<float>   dl(96000), dr(96000), cl(192000), cr(192000);
     static daisysp::ReverbSc    rv;
     Memory                      mem;
     for(int t = 0; t < kTracks; t++)
-        mem.slot_mem[t] = slots.data() + (size_t)t * 1536 * 1024;
-    mem.slot_capacity = 1536 * 1024;
+        mem.slot_mem[t] = slots.data() + (size_t)t * 768 * 1024;
+    mem.slot_capacity = 768 * 1024;
     mem.delay_l = dl.data(), mem.delay_r = dr.data(), mem.delay_len = 96000;
     mem.capture_l = cl.data(), mem.capture_r = cr.data(), mem.capture_len = 192000;
 #ifdef USE_DAISYSP_LGPL
@@ -1927,6 +1933,294 @@ int main()
     CHECK(e.PerfFxActive(2));       // keepalives still coming
     T95Tick(2200, false, false);    // the bridge died with the pad held
     CHECK(!e.PerfFxActive(2));
+
+    /* ---- 16 s slots, spare blocks for the loops that don't fit one ---- */
+    {
+        auto U = [](const char* a) {
+            CHECK(BoxUiCommand(a, now_ms));
+            Tick(2);
+        };
+        auto until = [](const std::function<bool()>& f, int max_ms) {
+            int n = 0;
+            while(!f() && n++ < max_ms)
+                Tick();
+            return f();
+        };
+        auto idle = [] { return e.LiveRecState() == 0; };
+        auto rec  = [] { return e.LiveRecState() == 2; };
+        auto kit  = [](int t) {
+            char p[8];
+            snprintf(p, sizeof(p), "@k%d", BuiltInKitFor(t));
+            e.ClearLoop(t);
+            QueueLoad(t, p, false);
+            WaitIdle();
+            Tick(5);
+        };
+        auto fill = [] { // every free block taken by someone else
+            for(int b = 0; b < spare_n; b++)
+                if(spare_owner[b] < 0)
+                {
+                    spare_owner[b] = 99;
+                    spare_held[b]  = true;
+                }
+        };
+        auto unfill = [] {
+            for(int b = 0; b < spare_n; b++)
+                if(spare_owner[b] == 99)
+                {
+                    spare_owner[b] = -1;
+                    spare_held[b]  = false;
+                }
+        };
+        const uint32_t cap = e.SlotCapacity();
+        const int      T   = 2; // track 3
+        const Slot&    s   = e.GetSlot(T);
+        e.Stop();
+        WaitIdle();
+        Tick(50);
+        kit(T);
+        kit(5);
+        Tick(5);
+        CHECK(cap == 768u * 1024u && spare_n == 8 && spare_block == 2 * cap && SpareFree() == 8);
+        U("tempo 1000"); // a bar is 2400 ms: 8 bars are 19.2 s, more than a slot holds
+        U("lrec count 0");
+        U("quant rec 0");
+        test_in_amp = 0.3f;
+
+        /* 4 bars fit the slot: no block */
+        U("lrec len 4");
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(SpareFree() == 8 && s.data == e.HomeData(T));
+        U("lrec cancel");
+        Tick(20);
+        WaitIdle();
+        Tick(5);
+        const uint32_t kit_len = s.length;
+        const int16_t  kit_a = s.data[100], kit_b = s.data[kit_len / 2];
+        CHECK(kit_len > 0 && s.data == e.HomeData(T) && !e.IsLoop(T));
+
+        /* 8 bars don't: the take gets a spare block, and the track's sound stays
+           whole where it is. Dropped, the track is back on it and the block is free */
+        U("lrec len 8");
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(SpareFree() == 7 && SpareOf(T) >= 0 && s.capacity == spare_block);
+        Tick(3000);
+        U("lrec cancel");
+        Tick(5);
+        CHECK(idle() && s.data == e.HomeData(T) && s.capacity == cap && s.length == kit_len);
+        CHECK(s.data[100] == kit_a && s.data[kit_len / 2] == kit_b && !e.IsLoop(T));
+        CHECK(SpareFree() == 8 && !LooperCan(false) && !IsRecPath(slot_path[T]));
+
+        /* kept: a loop of 8 bars, longer than a slot, and no undo for it */
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(until(idle, 8 * 2400 + 200));
+        Tick(40);
+        CHECK(e.IsLoop(T) && e.LoopBars(T) == 8 && labs((long)s.length - 921600) < 8);
+        const int      blk      = SpareOf(T);
+        const uint32_t long_len = s.length;
+        CHECK(blk >= 0 && SpareFree() == 7 && s.length > cap && s.data[cap + 5000] != 0);
+        CHECK(!LooperCan(false) && IsRecPath(slot_path[T]));
+        test_in_amp = 0.f;
+        float pk = 0.f; // it plays past the 16 s mark
+        Tick(17000);
+        for(int i = 0; i < 2000; i++)
+        {
+            Tick();
+            for(int k = 0; k < 48; k++)
+                pk = fmaxf(pk, fabsf(outl[k]));
+        }
+        CHECK(pk > 0.01f);
+        test_in_amp = 0.3f;
+
+        /* a new long take over it: a second block while it runs, the loop untouched;
+           dropped, the loop is back and the second block is free */
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(SpareFree() == 6 && SpareOf(T) >= 0 && SpareOf(T) != blk);
+        Tick(1000);
+        U("lrec cancel");
+        Tick(5);
+        CHECK(idle() && SpareOf(T) == blk && s.length == long_len && e.IsLoop(T) && SpareFree() == 7);
+
+        /* overdub on a long loop: in place, and nothing to go back to */
+        U("lrec len 1");
+        U("lrec over 3");
+        CHECK(until(rec, 2600));
+        CHECK(until(idle, 2600));
+        Tick(40);
+        CHECK(SpareOf(T) == blk && s.length == long_len && e.IsLoop(T));
+        BoxUiCommand("lrec undo", now_ms);
+        Tick(40);
+        CHECK(SpareOf(T) == blk && s.length == long_len && e.IsLoop(T) && !LooperCan(false) && !LooperCan(true));
+
+        /* no block free: a chosen length that doesn't fit is refused before anything is armed */
+        fill();
+        CHECK(SpareFree() == 0);
+        U("lrec len 8");
+        const uint32_t gen6 = slot_gen[5], len6 = e.GetSlot(5).length;
+        U("lrec arm 6");
+        Tick(30);
+        CHECK(!e.LiveRecBusy() && slot_gen[5] == gen6 && e.GetSlot(5).length == len6 && !e.IsLoop(5));
+        /* with no length chosen the take goes into the slot, and can be undone */
+        U("lrec len 0");
+        U("lrec arm 6");
+        CHECK(until(rec, 2600));
+        CHECK(e.GetSlot(5).data == e.HomeData(5) && e.GetSlot(5).capacity == cap);
+        Tick(2400 + 200);
+        U("lrec stop");
+        CHECK(until(idle, 2600));
+        Tick(40);
+        CHECK(e.IsLoop(5) && e.LoopBars(5) == 2 && SpareOf(5) < 0 && LooperCan(false));
+        /* a long take over the track's own long loop goes in place then */
+        U("lrec len 8");
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(SpareOf(T) == blk);
+        U("lrec cancel");
+        Tick(20);
+        WaitIdle();
+        Tick(5);
+        CHECK(s.data == e.HomeData(T) && s.capacity == cap && !e.IsLoop(T));
+        unfill();
+        CHECK(SpareFree() == 8);
+
+        /* no length chosen and a block free: the take gets the block, and moves
+           into the slot afterwards because it fits. Undo works as for any take */
+        U("lrec len 0");
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(SpareFree() == 7 && SpareOf(T) >= 0);
+        Tick(2400 + 200);
+        U("lrec stop");
+        CHECK(until(idle, 2600));
+        Tick(40);
+        CHECK(e.IsLoop(T) && e.LoopBars(T) == 2 && labs((long)s.length - 2 * 115200) < 8);
+        CHECK(s.data == e.HomeData(T) && s.capacity == cap && SpareFree() == 8 && LooperCan(false));
+        U("lrec undo");
+        WaitIdle();
+        Tick(40);
+        CHECK(!IsRecPath(slot_path[T]) && !e.IsLoop(T) && LooperCan(true));
+
+        /* a long loop saved in a set comes back whole, in a block */
+        U("lrec len 8");
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(until(idle, 8 * 2400 + 200));
+        Tick(40);
+        test_in_amp = 0.f;
+        CHECK(SpareOf(T) >= 0 && e.LoopBars(T) == 8);
+        std::vector<int16_t> take(s.data, s.data + s.length);
+        const int            slot = FirstFreeSlot();
+        CHECK(slot >= 0);
+        U("set new long loop");
+        WaitIdle();
+        CHECK(set_exists[slot] && open_set == slot);
+        kit(T);
+        CHECK(SpareFree() == 8 && s.data == e.HomeData(T) && !e.IsLoop(T));
+        std::vector<int16_t> next(e.HomeData(T + 1), e.HomeData(T + 1) + 4096); // the neighbour's memory
+        char cmd[40];
+        snprintf(cmd, sizeof(cmd), "set load %d", slot + 1);
+        U(cmd);
+        WaitIdle();
+        Tick(50);
+        CHECK(e.IsLoop(T) && e.LoopBars(T) == 8 && s.length == take.size());
+        CHECK(SpareOf(T) >= 0 && SpareFree() == 7 && s.capacity == spare_block);
+        CHECK(s.length == take.size() && !memcmp(s.data, take.data(), take.size() * 2));
+        CHECK(!memcmp(e.HomeData(T + 1), next.data(), next.size() * 2));
+        /* the same, loaded straight into the track (as when the staging pool is full) */
+        kit(T);
+        CHECK(SpareFree() == 8);
+        {
+            Job* j = QueueJob(T, setf.file[T], false);
+            CHECK(j != nullptr);
+            if(j)
+            {
+                j->loop_bars = 8;
+                j->loop_bpm  = 100.f;
+            }
+            WaitIdle();
+            Tick(50);
+            CHECK(SpareOf(T) >= 0 && SpareFree() == 7 && s.length == take.size() && e.IsLoop(T));
+            CHECK(!memcmp(s.data, take.data(), take.size() * 2));
+        }
+        /* no block free when it loads: cut to the slot, nothing written past it */
+        kit(T);
+        fill();
+        U(cmd);
+        WaitIdle();
+        Tick(50);
+        CHECK(s.data == e.HomeData(T) && s.length == cap && s.capacity == cap && e.IsLoop(T));
+        CHECK(!memcmp(s.data, take.data(), (size_t)cap * 2));
+        CHECK(!memcmp(e.HomeData(T + 1), next.data(), next.size() * 2));
+        kit(T);
+        {
+            Job* j = QueueJob(T, setf.file[T], false);
+            if(j)
+                j->loop_bars = 8, j->loop_bpm = 100.f;
+            WaitIdle();
+            Tick(50);
+            CHECK(s.data == e.HomeData(T) && s.length == cap);
+            CHECK(!memcmp(e.HomeData(T + 1), next.data(), next.size() * 2));
+        }
+        unfill();
+        kit(T);
+        CHECK(SpareFree() == 8);
+
+        /* a plain sample longer than a slot is cut, loaded straight in or with a set */
+        WriteSine("samples/test/verylong.wav", 900000, 330.f); // 18.75 s
+        const int V = 8;
+        kit(V);
+        kit(V + 1);
+        std::vector<int16_t> nextv(e.HomeData(V + 1), e.HomeData(V + 1) + 4096);
+        QueueLoad(V, "samples/test/verylong.wav", false);
+        WaitIdle();
+        Tick(5);
+        CHECK(e.GetSlot(V).length == cap && e.GetSlot(V).data == e.HomeData(V) && SpareFree() == 8);
+        CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
+        const int slot2 = FirstFreeSlot();
+        U("set new long sample");
+        WaitIdle();
+        CHECK(slot2 >= 0 && set_exists[slot2]);
+        kit(V);
+        snprintf(cmd, sizeof(cmd), "set load %d", slot2 + 1);
+        U(cmd);
+        WaitIdle();
+        Tick(50);
+        CHECK(e.GetSlot(V).length == cap && e.GetSlot(V).data == e.HomeData(V) && SpareFree() == 8);
+        CHECK(!memcmp(e.HomeData(V + 1), nextv.data(), nextv.size() * 2));
+
+        /* a one-shot over a long loop goes into the slot; the loop's block is free once it's kept */
+        U("lrec len 8");
+        test_in_amp = 0.3f;
+        U("lrec arm 3");
+        CHECK(until(rec, 2600));
+        CHECK(until(idle, 8 * 2400 + 200));
+        Tick(40);
+        CHECK(SpareOf(T) >= 0 && SpareFree() == 7);
+        e.Stop();
+        Tick(50);
+        test_in_amp = 0.f;
+        U("lrec shot 3");
+        Tick(100);
+        test_in_amp = 0.5f;
+        Tick(300);
+        CHECK(rec() && s.data == e.HomeData(T) && SpareFree() == 7);
+        U("lrec stop");
+        Tick(5);
+        test_in_amp = 0.f;
+        CHECK(idle() && !e.IsLoop(T) && s.data == e.HomeData(T) && s.length > 10000 && s.length < 20000);
+        CHECK(SpareFree() == 8 && !LooperCan(false));
+
+        kit(T);
+        kit(5);
+        kit(V);
+        U("lrec len 0");
+        U("tempo 1200");
+        printf("long loops: spare blocks, refusal, cancel, sets, cut loads ok\n");
+    }
 
     CHECK(e.nan_count == 0);
     printf("%s (%d failures), peak %.2f\n", fails ? "FAILED" : "all ok", fails, peak_last);

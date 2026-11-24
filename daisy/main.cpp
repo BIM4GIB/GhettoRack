@@ -64,7 +64,8 @@ volatile uint32_t Link::rx_w_ = 0, Link::rx_r_ = 0, Link::rx_dropped_ = 0;
 #define Log BoxLog
 
 constexpr float    kSampleRate = 48000.f;
-constexpr uint32_t kSlotCap    = 1536u * 1024u; // 32 s per track at 48k, 16 tracks
+constexpr uint32_t kSlotCap    = 768u * 1024u;  // 16 s per track at 48k, 16 tracks
+constexpr int      kSpareBlocks = 8;             // for loops longer than that: 32 s each
 constexpr uint32_t kDelayLen   = 96000;              // 2 s
 constexpr uint32_t kCaptureLen = 192000;             // 4 s
 
@@ -89,6 +90,9 @@ constexpr uint32_t   kStageCap = 4600 * 1024;
 DSY_SDRAM_BSS int16_t stage_mem[kStageCap];
 /* The looper's undo: what a track held before the last take (one slot) */
 DSY_SDRAM_BSS int16_t undo_mem[kSlotCap];
+/* Spare blocks of two slots each: a take the looper can't fit into a slot at
+   the tempo (8 bars below about 117 BPM), and such loops loaded from a set */
+DSY_SDRAM_BSS int16_t spare_mem[kSpareBlocks][2 * kSlotCap];
 DIR                 dir;
 FILINFO             fno;
 
@@ -642,6 +646,11 @@ class DaisyPlatform : public Platform
         *samples = kSlotCap;
         return undo_mem;
     }
+    int16_t* SpareMem(uint32_t* samples) override
+    {
+        *samples = (uint32_t)kSpareBlocks * 2u * kSlotCap;
+        return spare_mem[0];
+    }
 
     float    CpuAvg() override { return cpu.GetAvgCpuLoad(); }
     float    CpuMax() override { return cpu.GetMaxCpuLoad(); }
@@ -868,7 +877,7 @@ int main(void)
     ui_link.Init();
     ui_link.OnCmd(OnHostCmd);
     t95.Init(SendLine);
-    ui_link.Printf("L ApcBox 13.15 start"); // not Log: the box code isn't set up yet
+    ui_link.Printf("L ApcBox 13.16 start"); // not Log: the box code isn't set up yet
     diag::Stage(3);
 
     /* Engine memory */

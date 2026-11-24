@@ -249,11 +249,16 @@ class Engine
     /** Record into a track from the next bar line (starts the transport
      *  if it's stopped). LiveRecStop ends it at the end of the bar it's
      *  in; the track then loops it in sync. */
-    void LiveRecArm(int track)
+    void LiveRecArm(int track, int16_t* buf = nullptr, uint32_t cap = 0)
     {
+        lr_req_buf_   = buf;
+        lr_req_cap_   = cap;
         lr_req_track_ = track;
         lr_req_       = 1;
     }
+    /* `buf`, `cap` (LiveRecArm, LiveRecShot): where the take goes. nullptr = where
+       the track's sound is now. Another buffer: the track's sound stays whole
+       where it is, and a take that is cancelled puts the track back on it. */
     /** Record on top of the track's loop, in place and in time with it
      *  (only at the tempo the loop was recorded at). Ends on LiveRecStop
      *  (at once) or after lr_len_bars. */
@@ -265,11 +270,15 @@ class Engine
     /** Record a one-shot sample into a track: starts when the input gets
      *  loud enough, ends on LiveRecStop or when the slot is full. Nothing
      *  to do with the transport; the track then plays it from its steps. */
-    void LiveRecShot(int track)
+    void LiveRecShot(int track, int16_t* buf = nullptr, uint32_t cap = 0)
     {
+        lr_req_buf_   = buf;
+        lr_req_cap_   = cap;
         lr_req_track_ = track;
         lr_req_       = 5;
     }
+    /** A take is asked for, armed or running */
+    bool LiveRecBusy() const { return lr_req_ != 0 || lr_state_ != 0; }
     void LiveRecStop() { lr_req_ = 2; }
     void LiveRecCancel() { lr_req_ = 3; }
     int  LiveRecState() const { return lr_state_; } // 0 idle, 1 armed, 2 recording
@@ -345,12 +354,22 @@ class Engine
     /** After copying a staged slot back into its own memory */
     void SlotHome(int t, uint32_t length)
     {
-        Slot& s    = slots_[t];
-        s.capacity = slot_capacity_;
-        __sync_synchronize();
-        s.data = home_[t]; // same samples, so a playing voice doesn't notice
         (void)length;
+        SlotPoint(t, home_[t], slot_capacity_);
     }
+    /** The track's sound is at `data` from now on (room for `cap` samples).
+     *  Either the same samples are there already, so a playing voice doesn't
+     *  notice, or the slot is empty or locked. */
+    void SlotPoint(int t, int16_t* data, uint32_t cap)
+    {
+        Slot& s    = slots_[t];
+        s.capacity = cap;
+        __sync_synchronize();
+        s.data = data;
+    }
+    /** Samples a track's own slot holds, and a bar at the tempo now */
+    uint32_t SlotCapacity() const { return slot_capacity_; }
+    uint32_t BarSamples() const { return (uint32_t)(kSteps * BaseStepLength()); }
     int16_t* HomeData(int t) const { return home_[t]; }
     /** Pitch bend from a keyboard, in semitones, per track */
     volatile float bend_st[kTracks] = {};
@@ -452,6 +471,8 @@ class Engine
     void  AcidStep(int t, int s);
     void  LiveRecStep(int s);
     void  LiveRecFinish();
+    void  LiveRecBuffer(int t);
+    bool  LiveRecRestore();
     void  ShotFinish();
     void  AcidLiveEvents();
     void  AcidRecord(int t, int note);
@@ -496,6 +517,12 @@ class Engine
     const float*      in_l_ = nullptr, *in_r_ = nullptr;
     volatile uint8_t  lr_req_       = 0; // 1 arm, 2 stop at bar end, 3 cancel
     volatile int      lr_req_track_ = 0;
+    int16_t* volatile lr_req_buf_   = nullptr; // where the take goes (nullptr: in place)
+    volatile uint32_t lr_req_cap_   = 0;
+    bool              lr_swapped_   = false;   // the take has its own buffer; what the track held:
+    int16_t*          lr_prev_data_ = nullptr;
+    uint32_t          lr_prev_cap_  = 0, lr_prev_len_ = 0;
+    bool              lr_prev_loop_ = false, lr_prev_synth_ = false;
     volatile uint8_t  lr_state_     = 0;
     volatile int      lr_track_     = -1;
     volatile int      lr_bars_done_ = 0;

@@ -480,7 +480,7 @@ void SetsJobDone(const Job& j, bool ok, uint32_t len, float rate, bool defer)
     set_swap.data[t]   = j.dst;
     set_swap.length[t] = len;
     set_swap.rate[t]   = rate;
-    if(len) // give back the unused part of its reservation
+    if(len && SpareIndex(j.dst) < 0) // give back the unused part of its reservation
         stage_used = (uint32_t)(j.dst - stage_mem_p) + ((len + 15) & ~15u);
     op_done++;
 }
@@ -561,8 +561,9 @@ void LoadSetBegin(int slot)
                 deferred[t] = true;
                 continue;
             }
-            j->stage = true;
-            j->dst   = stage_mem_p; // fixed up when it starts
+            j->stage     = true;
+            j->dst       = stage_mem_p; // fixed up when it starts
+            j->loop_bars = setf.loop_bars[t]; // a loop longer than a slot may take a spare block
             stage_jobs++;
         }
     load_slot  = slot;
@@ -642,9 +643,18 @@ void LoadStep()
             return;
         case 3:
         {
-            /* staged sounds back into their own slots, a piece at a time */
-            while(copy_t < kTracks && !set_swap.data[copy_t])
+            /* staged sounds back into their own slots, a piece at a time
+               (a long loop that loaded into a spare block stays there) */
+            while(copy_t < kTracks && (!set_swap.data[copy_t] || SpareIndex(set_swap.data[copy_t]) >= 0))
+            {
+                const int b = set_swap.data[copy_t] ? SpareIndex(set_swap.data[copy_t]) : -1;
+                if(b >= 0)
+                {
+                    eng->SlotPoint(copy_t, SpareBase(b), spare_block);
+                    spare_held[b] = false; // from here the slot keeps it
+                }
                 copy_t++;
+            }
             if(copy_t < kTracks)
             {
                 int      t   = copy_t;
