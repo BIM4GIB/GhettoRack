@@ -4,11 +4,14 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## v13.20: spare memory as one region with claims by size (built 2026-11-24, NOT flashed, nothing tried on the rig)
+## v13.20: spare memory as one region with claims by size (on the rig, flashed 2026-11-24, no take tried there)
 
 `daisy/release/ApcBox.bin` is v13.20. Control protocol 10 as before, report 18
 (`SM`). SDRAM 95.9% as before. Desktop tests and the page in a browser against
-the firmware simulator only.
+the firmware simulator. On the rig after the flash: `/health` says firmware
+13.20, control 10, 0 bad lines, both controllers back; the event stream has
+`SM 12582912 12582912 12582912 0 786432 0` (all 262 s free) and the looper
+settings as before. No take recorded there, the page not looked at on a screen.
 
 - The 8 fixed blocks of 32 s are a table of up to 24 claims over the same 262 s,
   each in one piece. A take of chosen bars claims what it needs plus a
