@@ -43,8 +43,14 @@ h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)
 .bars{display:flex;gap:2px;align-items:flex-end;height:16px}
 .bars i{width:5px;background:#3a4047;border-radius:1px}.bars i.on{background:var(--green)}
 .acts{display:flex;gap:6px}
-.banner{border:1px solid #8a6a20;color:var(--amber);border-radius:10px;padding:8px 12px;display:none}
-.banner.on{display:block}.banner.bad{border-color:var(--red);color:var(--red)}.banner.good{border-color:#2f6a3f;color:var(--green)}
+.banner{display:flex;align-items:center;gap:10px;background:#1d2126;border-radius:8px;padding:0 12px;height:34px;flex:none;min-width:0;visibility:hidden;cursor:pointer}
+.banner.on{visibility:visible}
+.banner .dot{width:8px;height:8px;border-radius:50%;background:var(--amber);flex:none}
+.banner.bad .dot{background:var(--red)}.banner.good .dot{background:var(--green)}
+.banner .bt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.banner.open{height:auto;min-height:34px;padding:7px 12px}.banner.open .bt{white-space:normal}
+.banner .ba{flex:none;display:inline-flex;align-items:center;height:26px;padding:0 10px;font-size:13px;background:none;border:1px solid #3a4047;border-radius:7px;color:var(--txt);text-decoration:none}
+.pin input.flash{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber)}
 .kv{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-family:var(--mono);font-size:14px}
 .kv span:nth-child(odd){color:var(--dim)}
 p{margin:0;color:#b9bec5}
@@ -71,7 +77,7 @@ header a{white-space:nowrap}
 @media (max-height:480px){
   header{padding:5px 10px}main{padding:6px 10px;gap:8px;grid-template-columns:120px 1fr}
   nav button{height:34px;font-size:13px}section{padding:8px 10px;gap:6px}button{height:30px}input{height:30px}
-  p{font-size:12px}.big{font-size:15px}
+  p{font-size:12px}.big{font-size:15px}.banner{height:28px}.banner.open{min-height:28px;padding:4px 12px}.banner .ba{height:22px}
 }
 </style>
 </head>
@@ -144,14 +150,27 @@ let bst = null, prof = "all";      // the bridge's own state (/state): remote bu
 let tab = Q.get("s") || "net", st = null, nets = null, npage = 0, joining = null, trial = null, sure = "", pinOk = false;
 const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
 
-/* a result (good / bad) goes away by itself after a while, or at a tap; a plain one stays until replaced */
+/* One line in a slot that is always there, so nothing below it moves. A result goes away by itself (good 3 s,
+   bad and note 6 s) or at a tap; a plain one stays until replaced. Too long for the line: the first tap opens it.
+   act: {label, href} or {label, go}, a button at the right end. */
 const btimer = {};
 function esc(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-function banner(id, text, cls) {
-  const b = $(id); b.textContent = text || ""; b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : "");
-  clearTimeout(btimer[id]); b.onclick = () => banner(id, "");
-  if (text && cls) btimer[id] = setTimeout(() => banner(id, ""), cls === "good" ? 8000 : 20000);
+function banner(id, text, cls, act) {
+  const b = $(id), ms = { good: 3000, bad: 6000, note: 6000 }[cls], key = text ? (cls || "") + "|" + text : "";
+  if (key && !ms && b.dataset.k === key) return;      // a standing line repeated by the poll: leave it (and its open state) alone
+  clearTimeout(btimer[id]); b.textContent = ""; b.dataset.k = key; b.onclick = null;
+  b.className = "banner" + (text ? " on" : "") + (cls ? " " + cls : "");
+  if (!text) return;
+  const t = el("span", "bt", text); b.append(el("i", "dot"), t);
+  if (act) { const a = el(act.href ? "a" : "button", "ba", act.label); if (act.href) a.href = act.href;
+    a.onclick = e => { e.stopPropagation(); if (act.go) { banner(id, ""); act.go(); } }; b.appendChild(a); }
+  const arm = () => { clearTimeout(btimer[id]); if (ms) btimer[id] = setTimeout(() => banner(id, ""), ms); };
+  b.onclick = () => { if (!b.classList.contains("open") && t.scrollWidth > t.clientWidth) { b.classList.add("open"); arm(); } else banner(id, ""); };
+  arm();
 }
+function go(k) { tab = k; sure = ""; nav(); draw(); poll(); }
+function flashPin() { const p = $("pin"); p.focus(); p.classList.add("flash"); setTimeout(() => p.classList.remove("flash"), 900); }
+const httpsAct = () => ({ label: "Open https", href: "https://" + location.hostname + ":8443/settings?s=" + tab + (tv ? "&tv=1" : "") });
 let down = false;       // the "box / helper isn't answering" banners are up
 /* every request gives up after a while: a box that is changing networks must not leave the page stuck */
 function tmo(ms) { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; }
@@ -163,15 +182,15 @@ async function sys(cmd, extra, risky) {
   catch (e) { return { error: "the box isn't answering", gone: true }; }
 }
 function needPin(id) {
-  if (!secure) { banner(id, "Open this page as https://" + location.hostname + ":8443/settings to change things: PINs and passwords don't go over plain http.", "bad"); return false; }
-  if (st && !st.pin_set) { banner(id, "Set a PIN first (System). It is asked for everything that changes the box.", "bad"); return false; }
-  if (!$("pin").value) { banner(id, "Type the PIN at the top right first.", "bad"); $("pin").focus(); return false; }
+  if (!secure) { banner(id, "Needs the secure page", "bad", httpsAct()); return false; }
+  if (st && !st.pin_set) { banner(id, "Set a PIN first", "bad", tab === "sys" ? null : { label: "System", go: () => go("sys") }); return false; }
+  if (!$("pin").value) { flashPin(); return false; }
   return true;
 }
 
 function nav() {
   const n = $("nav"); n.textContent = "";
-  for (const [k, name] of TABS) { const b = el("button", k === tab ? "on" : "", innerWidth < 700 ? SHORT[k] : name); b.onclick = () => { tab = k; sure = ""; nav(); draw(); poll(); }; n.appendChild(b); }
+  for (const [k, name] of TABS) { const b = el("button", k === tab ? "on" : "", innerWidth < 700 ? SHORT[k] : name); b.onclick = () => go(k); n.appendChild(b); }
   for (const [k] of TABS) $("s-" + k).classList.toggle("on", k === tab);
 }
 
@@ -190,7 +209,7 @@ function drawNets() {
     if (!n.current) { const j = el("button", "act", n.saved ? "RETRY" : "JOIN"); j.disabled = !!trial; j.onclick = () => { joining = n; $("n-psk").value = ""; drawJoin(); if (n.secure) $("n-psk").focus(); }; acts.appendChild(j); }
     if (n.saved && !n.current && !trial) { const f = el("button", sure === "f:" + n.ssid ? "warn" : "", sure === "f:" + n.ssid ? "SURE?" : "FORGET");
       f.onclick = async () => { if (sure !== "f:" + n.ssid) { sure = "f:" + n.ssid; return drawNets(); } sure = ""; if (!needPin("n-banner")) return drawNets();
-        const o = await sys("forget", { ssid: n.ssid }, true); banner("n-banner", o.error || "Forgot " + n.ssid + ".", o.error ? "bad" : "good"); if (!o.error) scan(); else drawNets(); };
+        const o = await sys("forget", { ssid: n.ssid }, true); banner("n-banner", o.error || "Forgot " + n.ssid, o.error ? "bad" : "good"); if (!o.error) scan(); else drawNets(); };
       acts.appendChild(f); }
     r.append(nm, bars, acts); L.appendChild(r);
   }
@@ -210,7 +229,7 @@ async function scan() {
 async function join() {
   const n = joining; if (!n || !needPin("n-banner")) return;
   const psk = n.secure ? $("n-psk").value : "";
-  if (n.secure && (psk.length < 8 || psk.length > 63)) return banner("n-banner", "A Wi-Fi password is 8 to 63 characters.", "bad");
+  if (n.secure && (psk.length < 8 || psk.length > 63)) return banner("n-banner", "Password: 8 to 63 characters", "bad");
   $("n-go").disabled = true;
   const o = await sys("join", { ssid: n.ssid, psk }, true);
   $("n-go").disabled = false;
@@ -226,22 +245,22 @@ async function trialTick() {
   if (st && st.trial && !trial) trial = { ssid: st.trial.ssid, lost: 0, seen: true };       // the page was reloaded meanwhile
   if (!trial) return;
   if (!st || st.error || st.helper === false) {
-    if (++trial.lost >= 2) banner("n-banner", "The box has left this network to try " + trial.ssid + ", so this page can't see it for a moment. "
-      + (trial.lost < 16 ? "If the password was wrong it is back in a few seconds." : "If it got onto " + trial.ssid + ", put this device on " + trial.ssid + " too; otherwise it comes back by itself."));
+    if (++trial.lost >= 2) banner("n-banner", trial.lost < 16 ? "Trying " + trial.ssid + ": the box is away for a moment"
+      : "Still away. If it joined " + trial.ssid + ", put this device on it too");
     return;
   }
   trial.lost = 0;
   const t = st.trial;
   if (t && t.phase === "connected") {
     const o = await sys("confirm");
-    if (o.kept) { banner("n-banner", trial.ssid + " works and is saved.", "good"); trial = null; drawNets(); scan(); }
+    if (o.kept) { banner("n-banner", "Joined " + trial.ssid + ", saved", "good"); trial = null; drawNets(); scan(); }
     else if (o.error) { banner("n-banner", o.error, "bad"); trial = null; drawNets(); scan(); }
   } else if (t) {
-    banner("n-banner", "Connecting to " + t.ssid + "... (" + t.left_s + " s)");
+    banner("n-banner", "Connecting to " + t.ssid + "... " + t.left_s + " s");
   } else {
     const l = st.last && st.last.ssid === trial.ssid ? st.last : null;
-    if (l && l.ok) banner("n-banner", trial.ssid + " works and is saved.", "good");
-    else banner("n-banner", trial.ssid + ": " + (l ? l.why : "not joined") + ". The box went back to " + (st.wifi.ssid || "the network it had") + ".", "bad");
+    if (l && l.ok) banner("n-banner", "Joined " + trial.ssid + ", saved", "good");
+    else banner("n-banner", trial.ssid + ": " + (l ? l.why : "not joined") + ". Back on " + (st.wifi.ssid || "the old network"), "bad");
     trial = null; drawNets(); scan();
   }
 }
@@ -252,7 +271,7 @@ function draw() {
   $("c-helper").textContent = st ? (h ? "helper: running" : "helper: not running") : "box: not answering"; $("c-helper").className = "chip " + (h ? "ok" : "warn");
   $("c-pin").textContent = !h ? "?" : !st.pin_set ? "no PIN set" : pinOk ? "unlocked" : "locked"; $("c-pin").className = "chip " + (pinOk ? "ok" : "warn");
   if (!st) return;
-  if (!h && !trial) { if (!down) for (const b of ["n-banner", "h-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running on the T95."); down = true; }
+  if (!h && !trial) { if (!down) for (const b of ["n-banner", "h-banner", "b-banner", "y-banner"]) banner(b, st.error || "The settings helper isn't running"); down = true; }
   else if (h && down) { down = false; for (const b of ["n-banner", "h-banner", "b-banner", "y-banner"]) if (!trial || b !== "n-banner") banner(b, ""); }
   const w = st.wifi || {};
   $("n-now").textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?";
@@ -292,7 +311,7 @@ function drawBridge() {
   const tabs = $("r-tabs"); tabs.textContent = "";
   for (const p of ir.profile_names || []) { const b = el("button", p === prof ? "sel" : "", p); b.onclick = () => { prof = p; drawBridge(); }; tabs.appendChild(b); }
   const L = ir.learning, binds = (ir.profiles || {})[prof] || {}, list = $("r-list"), top = list.scrollTop;
-  banner("r-banner", L ? "Press the remote button for " + L.action.replace("_", " ") + " (" + L.press + ") in profile \"" + L.profile + "\"... (tap its button here again to cancel)" : "");
+  banner("r-banner", L ? "Press the remote button: " + L.action.replace("_", " ") + ", " + L.press + " (" + L.profile + ")" : "");
   list.textContent = "";
   for (const a of ir.actions || []) {
     const r = el("div", "irr"); r.appendChild(el("span", "a", a.replace("_", " ")));
@@ -326,14 +345,14 @@ async function checkPin() {
 async function power(k, cmd, text) {
   if (sure !== k) { sure = k; return draw(); }
   sure = ""; if (!needPin("y-banner")) return draw();
-  const o = await sys(cmd, {}, true); banner("y-banner", o.error || text, o.error ? "bad" : "good"); draw();
+  const o = await sys(cmd, {}, true); banner("y-banner", o.error || text, o.error ? "bad" : cmd === "poweroff" ? "" : "note"); draw();
 }
 
 $("n-scan").onclick = scan; $("n-go").onclick = join; $("n-cancel").onclick = () => { joining = null; drawJoin(); };
 $("n-show").onclick = () => { const p = $("n-psk"); p.type = p.type === "password" ? "text" : "password"; $("n-show").textContent = p.type === "password" ? "show" : "hide"; };
 $("n-prev").onclick = () => { npage--; drawNets(); }; $("n-next").onclick = () => { npage++; drawNets(); };
 $("n-host-save").onclick = async () => { if (!needPin("n-banner")) return; const o = await sys("hostname", { name: $("n-host").value.trim() }, true);
-  banner("n-banner", o.error || "The box is now called " + $("n-host").value.trim() + ". Other devices pick the new name up within a minute.", o.error ? "bad" : "good"); poll(); };
+  banner("n-banner", o.error || "Box name: " + $("n-host").value.trim(), o.error ? "bad" : "good"); poll(); };
 $("d-hdmi").onclick = async () => { await bpost("/settings", { hdmi_audio: !(bst && bst.hdmi_audio && bst.hdmi_audio.on) }); await pollBridge(); setTimeout(pollBridge, 2500); };
 /* The TV remote (and arrow keys) walk the buttons; ok presses one; back / home leave to the modules.
    Typing (PIN, passwords) needs a keyboard or a phone. */
@@ -354,28 +373,28 @@ try { const es = new EventSource("/events?view=settings");
   es.addEventListener("irlearned", () => pollBridge()); } catch (e) {}
 $("h-show").onclick = () => { const p = $("h-psk"); p.type = p.type === "password" ? "text" : "password"; $("h-show").textContent = p.type === "password" ? "show" : "hide"; };
 $("h-save").onclick = async () => { if (!needPin("h-banner")) return; const psk = $("h-psk").value;
-  if (psk.length < 8 || psk.length > 63) return banner("h-banner", "A hotspot password is 8 to 63 characters.", "bad");
-  const o = await sys("hotspot_set", { psk }, true); banner("h-banner", o.error || "Hotspot password saved." + (st.hotspot && st.hotspot.on ? " It applies the next time the hotspot starts." : ""), o.error ? "bad" : "good");
+  if (psk.length < 8 || psk.length > 63) return banner("h-banner", "Password: 8 to 63 characters", "bad");
+  const o = await sys("hotspot_set", { psk }, true); banner("h-banner", o.error || "Hotspot password saved" + (st.hotspot && st.hotspot.on ? ", used from the next start" : ""), o.error ? "bad" : "good");
   if (!o.error) $("h-psk").value = ""; poll(); };
 $("h-auto").onclick = async () => { if (!needPin("h-banner")) return; const o = await sys("hotspot_set", { auto: !(st.hotspot && st.hotspot.auto) }, true);
   if (o.error) banner("h-banner", o.error, "bad"); poll(); };
 $("h-toggle").onclick = async () => { if (!needPin("h-banner")) return; const hs = st.hotspot || {}, on = !hs.on;
   if (on && sure !== "hot") { sure = "hot"; return draw(); }
   sure = ""; const o = await sys("hotspot", { on }, true);
-  banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting. Join " + hs.ssid + " on this device, then open https://" + hs.addr + ":8443" : "Hotspot off: the box is going back to the Wi-Fi.", o.error && !o.gone ? "bad" : ""); poll(); };
+  banner("h-banner", o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid + " on this device" : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : on ? "" : "note"); poll(); };
 $("b-toggle").onclick = async () => { if (!needPin("b-banner")) return; const on = !(st.bt && st.bt.on); $("b-toggle").disabled = true;
-  banner("b-banner", on ? "Starting Bluetooth: up to 20 seconds the first time after a restart." : "");
-  const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth is starting: the radio takes about ten seconds." : "Bluetooth is off, and stays off after a restart."), o.error ? "bad" : "good"); poll(); };
+  banner("b-banner", on ? "Starting Bluetooth, up to 20 s" : "");
+  const o = await sys("bt", { on }, true); banner("b-banner", o.error || (on ? "Bluetooth starting, about 10 s" : "Bluetooth off"), o.error ? "bad" : "good"); poll(); };
 $("y-auto-save").onclick = async () => { const a = +$("y-auto").value;
-  try { const r = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autostart_s: a }) })).json(); banner("y-banner", r.error || "Saved.", r.error ? "bad" : "good"); }
+  try { const r = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autostart_s: a }) })).json(); banner("y-banner", r.error || "Saved", r.error ? "bad" : "good"); }
   catch (e) { banner("y-banner", "the box isn't answering", "bad"); } };
-$("y-bridge").onclick = () => power("bridge", "restart_bridge", "The bridge restarts: the page is back in a few seconds.");
-$("y-reboot").onclick = () => power("reboot", "reboot", "Rebooting. The box is back in about a minute.");
-$("y-off").onclick = () => power("off", "poweroff", "Shutting down. Wait for the box's light before pulling the plug.");
+$("y-bridge").onclick = () => power("bridge", "restart_bridge", "Bridge restarting, back in seconds");
+$("y-reboot").onclick = () => power("reboot", "reboot", "Rebooting, back in about a minute");
+$("y-off").onclick = () => power("off", "poweroff", "Shutting down. Wait for the box's light before unplugging");
 $("y-pin").onclick = async () => {
-  if (!secure) return banner("y-banner", "Open this page as https://" + location.hostname + ":8443/settings to set the PIN.", "bad");
+  if (!secure) return banner("y-banner", "Needs the secure page", "bad", httpsAct());
   const o = await sys("pin_set", { old: $("y-old").value, new: $("y-new").value });
-  banner("y-banner", o.error || "PIN set. Type it at the top right to change things.", o.error ? "bad" : "good");
+  banner("y-banner", o.error || "PIN set", o.error ? "bad" : "good");
   if (!o.error) { $("pin").value = $("y-new").value; $("y-old").value = $("y-new").value = ""; await poll(); checkPin(); }
 };
 let pinT = null; $("pin").addEventListener("input", () => { clearTimeout(pinT); pinT = setTimeout(checkPin, 500); });

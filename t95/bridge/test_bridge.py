@@ -2466,7 +2466,7 @@ class IrTest(unittest.TestCase):
             pg.goto("http://127.0.0.1:%d/settings?s=ir" % self.http)
             pg.click("#r-tabs button:text-is('apcbox')")
             pg.click("#r-list button[title='left tap']")
-            pg.wait_for_function("document.getElementById('r-banner').textContent.includes('left (tap)')")
+            pg.wait_for_function("document.getElementById('r-banner').textContent.includes('left, tap')")
             self.press(0x2FE0D)
             pg.wait_for_function("document.querySelector(\"#r-list button[title='left tap']\").textContent === '2fe0d'", timeout=5000)
             self.assertIn("last button", pg.inner_text("#r-last"))
@@ -2979,12 +2979,12 @@ class SettingsTest(unittest.TestCase):
                 pg.click("#n-scan")
                 pg.wait_for_selector(".net.cur")
                 self.assertGreaterEqual(pg.locator(".net").count(), 2 if h_ > 400 else 1)
-                # joining needs the PIN: without it, a hint and nothing sent
+                # joining needs the PIN: without it, the PIN field takes the cursor and nothing is sent
                 while not pg.locator(".net", has_text="Cafe Open").count():
                     pg.click("#n-next")
                 pg.locator(".net", has_text="Cafe Open").locator("button:has-text('JOIN')").click()
                 pg.click("#n-go")
-                pg.wait_for_function("document.getElementById('n-banner').textContent.includes('PIN')")
+                pg.wait_for_function("document.activeElement.id === 'pin'")
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 pg.fill("#pin", "2468")
                 pg.wait_for_function("document.getElementById('c-pin').textContent === 'unlocked'")
@@ -2995,7 +2995,7 @@ class SettingsTest(unittest.TestCase):
                 pg.click("#n-go")
                 pg.wait_for_function("document.getElementById('n-banner').textContent.includes('wrong password')", timeout=8000)
                 self.assertLess(time.time() - t0, 5)
-                self.assertIn("went back to Home Net", pg.inner_text("#n-banner"))
+                self.assertIn("Back on Home Net", pg.inner_text("#n-banner"))
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 self.assertEqual(self.wpa.names(), ["Home Net"])
                 pg.wait_for_selector(".net.cur")
@@ -3007,7 +3007,7 @@ class SettingsTest(unittest.TestCase):
                 self.wpa.mode = "ok"
                 row.locator("button:has-text('JOIN')").click()
                 pg.click("#n-go")
-                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Cafe Open works and is saved.'", timeout=8000)
+                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Joined Cafe Open, saved'", timeout=8000)
                 self.assertTrue(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 self.assertEqual(self.state()["trial"], None)
                 while not pg.locator(".net", has_text="Cafe Open").locator("button:has-text('FORGET')").count():
@@ -3017,7 +3017,7 @@ class SettingsTest(unittest.TestCase):
                 f = pg.locator(".net", has_text="Cafe Open").locator("button", has_text=re.compile("FORGET|SURE"))
                 f.click()
                 f.click()
-                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Forgot Cafe Open.'")
+                pg.wait_for_function("document.getElementById('n-banner').textContent === 'Forgot Cafe Open'")
                 self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
                 self.assertEqual(self.wpa.names(), ["Home Net"])
                 # Hotspot: no password, no hotspot; with one it asks twice, comes up named like the box, and goes off again
@@ -3031,7 +3031,7 @@ class SettingsTest(unittest.TestCase):
                     pg.wait_for_function("document.getElementById('h-banner').textContent.includes('8 to 63')")
                     pg.fill("#h-psk", "rack rack 99")
                     pg.click("#h-save")
-                    pg.wait_for_function("document.getElementById('h-banner').textContent === 'Hotspot password saved.'")
+                    pg.wait_for_function("document.getElementById('h-banner').textContent === 'Hotspot password saved'")
                 pg.wait_for_function("document.getElementById('h-text').textContent.includes('https://10.42.0.1:8443')")
                 self.assertIn(name, pg.inner_text("#h-text"))
                 pg.wait_for_function("!document.getElementById('h-toggle').disabled")
@@ -3055,7 +3055,7 @@ class SettingsTest(unittest.TestCase):
                 self.assertEqual(pg.locator("#r-list .irr").count(), 24)
                 pg.click("#r-tabs button:has-text('apcbox')")
                 pg.locator("#r-list button[title='ok hold']").click()
-                pg.wait_for_function("document.getElementById('r-banner').textContent.includes('ok (hold) in profile \"apcbox\"')")
+                pg.wait_for_function("document.getElementById('r-banner').textContent.includes('ok, hold (apcbox)')")
                 self.assertEqual(json.loads(BridgeTest.get("/state")[2])["ir"]["learning"], {"profile": "apcbox", "action": "ok", "press": "hold"})
                 if (w_, h_) in ((1920, 1080), (390, 664)):
                     pg.screenshot(path=os.path.join(self.dir, "settings-remote-%d.png" % w_))
