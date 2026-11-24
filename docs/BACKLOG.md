@@ -4,9 +4,15 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
-## v13.16: 16 s slots and spare blocks (flashed 2026-11-24, long takes NOT tried on the rig yet)
+## v13.17 on the rig (flashed 2026-11-24): v13.16 plus the firmware's version in the report
 
-`daisy/release/ApcBox.bin`. Control protocol 10 and report 16 as before. SDRAM
+Report version 17: a `VF` line with the firmware's version. `/health` on the
+box says `"firmware": "13.17"`, Settings > Devices shows it. Read back on the
+rig after the flash, pages at report 17, no mismatch warning.
+
+## v13.16: 16 s slots and spare blocks (in v13.17 on the rig, long takes NOT tried there yet)
+
+Control protocol 10 as before. SDRAM
 95.9% in the build (`make -C daisy`, 2026-11-24). On the rig it boots and the
 bridge talks to it; nothing of the list below has been played there.
 

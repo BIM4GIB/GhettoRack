@@ -24,12 +24,20 @@ is stale; it is a snapshot, not a rule book.
 
 ## What runs on the rig
 
-- Daisy firmware v13.16 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
-  for long loops. Control protocol 10, report version 16. It boots and the
-  bridge talks to it; no long take has been recorded on the rig yet
-  (`docs/BACKLOG.md` has what to try). v13.15 was the last one Rene played.
+- Daisy firmware v13.17 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
+  for long loops (that part is v13.16), and it says its version
+  (`curl -s localhost:8040/health | grep firmware`). Control protocol 10,
+  report version 17. It boots and the bridge talks to it; no long take has
+  been recorded on the rig yet (`docs/BACKLOG.md` has what to try). v13.15
+  was the last one Rene played.
 - Bridge, kiosk, settings helper, Bluetooth unit installed from `main` at
-  `c491fb9` (the Settings banners: one short line, 3 or 6 s).
+  `6f5377d` (Settings banners: one short line, 3 or 6 s; the bridge stops in
+  half a second instead of 90 s and a kill).
+- `t95/bridge/test_bridge.py` on the Mac: 16 tests fail there with or without
+  a change (MidiTest, RouterTest, SampleTest and a few more: the fake Daisy
+  never sees what the bridge writes to it). Not looked into. The suite was
+  only ever green on Linux; it was not run on the box, where a test bridge
+  could find the rig's real controllers and remote.
 - On the Mac: Playwright is installed, so the page tests in
   `t95/bridge/test_bridge.py` run. A plain `git push` gets a 403 (the active
   `gh` login is another account); the `BIM4GIB` login in `gh` works.
@@ -53,10 +61,11 @@ and this chip (UWE5622, `tx_addba failed` in dmesg every 3 s since the
 install) queues under that. Cleared by test: Bluetooth, the helper, the
 kiosk, power save, signal. Fix: `--flush-ms` (40) in the bridge, one write per
 40 ms to browsers on the network. After it: 20 to 160 ms, average 51, with one
-page open. Not measured: two or three browsers at once. If it returns, send
+page open. If it returns, send
 less (drop or thin lines the page does not need), not just less often.
 Quick check: `ping -c 10 -q <router>` on the box, with and without
-`sudo systemctl stop apcbox-bridge`.
+`sudo systemctl stop apcbox-bridge`. Measured 24 Nov with up to 8 clients:
+7 to 15 ms average (`t95/README.md`, "Wi-Fi with several browsers").
 
 ## Open, in the order I would take them
 

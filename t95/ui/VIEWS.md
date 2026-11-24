@@ -105,6 +105,9 @@ live, with markers and bar lines), pad, list row with waveform.
   by accident is undone with the same undo (APC40: the left device arrow).
 - v13.15 (control protocol 10, report 16): the button map (`daisy/apcmap.h`,
   `MB` / `MC`, `map b` / `map c` / `map reset`), saved on the card.
+- v13.16 (control protocol 10): 16 s slots, 8 spare blocks for loops that don't
+  fit one. No page change: the looper says "no room" in the popup line.
+- v13.17 (report 17): `VF`, the firmware's version; Settings > Devices shows it.
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 
