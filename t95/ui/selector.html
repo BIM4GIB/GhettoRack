@@ -89,7 +89,8 @@ td.code.set{color:var(--green)}
   <span id="c-daisy" class="chip">Daisy: ?</span>
   <span id="c-ctl" class="chip">controllers: ?</span>
   <span id="c-ir" class="chip">remote: ?</span>
-  <a id="settings" class="chip" href="/settings" style="margin-left:auto;text-decoration:none;color:inherit">⚙ Settings</a>
+  <a id="jam" class="chip" href="/jam" style="margin-left:auto;text-decoration:none;color:inherit">Jam recorder</a>
+  <a id="settings" class="chip" href="/settings" style="text-decoration:none;color:inherit">⚙ Settings</a>
 </header>
 <main>
   <h2>Modules</h2>
@@ -101,7 +102,7 @@ td.code.set{color:var(--green)}
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const tv = params.has("tv"), boot = params.has("boot");
-if (tv) $("settings").href = "/settings?tv=1";
+if (tv) { $("settings").href = "/settings?tv=1"; $("jam").href = "/jam?tv=1"; }
 if (tv) document.body.classList.add("tv");
 let st = null, countdown = null;
 
@@ -195,8 +196,12 @@ es.addEventListener("bridge", e => {
     chip("c-daisy", b.daisy ? "Daisy: connected" : "Daisy: not on the T95", b.daisy ? "ok" : "bad");
     const n = (b.controllers || []).map(c => c.name).join(", ");
     chip("c-ctl", n ? "controllers: " + n : "controllers: none", n ? "ok" : "");
+    jamLamp(b.jam);
   } catch (err) {}
 });
+/* the jam recorder's lamp: red while a take runs, whatever module is open */
+function jamLamp(j) { if (j) chip("jam", j.recording ? "Jam recorder: recording" : "Jam recorder", j.recording ? "bad" : ""); }
+es.addEventListener("jam", e => { try { jamLamp(JSON.parse(e.data)); } catch (err) {} });
 es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
 es.addEventListener("irraw", () => stopCountdown());
 

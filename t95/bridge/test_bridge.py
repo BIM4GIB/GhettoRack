@@ -3853,5 +3853,282 @@ class HdmiAudioTest(unittest.TestCase):
         subprocess.run(["pkill", "-f", fake])
 
 
+FAKE_JAM_ARECORD = """#!%s
+# arecord for the jam recorder's tests: a 440 Hz tone into WAV files in real time, a new file
+# every --max-file-time seconds (part.wav, part-01.wav...), the header put right on SIGTERM
+import math, os, signal, struct, sys, time
+args = sys.argv[1:]
+with open(%r, "a") as f:
+    f.write(" ".join(args) + " | ALSA_CONFIG_PATH=" + os.environ.get("ALSA_CONFIG_PATH", "") + "\\n")
+if os.path.exists(%r):
+    sys.stderr.write("arecord: main:831: audio open error: Device or resource busy\\n")
+    sys.exit(1)
+gone = %r
+split = next((int(a.split("=")[1]) for a in args if a.startswith("--max-file-time=")), 0)
+path = args[-1]
+def head(n):
+    return (b"RIFF" + struct.pack("<I", 36 + n) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 48000, 192000, 4, 16)
+            + b"data" + struct.pack("<I", n))
+state = {"f": None, "n": 0}
+def close():
+    f = state["f"]
+    if f:
+        f.seek(0); f.write(head(state["n"])); f.close()
+def new(i):
+    close()
+    name = path if i == 0 else path[:-4] + "-%%02d.wav" %% i
+    state["f"] = open(name, "wb"); state["n"] = 0
+    state["f"].write(head(0x7fffff00)); state["f"].flush()
+def term(*a):
+    close(); sys.exit(0)
+signal.signal(signal.SIGTERM, term)
+new(0)
+n, idx, t0 = 0, 0, time.monotonic()
+while True:
+    if os.path.exists(gone):
+        sys.stderr.write("arecord: pcm_read:2221: read error: No such device\\n")
+        sys.exit(1)                      # the header stays wrong, as when the Daisy is pulled
+    chunk = b"".join(struct.pack("<hh", int(12000 * math.sin(2 * math.pi * 440 * (n + i) / 48000)),
+                                 int(6000 * math.sin(2 * math.pi * 440 * (n + i) / 48000))) for i in range(480))
+    n += 480
+    state["f"].write(chunk); state["f"].flush(); state["n"] += len(chunk)
+    if split and n // (48000 * split) > idx:
+        idx += 1
+        new(idx)
+    d = t0 + n / 48000 - time.monotonic()
+    if d > 0:
+        time.sleep(d)
+"""
+
+
+class JamTest(unittest.TestCase):
+    """The jam recorder: takes from a fake arecord, as one WAV with byte ranges, rename, library, delete"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.asound = os.path.join(cls.dir, "asound")
+        os.makedirs(cls.asound)
+        cls.alog = os.path.join(cls.dir, "arecord.log")
+        cls.busy = os.path.join(cls.dir, "busy")
+        cls.gone = os.path.join(cls.dir, "gone")
+        cls.arecord = os.path.join(cls.dir, "arecord")
+        with open(cls.arecord, "w") as f:
+            f.write(FAKE_JAM_ARECORD % (sys.executable, cls.alog, cls.busy, cls.gone))
+        os.chmod(cls.arecord, 0o755)
+        cls.http = free_port()
+        cls.proc = cls.start()
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: "jam" in h, 10)
+
+    @classmethod
+    def start(cls, *more):
+        p = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
+             "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
+             "--arecord", cls.arecord, "--asound", cls.asound, "--jam-split-s", "1"] + list(more),
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+        cls.addClassCleanup(p.kill)
+        return p
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    post = SettingsTest.post
+
+    def jams(self):
+        return json.loads(BridgeTest.get("/jam?json=1")[2])
+
+    def fetch(self, take, headers=None, dl=False):
+        req = urllib.request.Request("http://127.0.0.1:%d/jam/file?take=%s%s" % (self.http, urllib.parse.quote(take), "&dl=1" if dl else ""),
+                                     headers=headers or {})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.headers, r.read()
+
+    def record(self, secs):
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 200, out)
+        time.sleep(secs)
+        code, out = self.post("/jam/stop", {})
+        self.assertEqual(code, 200, out)
+        return out
+
+    def test_j1_no_daisy_audio_says_so(self):
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 503)
+        self.assertIn("Daisy's audio isn't on the T95", out["error"])
+        self.assertEqual(self.post("/jam/stop", {})[0], 400)
+        self.assertEqual(self.jams()["takes"], [])
+        self.assertIn(b"JAM", BridgeTest.get("/jam")[2])          # the page
+
+    def test_j2_a_take_in_parts_comes_back_as_one_wav(self):
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 200, out)
+        take = out["take"]
+        self.assertEqual(self.post("/jam/start", {})[0], 400)       # one at a time
+        h = BridgeTest.wait_health(lambda h: h["jam"]["seconds"] > 1.2 and h["jam"]["peak"][0] > 0.3, 6)
+        self.assertTrue(h["jam"]["recording"])
+        self.assertAlmostEqual(h["jam"]["peak"][0], 12000 / 32768, delta=0.01)   # the level of the tone, left and right
+        self.assertAlmostEqual(h["jam"]["peak"][1], 6000 / 32768, delta=0.01)
+        self.assertEqual(self.post("/jam/delete", {"take": take})[0], 400)       # not while it records
+        self.assertEqual(self.post("/jam/rename", {"take": take, "to": "x"})[0], 400)
+        time.sleep(1.2)
+        code, out = self.post("/jam/stop", {})
+        self.assertEqual(code, 200, out)
+        with open(self.alog) as f:
+            line = f.read().strip().splitlines()[-1]
+        self.assertIn("-D plug:daisyshare -f S16_LE -r 48000 -c 2 -t wav --max-file-time=1", line)
+        self.assertIn("asound-share.conf", line)                    # the device shared with the TV sound and listening
+        j = self.jams()
+        self.assertFalse(j["recording"])
+        self.assertEqual(len(j["takes"]), 1)
+        t = j["takes"][0]
+        print("\n  jam: %.1f s in %d parts" % (t["seconds"], t["parts"]))
+        self.assertEqual(t["take"], take)
+        self.assertGreaterEqual(t["parts"], 2)
+        self.assertTrue(2.0 < t["seconds"] < 3.6, t)
+        status, hdr, wav = self.fetch(take)
+        self.assertEqual((status, hdr["Content-Type"], hdr["Accept-Ranges"]), (200, "audio/wav", "bytes"))
+        self.assertEqual(len(wav), 44 + t["bytes"])
+        self.assertEqual(wav[:4] + wav[8:16], b"RIFFWAVEfmt ")
+        self.assertEqual(struct.unpack("<I", wav[4:8])[0], len(wav) - 8)
+        self.assertEqual(struct.unpack("<I", wav[40:44])[0], t["bytes"])
+        n = t["bytes"] // 4
+        left = struct.unpack("<%dh" % (2 * n), wav[44:])[0::2]
+        ups = sum(1 for a, b in zip(left, left[1:]) if a < 0 <= b)   # 440 a second, also across the parts' seams
+        self.assertAlmostEqual(ups / (n / 48000), 440, delta=3)
+        # every part's own header says what it holds
+        d = os.path.join(self.dir, "jams", take)
+        for name in os.listdir(d):
+            with open(os.path.join(d, name), "rb") as f:
+                head = f.read(44)
+            self.assertEqual(struct.unpack("<I", head[40:44])[0], os.path.getsize(os.path.join(d, name)) - 44, name)
+        # byte ranges, for seeking in a browser: across the header and across a seam
+        status, hdr, part = self.fetch(take, {"Range": "bytes=40-1043"})
+        self.assertEqual((status, hdr["Content-Range"]), (206, "bytes 40-1043/%d" % len(wav)))
+        self.assertEqual(part, wav[40:1044])
+        a = 44 + 192000 - 500
+        status, hdr, part = self.fetch(take, {"Range": "bytes=%d-%d" % (a, a + 999)})
+        self.assertEqual(part, wav[a:a + 1000])
+        status, hdr, part = self.fetch(take, {"Range": "bytes=-800"})
+        self.assertEqual((status, part), (206, wav[-800:]))
+        status, hdr, part = self.fetch(take, {"Range": "bytes=%d-" % (len(wav) - 10)})
+        self.assertEqual(part, wav[-10:])
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.fetch(take, {"Range": "bytes=%d-" % (len(wav) + 5)})
+        self.assertEqual(e.exception.code, 416)
+        self.assertIn('filename="%s.wav"' % take, self.fetch(take, dl=True)[1]["Content-Disposition"])
+
+    def test_j3_rename_library_delete(self):
+        take = self.jams()["takes"][0]["take"]
+        for bad in ("", "../x", "a/b", ".hidden", "x" * 49, "dot.", 5):
+            self.assertEqual(self.post("/jam/rename", {"take": take, "to": bad})[0], 400, bad)
+        self.assertEqual(self.post("/jam/rename", {"take": "../jams", "to": "x"})[0], 400)
+        code, out = self.post("/jam/rename", {"take": take, "to": " Friday jam 1 "})
+        self.assertEqual((code, out.get("take")), (200, "Friday jam 1"))
+        self.assertEqual(self.post("/jam/rename", {"take": take, "to": "y"})[0], 400)     # the old name is gone
+        self.assertEqual([t["take"] for t in self.jams()["takes"]], ["Friday jam 1"])
+        code, out = self.post("/jam/library", {"take": "Friday jam 1"})
+        self.assertEqual(code, 200, out)
+        self.assertEqual(len(out["files"]), out["parts"])
+        lib = json.loads(BridgeTest.get("/samples?src=lib&path=jams")[2])
+        self.assertEqual(sorted(f["name"] for f in lib["files"]), sorted(out["files"]))
+        self.assertEqual(self.post("/jam/library", {"take": "Friday jam 1"})[1]["files"], [])   # again: nothing new
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.fetch("nope")
+        self.assertEqual(e.exception.code, 404)
+        self.assertEqual(self.post("/jam/delete", {"take": "Friday jam 1"})[0], 200)
+        self.assertEqual(self.jams()["takes"], [])
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "jams", "Friday jam 1")))
+        # the library keeps its own (links): deleting the take doesn't take the sample away
+        lib = json.loads(BridgeTest.get("/samples?src=lib&path=jams")[2])
+        self.assertEqual(len(lib["files"]), out["parts"])
+        self.assertEqual(self.post("/jam/delete", {"take": "Friday jam 1"})[0], 400)
+        self.assertEqual(self.post("/jam/nonsense", {"take": "x"})[0], 400)
+
+    def test_j4_the_daisy_leaves_mid_take(self):
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 200, out)
+        BridgeTest.wait_health(lambda h: h["jam"]["seconds"] > 0.5, 5)
+        open(self.gone, "w").close()
+        try:
+            h = BridgeTest.wait_health(lambda h: not h["jam"]["recording"] and h["jam"]["error"], 5)
+        finally:
+            os.remove(self.gone)
+        self.assertIn("stopped by itself", h["jam"]["error"])
+        self.assertIn("No such device", h["jam"]["error"])
+        j = self.jams()
+        self.assertEqual(len(j["takes"]), 1)                         # what was recorded is kept
+        t = j["takes"][0]
+        self.assertGreater(t["seconds"], 0.4)
+        d = os.path.join(self.dir, "jams", t["take"])
+        with open(os.path.join(d, "part.wav"), "rb") as f:           # and its header put right
+            head = f.read(44)
+        self.assertEqual(struct.unpack("<I", head[40:44])[0], os.path.getsize(os.path.join(d, "part.wav")) - 44)
+        self.assertEqual(self.post("/jam/delete", {"take": t["take"]})[0], 200)
+        # a device that can't be opened: no empty take left behind
+        open(self.busy, "w").close()
+        try:
+            self.assertEqual(self.post("/jam/start", {})[0], 200)
+            h = BridgeTest.wait_health(lambda h: not h["jam"]["recording"] and h["jam"]["error"], 5)
+        finally:
+            os.remove(self.busy)
+        self.assertIn("busy", h["jam"]["error"])
+        self.assertEqual(self.jams()["takes"], [])
+
+    def test_j5_events_for_the_pages(self):
+        c = SseClient(self.http)
+        self.addCleanup(c.close)
+        self.assertEqual(self.post("/jam/start", {})[0], 200)
+        try:
+            self.assertTrue(c.wait_for(lambda c: any(e[0] == "jam" and e[1]["recording"] and e[1]["seconds"] > 0.4 for e in c.named), 5))
+        finally:
+            self.assertEqual(self.post("/jam/stop", {})[0], 200)
+        self.assertTrue(c.wait_for(lambda c: any(e[0] == "jam" for e in c.named) and not [e for e in c.named if e[0] == "jam"][-1][1]["recording"], 5))
+        self.assertEqual(self.post("/jam/delete", {"take": self.jams()["takes"][0]["take"]})[0], 200)
+
+    def test_j6_a_part_cut_off_gets_its_header_back(self):
+        sys.path.insert(0, HERE)
+        from rackbridge.jam import wav_fix, wav_data, wav_header
+        p = os.path.join(self.dir, "cut.wav")
+        with open(p, "wb") as f:
+            f.write(wav_header(0x7fffff00) + b"\x01\x02\x03\x04" * 1000 + b"\x09\x09")     # two bytes of a torn frame
+        self.assertEqual(wav_data(p), (44, 4000))
+        self.assertTrue(wav_fix(p))
+        with open(p, "rb") as f:
+            self.assertEqual(f.read(44), wav_header(4000))
+        self.assertFalse(wav_fix(p))
+        with open(p, "wb") as f:
+            f.write(b"not a wav file at all")
+        self.assertIsNone(wav_data(p))
+        self.assertFalse(wav_fix(p))
+
+    def test_j7_no_room(self):
+        self.proc.terminate(); self.proc.wait(5)
+        type(self).proc = self.start("--jam-min-free-mb", str(1 << 30))
+        BridgeTest.wait_health(lambda h: "jam" in h, 10)
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 503)
+        self.assertIn("not enough room", out["error"])
+
+    def test_j8_stopping_the_bridge_closes_the_take(self):
+        self.proc.terminate(); self.proc.wait(5)
+        type(self).proc = self.start()
+        BridgeTest.wait_health(lambda h: "jam" in h, 10)
+        code, out = self.post("/jam/start", {})
+        self.assertEqual(code, 200, out)
+        BridgeTest.wait_health(lambda h: h["jam"]["seconds"] > 0.5, 5)
+        self.proc.terminate()
+        self.proc.wait(8)
+        d = os.path.join(self.dir, "jams", out["take"])
+        size = os.path.getsize(os.path.join(d, "part.wav"))
+        with open(os.path.join(d, "part.wav"), "rb") as f:
+            head = f.read(44)
+        self.assertGreater(size, 44 + 48000)
+        self.assertEqual(struct.unpack("<I", head[40:44])[0], size - 44)
+        self.assertEqual(subprocess.run(["pgrep", "-f", self.arecord], capture_output=True).stdout, b"")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -57,6 +57,7 @@ Sound and Steps show the editor that fits the selected track's type.
 | Selector | pick a mode | built (`selector.html`) |
 | MIDI hub | routing grid, network devices, presets | built (`midihub.html`), same look |
 | Clock | tempo, source, outputs, timing | built (`clock.html`), same look |
+| Jam recorder | `/jam` (`t95/ui/jam.html`), from the start screen (its lamp is red while a take runs): REC / STOP, time, level L/R, room left on the T95; takes with play (one WAV, seekable), download, rename, to the sample library, delete (asks). Records the Daisy's master onto the T95. Remote: OK does the focused button (REC first), play / stop, arrows walk the buttons | built, same look; one short take tried on the rig, the remote not |
 | Settings | `/settings` (`t95/ui/settings.html`): Network, Hotspot, Bluetooth (on / off, scan, pair, forget; MIDI devices are marked; VISIBLE: 3 minutes as a Bluetooth MIDI device an iPad or Mac can find, with the PIN, untried with a device), System (start-up delay, PIN, power), Devices (Daisy, controllers, Bluetooth MIDI, the box's SD card, every sound card with what the box uses it for, TV sound; the Daisy's own card is not shown: the firmware doesn't report it), Remote (the remote's buttons per profile). With the TV remote, ok on a PIN field (or on a button that needs the PIN) opens a number pad. The start screen holds only the modules and the way here | built; hotspot not working on the rig yet |
 | Cubase sync | plugin status, Cubase's transport | later |
 | Numark DJ | decks with scrolling waveforms, mixer, library | later |

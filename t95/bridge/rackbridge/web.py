@@ -259,7 +259,14 @@ class WebMixin:
                     await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
                     writer.close()
                     return
-                code, out = self.post(path, body)
+                if path.startswith("/jam/"):
+                    try:
+                        d = json.loads(body.decode() or "{}")
+                    except ValueError:
+                        d = None
+                    code, out = await self.jam.post(path, d) if isinstance(d, dict) else (400, {"error": "JSON object expected"})
+                else:
+                    code, out = self.post(path, body)
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
             elif method != "GET":
                 await self.reply(writer, 405, "text/plain", b"GET or POST\n")
@@ -270,6 +277,16 @@ class WebMixin:
             elif path == "/clock":
                 body = dict(self.clock.info(), ports=[p.name for p in sorted(self.ports.values(), key=lambda p: p.num)])
                 await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
+            elif path == "/jam" and "json" not in params:
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["jam"])
+            elif path == "/jam":
+                out = await asyncio.get_running_loop().run_in_executor(None, self.jam.list)
+                await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")
+            elif path == "/jam/file":
+                code, why = await self.jam.serve_file(writer, urllib.parse.unquote(params.get("take", "")),
+                                                      head.decode("latin-1"), params.get("dl") == "1")
+                if code:
+                    await self.reply(writer, code, "text/plain", (why or "no such take").encode() + b"\n")
             elif path == "/audio.pcm":
                 code, why = await self.listen.serve(writer)
                 if code:
@@ -329,7 +346,7 @@ class WebMixin:
                 await self.reply(writer, 200, "application/json", json.dumps(self.status(), indent=1).encode() + b"\n")
             elif path == "/caps":
                 caps = {"source": "daisy-bridge", "bridge": 7, "control": self.ctl >= 2, "control_version": self.ctl, "midi": True, "ir": True,
-                        "samples": True, "https_port": self.args.https_port,
+                        "samples": True, "jam": True, "https_port": self.args.https_port,
                         "selector": "/", "ui": self.ctl >= 2, "tft": False}
                 await self.reply(writer, 200, "application/json", json.dumps(caps).encode() + b"\n")
             elif path == "/events":

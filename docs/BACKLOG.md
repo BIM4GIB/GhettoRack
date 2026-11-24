@@ -157,17 +157,23 @@ them one on the map (REC still arms a loop).
   Bluetooth MIDI, the PIN with the TV remote (a number pad). Sound cards and the box's SD card under Devices: built 2026-11-24 (read-only; no eject, and not the Daisy's own card).
   Rene, 2026-11-23: the join works on the rig (wrong password comes back),
   but the error and info banners are ugly and stay too long. UI pass later.
-- **Jam recorder** (next for the box's SD card; Rene, 2026-11-24): record the
-  Daisy's master to the card in the T95's slot. The audio already arrives on
-  the T95 as USB audio (`arecord` showed 48 kHz stereo, `t95/README.md`). Not
-  built. Needs: the card writable only while a recording runs (the udev rule
-  mounts it read-only so pulling it is always safe), an eject under Settings >
-  Devices, a record button on the page, files split or flushed so a pulled
-  card loses seconds, not the take. Open: exFAT in this slot reads (2026-11-24,
-  `t95/README.md`), writing is untested; write speed and dropouts while the bridge and MIDI run are
-  unmeasured, what happens when the card is full. Recording must not run in
-  the bridge's own loop. Later with a writable card: set and kit backups, the
-  library on the card.
+- **Jam recorder** (`/jam`, `t95/ui/jam.html`, `t95/bridge/rackbridge/jam.py`; Rene, 2026-11-24): records
+  the Daisy's master on the T95. Slice 1 built 2026-11-24: `arecord` as its own process writes
+  WAV onto the eMMC (the bridge's folder, `jams/<take>/`, a new file every half hour), next to
+  the TV sound and listening on the shared capture device; REC / STOP with time and level on the
+  page and the remote, takes played and downloaded as one WAV, rename, delete, "to library"
+  (links into the sample library, folder `jams`); stops by itself under 1 GB free; a lamp on the
+  start screen while a take runs. Seen on the T95 the same day: a 25 s take with the Daisy
+  playing (peak -0.4 dB, 0 dropouts reported), the page in a browser on the Mac. NOT tried:
+  a long take (over the half-hour seam), the remote, the TV, a phone, a power cut, the Daisy
+  pulled mid-take, the box nearly full; those only against a made-up `arecord` in the tests.
+  A restart of the bridge ends a running take (it is kept).
+  Slice 2, not built: COPY TO CARD and EJECT under Settings > Devices (the helper makes the card
+  writable for the copy only; the udev rule mounts it read-only so pulling it is always safe).
+  Open: writing exFAT in this slot is untested (reading works, `t95/README.md`), what happens
+  when the card is full. Later: a record lamp and button in the ApcBox page's top bar, a job for
+  an APC40 button, takes over 3.5 minutes get no waveform in the Samples view (40 MB limit),
+  set and kit backups and the library on the card.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
 - **Numark DJ**: likely Mixxx on the T95 in the kiosk; which Numark?

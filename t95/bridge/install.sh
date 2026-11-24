@@ -43,6 +43,7 @@ install -m 644 "$REPO/t95/ui/midihub.html" "$DEST/midihub.html"
 install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
 install -m 644 "$REPO/t95/ui/apcbox.html" "$DEST/apcbox.html"
 install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
+install -m 644 "$REPO/t95/ui/jam.html" "$DEST/jam.html"
 # Settings: the helper that does the few things needing root (t95/helper/README.md).
 # The bridge reaches it through the group; networks it joins and its PIN stay on the box.
 getent group ghettorack >/dev/null || groupadd --system ghettorack

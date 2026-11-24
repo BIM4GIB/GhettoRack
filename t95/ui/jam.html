@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jam recorder</title>
+<style>
+/* Same look as selector.html, clock.html and midihub.html */
+:root{--bg:#0b0c0d;--panel:#15171a;--line:#2a2d31;--text:#d9dcdf;--dim:#7d848c;--green:#35d05a;--red:#ff4b3e;--yellow:#ffb833;--amber:#ff9a1f;--blue:#4aa3ff;--off:#23262a;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 -apple-system,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+body.tv{zoom:1.5}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;padding:12px 18px;border-bottom:1px solid var(--line);background:#101214}
+h1{font-size:18px;margin:0;letter-spacing:.1em}
+h2{margin:22px 0 10px;font-size:12px;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;font-weight:600}
+main{max-width:860px;margin:0 auto;padding:18px 16px 40px}
+.chip{font-family:var(--mono);display:inline-flex;align-items:center;gap:7px;color:var(--dim);font-size:12px;white-space:nowrap}
+.chip::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--off);flex:none}
+.chip.ok::before{background:var(--green);box-shadow:0 0 8px var(--green)}
+.chip.warn::before{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.chip.bad::before{background:var(--red);box-shadow:0 0 8px var(--red)}
+.chip.warn,.chip.bad{color:var(--text)}
+button,a.btn{background:#1d2024;border:1px solid #3a3f45;border-radius:7px;color:#c3c8cd;font:inherit;font-size:13px;font-weight:600;min-height:34px;padding:6px 12px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center}
+button:hover,a.btn:hover{background:#24282c}
+button:disabled{opacity:.35;cursor:default}
+button:focus-visible,a:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
+button.on{color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1f77, inset 0 0 8px #ff9a1f33}
+#home{height:40px;padding:0 16px}
+.big{display:flex;align-items:center;gap:22px;padding:18px;border-radius:12px;background:var(--panel);border:1px solid var(--line)}
+#rec{width:120px;height:120px;border-radius:50%;font-size:17px;letter-spacing:.08em;justify-content:center;flex:none;border-width:2px}
+#rec::before{content:"";width:16px;height:16px;border-radius:50%;background:#5a2320;margin-right:9px}
+#rec.on{color:var(--red);border-color:var(--red);box-shadow:0 0 18px #ff4b3e88, inset 0 0 14px #ff4b3e33}
+#rec.on::before{background:var(--red);box-shadow:0 0 10px var(--red);border-radius:3px}
+.time{font-family:var(--mono);font-size:64px;font-weight:600;line-height:1}
+.sub{font-family:var(--mono);font-size:13px;color:var(--dim);margin-top:8px;min-height:1.4em}
+.meters{display:flex;flex-direction:column;gap:6px;margin-top:12px;max-width:420px}
+.meter{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11px;color:var(--dim)}
+.bar{flex:1;height:10px;border-radius:3px;background:var(--off);overflow:hidden;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,var(--green) 0 70%,var(--yellow) 70% 90%,var(--red) 90%);background-size:420px 100%;transition:width .12s linear}
+.hint{color:var(--dim);font-size:13px}
+.err{color:#ff9d94;font-size:13px;min-height:1.4em;margin-top:10px}
+.take{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:8px}
+.take.live{border-color:var(--red)}
+.take .name{font-weight:600;flex:1 1 220px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.take .meta{font-family:var(--mono);font-size:12px;color:var(--dim);flex:0 0 auto}
+.take .acts{display:flex;flex-wrap:wrap;gap:6px}
+audio{width:100%;margin-top:6px;display:none}
+audio.on{display:block}
+@media (max-width:560px){.big{flex-wrap:wrap}.time{font-size:46px}#rec{width:96px;height:96px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>JAM RECORDER</h1>
+  <span id="c-audio" class="chip">Daisy audio: ?</span>
+  <span id="c-free" class="chip">room: ?</span>
+  <span style="flex:1"></span>
+  <button id="home">Modules</button>
+</header>
+<main>
+  <div class="big">
+    <button id="rec">REC</button>
+    <div style="flex:1;min-width:0">
+      <div class="time" id="time">0:00</div>
+      <div class="sub" id="sub"></div>
+      <div class="meters">
+        <div class="meter">L<div class="bar"><i id="mL"></i></div></div>
+        <div class="meter">R<div class="bar"><i id="mR"></i></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="err" id="err"></div>
+  <p class="hint">Records what the Daisy plays (its master, 48 kHz stereo) onto the T95. A take is kept in half-hour files, so a power cut costs the open one at most. Play or download a take as one WAV.</p>
+
+  <h2>Takes</h2>
+  <audio id="player" controls preload="none"></audio>
+  <div id="takes"></div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const tv = new URLSearchParams(location.search).has("tv");
+if (tv) document.body.classList.add("tv");
+let J = null, takes = [], at = 0, playing = null;
+
+async function post(path, body) {
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    const j = await r.json();
+    $("err").textContent = j.error || "";
+    return j;
+  } catch (e) { $("err").textContent = "the box isn't answering"; return { error: "x" }; }
+}
+function chip(id, text, cls) { const e = $(id); e.textContent = text; e.className = "chip" + (cls ? " " + cls : ""); }
+function clock(s) {
+  s = Math.floor(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0");
+  return h ? h + ":" + String(m).padStart(2, "0") + ":" + x : m + ":" + x;
+}
+function size(b) { return b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GB" : Math.max(1, Math.round(b / (1 << 20))) + " MB"; }
+function level(p) { return p > 0 ? Math.max(0, Math.min(100, (20 * Math.log10(p) + 48) / 48 * 100)) : 0; }   // -48 dB .. 0 dB
+
+function show() {
+  if (!J) return;
+  $("rec").classList.toggle("on", J.recording);
+  $("rec").textContent = J.recording ? "STOP" : "REC";
+  $("rec").disabled = !J.recording && !J.daisy_audio;
+  chip("c-audio", J.daisy_audio ? "Daisy audio" : "no Daisy audio (USB)", J.daisy_audio ? "ok" : "bad");
+  if (J.free != null) {
+    const keep = J.min_free || 0, left = Math.max(0, J.free - keep) / 192000;
+    chip("c-free", "room for " + (left >= 3600 ? (left / 3600).toFixed(1) + " h" : Math.floor(left / 60) + " min"), left < 600 ? "bad" : left < 3600 ? "warn" : "ok");
+  }
+  $("mL").style.width = level(J.recording ? J.peak[0] : 0) + "%";
+  $("mR").style.width = level(J.recording ? J.peak[1] : 0) + "%";
+  $("sub").textContent = J.recording ? J.take + " · " + size(J.bytes) + (J.overruns ? " · " + J.overruns + " dropouts" : "")
+    : (J.note || "");
+  if (J.error && !J.recording) $("err").textContent = J.error;
+  tick();
+}
+function tick() {
+  if (!J) return;
+  $("time").textContent = clock(J.recording ? J.seconds + (performance.now() - at) / 1000 : 0);
+}
+setInterval(tick, 250);
+
+function list() {
+  const box = $("takes");
+  const focus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.k : null;
+  box.textContent = "";
+  if (!takes.length) { box.innerHTML = '<p class="hint">No takes yet.</p>'; return; }
+  for (const t of takes) {
+    const row = document.createElement("div");
+    row.className = "take" + (t.recording ? " live" : "");
+    const name = document.createElement("div"); name.className = "name"; name.textContent = t.take;
+    const meta = document.createElement("div"); meta.className = "meta";
+    meta.textContent = clock(t.seconds) + " · " + size(t.bytes) + " · " + new Date(t.at * 1000).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const acts = document.createElement("div"); acts.className = "acts";
+    const btn = (label, fn, k) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; b.dataset.k = t.take + "/" + k; acts.appendChild(b); return b; };
+    const url = "/jam/file?take=" + encodeURIComponent(t.take);
+    if (t.recording) {
+      const s = document.createElement("span"); s.className = "chip bad"; s.textContent = "recording"; acts.appendChild(s);
+    } else {
+      btn(playing === t.take ? "Hide player" : "Play", () => play(t.take, url), "play").classList.toggle("on", playing === t.take);
+      const a = document.createElement("a"); a.className = "btn"; a.textContent = "Download"; a.href = url + "&dl=1"; a.dataset.k = t.take + "/dl"; acts.appendChild(a);
+      btn("Rename", async () => {
+        const to = prompt("New name (letters, digits, space, - _ .)", t.take);
+        if (to && to.trim() !== t.take && !(await post("/jam/rename", { take: t.take, to })).error) { if (playing === t.take) stopPlayer(); load(); }
+      }, "ren");
+      btn("To library", async () => {
+        const r = await post("/jam/library", { take: t.take });
+        if (!r.error) $("err").textContent = r.files.length ? "In the sample library, folder jams: " + r.files.join(", ") : "Already in the sample library (folder jams).";
+      }, "lib");
+      btn("Delete", async () => {
+        if (!confirm('Delete "' + t.take + '" (' + clock(t.seconds) + ")? It can't be undone.")) return;
+        if (playing === t.take) stopPlayer();
+        await post("/jam/delete", { take: t.take }); load();
+      }, "del");
+    }
+    row.append(name, meta, acts);
+    box.appendChild(row);
+  }
+  if (focus) { const e = [...box.querySelectorAll("[data-k]")].find(e => e.dataset.k === focus); if (e) e.focus(); }
+}
+function stopPlayer() { const p = $("player"); p.pause(); p.removeAttribute("src"); p.load(); p.classList.remove("on"); playing = null; }
+function play(take, url) {
+  const p = $("player");
+  if (playing === take) stopPlayer();
+  else { playing = take; p.src = url; p.classList.add("on"); p.play().catch(() => {}); }
+  list();
+}
+
+async function load() {
+  try {
+    const j = await (await fetch("/jam?json=1")).json();
+    takes = j.takes; J = j; at = performance.now();
+    show(); list();
+  } catch (e) { chip("c-audio", "the box isn't answering", "bad"); }
+}
+async function toggle() {
+  if (!J) return;
+  $("rec").disabled = true;
+  await post(J.recording ? "/jam/stop" : "/jam/start");
+  await load();
+}
+$("rec").onclick = toggle;
+$("home").onclick = () => { location.href = "/" + (tv ? "?tv=1" : ""); };
+
+/* Remote: ok does the focused button (REC to begin with), play / stop record and stop, arrows walk the buttons */
+function focusables() { return [...document.querySelectorAll("button:not(:disabled), a.btn")]; }
+function move(d) {
+  const f = focusables(), i = f.indexOf(document.activeElement);
+  (f[i < 0 ? (d > 0 ? 0 : f.length - 1) : (i + d + f.length) % f.length] || $("rec")).focus();
+}
+function action(a) {
+  if (a === "up" || a === "left") move(-1);
+  else if (a === "down" || a === "right") move(1);
+  else if (a === "ok") { const e = document.activeElement; (e && e !== document.body && focusables().includes(e) ? e : $("rec")).click(); }
+  else if (a === "play") { if (J && !J.recording) toggle(); }
+  else if (a === "stop") { if (J && J.recording) toggle(); }
+  else if (a === "back" || a === "home" || a === "menu") location.href = "/" + (tv ? "?tv=1" : "");
+}
+let was = false;
+const es = new EventSource("/events?view=jam");
+es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
+es.addEventListener("jam", e => {
+  try {
+    const d = JSON.parse(e.data);
+    J = Object.assign(J || {}, d); at = performance.now();
+    show();
+    if (d.recording !== was) { was = d.recording; load(); }     // a take began or ended (here or on another screen)
+  } catch (err) {}
+});
+load();
+setInterval(() => { if (!J || !J.recording) load(); }, 5000);
+if (tv) $("rec").focus();
+</script>
+</body>
+</html>

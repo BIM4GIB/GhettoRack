@@ -14,6 +14,7 @@ from .clock import Clock
 from .listen import Listen
 from .ble import Ble
 from .devices import Devices
+from .jam import Jam
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -57,7 +58,8 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         except (OSError, TypeError):
             log.warning("no selector page at %s", args.selector)
         self.pages = {}
-        for name, path in (("clock", args.clock_page), ("apcbox", args.apcbox_page), ("settings", args.settings_page)):
+        for name, path in (("clock", args.clock_page), ("apcbox", args.apcbox_page), ("settings", args.settings_page),
+                           ("jam", args.jam_page)):
             try:
                 with open(path, "rb") as f:
                     self.pages[name] = f.read()
@@ -85,6 +87,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.xfer_seq = 0
         self.xfer_wake = asyncio.Event()
         self.xfer_replies = asyncio.Queue()
+        self.jam = Jam(self)
         self.net_init()
         self.clock = Clock(self, self.state.data.get("clock") or {})
 
@@ -116,6 +119,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "net": self.net_info(),
             "clock": self.clock.info(),
             "listen": self.listen.info(),
+            "jam": self.jam.info(),
         }
 
 
@@ -140,13 +144,14 @@ async def main_async(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task())
+                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task(), b.jam.task())
     finally:
         # Stop taking connections, and don't wait for the open ones. `async with server` did:
         # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
         # page on the box's own screen never does, so a stop sat there until systemd's 90 s
         # were up and it killed the bridge (rig, 2026-11-24: every restart that night).
         # asyncio.run cancels the browsers' handlers once this returns; their finally blocks run.
+        b.jam.stop_now()      # a take that is running: arecord closes its file
         server.close()
         if tls:
             tls.close()
@@ -184,6 +189,12 @@ def main(argv=None):
                     help="where the settings helper (root, t95/helper) listens")
     ap.add_argument("--clock-page", default=next((p for p in (os.path.join(here, "clock.html"),
                     os.path.join(here, "..", "ui", "clock.html")) if os.path.exists(p)), None))
+    ap.add_argument("--jam-page", default=next((p for p in (os.path.join(here, "jam.html"),
+                    os.path.join(here, "..", "ui", "jam.html")) if os.path.exists(p)), None),
+                    help="the jam recorder's page (/jam)")
+    ap.add_argument("--jams", help="where recorded takes go (default: jams, next to the state file)")
+    ap.add_argument("--jam-min-free-mb", type=int, default=1024, help="recording stops when the T95 has less than this free")
+    ap.add_argument("--jam-split-s", type=int, default=1800, help="a take is written as files of this many seconds")
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")

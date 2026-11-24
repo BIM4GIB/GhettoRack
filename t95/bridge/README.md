@@ -22,7 +22,7 @@ Python 3 standard library only (Bluetooth MIDI and Link each need one package an
 | File | What |
 |---|---|
 | `apcbox_bridge.py` | Entry point (the service runs it) |
-| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `ble` (paired Bluetooth MIDI devices as ports, over its own ATT channel; asks BlueZ which devices are paired, for which it needs `python3-dbus-fast`; and the box as a Bluetooth MIDI device others find, served through BlueZ while VISIBLE is on, untried with a device), `devices` (the sound cards and the SD card, for Settings > Devices), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
+| `rackbridge/` | The bridge, one file per building block: `daisy` (Daisy link), `midi` (USB ports), `router` (modules' routing), `netmidi` (RTP-MIDI), `clock` (clock module), `listen` (audio to browsers), `jam` (jam recorder), `ble` (paired Bluetooth MIDI devices as ports, over its own ATT channel; asks BlueZ which devices are paired, for which it needs `python3-dbus-fast`; and the box as a Bluetooth MIDI device others find, served through BlueZ while VISIBLE is on, untried with a device), `devices` (the sound cards and the SD card, for Settings > Devices), `samples`, `ir` (remote), `hdmi` (TV sound), `state`, `web` (HTTP/SSE/API), `bridge` (puts them together) |
 | `ghettorack-midi.service` | Avahi service: the T95 shows up as "GhettoRack" for network MIDI |
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
@@ -257,6 +257,10 @@ The clock module (`/clock`): one tempo for everything.
 | `/` | The module selector (`t95/ui/selector.html`) |
 | `/apcbox` | The T95's ApcBox page (`t95/ui/apcbox.html`): full-screen views, works with no APC40, needs firmware v13.9 |
 | `/audio.pcm` | The Daisy's audio for the page's LISTEN button: raw s16le 48 kHz stereo, endless |
+| `/jam`, `/jam?json=1` | The jam recorder's page; its state and takes (`recording`, `take`, `seconds`, `peak`, `overruns`, `free`, `takes`). Also in `/health` (`jam`) and as `jam` events on `/events` twice a second while a take runs |
+| `POST /jam/start`, `/jam/stop` | Record the Daisy's audio (16-bit 48 kHz stereo) into `jams/<take>/` next to the state file: `arecord` on the shared capture device, a process of its own, a new WAV every `--jam-split-s` (1800). Refused without the Daisy's audio or with less than `--jam-min-free-mb` (1024) free, and it stops by itself there |
+| `/jam/file?take=` | The take as one WAV (the parts strung together), byte ranges for seeking; `&dl=1` to download |
+| `POST /jam/rename`, `/jam/delete`, `/jam/library` | `{"take"}` (rename: and `"to"`): rename, delete, or link the take's files into the sample library (folder `jams`). Not while that take records |
 | `/samples/peaks?src=&path=` | JSON `{secs, peaks}`: 96 peaks (hex) of what the Daisy would get of that file, for the waveform in the list |
 | `/samples/preview?src=&path=` | That file as the Daisy would get it (WAV), for hearing it in the browser. `&start=&end=` (0-1, fractions of its length) and `&norm=1`: trimmed (2 ms fades at the cuts) and normalised to -0.3 dB, as `/samples/send` would send it |
 | `POST /do` | `{"a": "mute 3 2"}` or a list of up to 32: page actions for the Daisy (`ESC U`), checked against a list before they go on the wire |
