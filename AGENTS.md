@@ -124,6 +124,14 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   pressure. Hardware claims require hardware evidence; desktop tests alone do
   not establish USB compatibility or gig readiness.
 
+## The rig
+
+When the session can reach Rene's network (Claude Code on his Mac): the T95 is
+`ssh ghettobox`, its clone is `~/GhettoRack`. Look, measure and install there
+yourself instead of handing him commands to paste. The box's address, Wi-Fi
+names and device serials stay out of the repo. `docs/HANDOVER.md` has the
+state of the rig as of the last session, if it is still there.
+
 ## Working with Rene
 
 Terse and direct, no padding, no em-dashes. Agree on a plan before building
