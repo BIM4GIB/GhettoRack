@@ -871,6 +871,16 @@ int main(void)
     hw.Init(true); // 480 MHz
     hw.SetLed(true);
     diag::Stage(2);
+    /* libDaisy puts every interrupt at priority 0, so none can cut into another.
+       The audio callback runs inside the SAI's DMA interrupt for most of each
+       1 ms block when the mix is heavy, and USB audio has to arm one packet
+       every 1 ms: stuck behind the callback it missed frames (about 3 % at
+       72 % CPU, heard as gaps by the T95). The audio interrupt goes one level
+       down, so USB and the other short handlers get in on time. They only
+       fill queues the main loop reads; the audio ring in usbdev.cpp is
+       written for a reader that interrupts the writer. */
+    HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 1, 0);
+    HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 1, 0);
     /* 48 kHz / 48-sample blocks are libDaisy's defaults; setting them again
        re-inits the audio hardware, so don't */
     diag::Stage(19);
