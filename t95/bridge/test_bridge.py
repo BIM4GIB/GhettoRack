@@ -3045,6 +3045,16 @@ class SampleTest(unittest.TestCase):
         make_wav(os.path.join(cls.sd, "Kits", "808", "BD.wav"), 0.3)
         make_wav(os.path.join(cls.sd, "Kits", "808", "SD 24bit stereo.wav"), 0.3, ch=2, width=3, rate=44100)
         open(os.path.join(cls.sd, "Kits", "readme.txt"), "w").write("not audio")
+        # A card full of Live's packs: AIFF in Ableton's own compression, which nothing outside Live decodes
+        # (11076 such files on the card that was in the T95, 2026-11-24). And an AIFF that is plain noise.
+        os.makedirs(os.path.join(cls.sd, "Packs"))
+        comm = struct.pack(">hIh", 1, 1000, 16) + bytes(10) + b"able" + b"\x0cAbleton enc\x00"
+        with open(os.path.join(cls.sd, "Packs", "Guitar Chord.aif"), "wb") as f:
+            f.write(b"FORM" + struct.pack(">I", 2000) + b"AIFC" + b"FVER" + struct.pack(">II", 4, 0xA2805140)
+                    + b"COMM" + struct.pack(">I", len(comm)) + comm + b"SSND" + struct.pack(">I", 1900) + os.urandom(1900))
+        with open(os.path.join(cls.sd, "Packs", "Broken.aif"), "wb") as f:
+            f.write(os.urandom(3000))
+        make_wav(os.path.join(cls.sd, "Packs", "Clap.wav"), 0.2)
         cls.link = os.path.join(cls.dir, "daisy")
         cls.daisy = LossyDaisy(cls.link)
         cls.http = free_port()
@@ -3091,6 +3101,30 @@ class SampleTest(unittest.TestCase):
         self.assertEqual((d["dirs"], d["files"]), (["808"], []), "readme.txt isn't audio")
         for bad in ("../", "../../etc", "/etc", "drums/../../"):
             self.assertEqual(self.samples("lib", bad)[0], 400, bad)
+        # files only Live can read are not offered, and counted; asked for anyway, the reason is one plain line
+        code, d = self.samples("sd", "Packs")
+        self.assertEqual((sorted(f["name"] for f in d["files"]), d["live_only"]), (["Broken.aif", "Clap.wav"], 1))
+        self.assertEqual(self.samples("sd", "Kits/808")[1]["live_only"], 0)
+        def peaks(path):
+            try:
+                with urllib.request.urlopen("http://127.0.0.1:%d/samples/peaks?src=sd&path=%s" % (self.http, urllib.parse.quote(path)), timeout=10) as r:
+                    return r.status, {}
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        code, out = peaks("Packs/Guitar Chord.aif")
+        self.assertEqual((code, out["error"]), (415, "Ableton pack format: only Live can read it"))
+        code, out = self.post("/samples/send", {"src": "sd", "path": "Packs/Guitar Chord.aif", "track": 1})
+        if code == 200:
+            self.assertEqual(self.wait_xfer(out["id"])["error"], "Ableton pack format: only Live can read it")
+        from rackbridge.samples import ffmpeg_says
+        self.assertEqual(ffmpeg_says(b"[aiff @ 0xaaaaad55bda0] could not find COMM tag or invalid block_align value\n"
+                                     b"[in#0 @ 0xaaaaad506510] Error opening input: Invalid data found when processing input\nError opening input file x.\n"),
+                         "could not find COMM tag or invalid block_align value")       # what the page showed on 2026-11-24, all of it
+        self.assertEqual(ffmpeg_says(b"\n"), "ffmpeg gave no reason")
+        if shutil.which("ffmpeg"):
+            code, out = peaks("Packs/Broken.aif")
+            err = out["error"]
+            self.assertTrue(code == 415 and err.startswith("can't read this file: ") and "0x" not in err and "\n" not in err and len(err) < 150, err)
         self.assertEqual(self.post("/samples/send", {"src": "lib", "path": "../state.json", "track": 1})[0], 400)
 
     def test_s2_upload(self):
@@ -3114,6 +3148,8 @@ class SampleTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.lib, "sdcard", "Kits", "808", "BD.wav")))
         self.assertFalse(os.path.exists(os.path.join(self.lib, "sdcard", "Kits", "readme.txt")))
         self.assertEqual(self.post("/samples/import", {"path": "Kits"})[1]["copied"], 0, "already there")
+        self.assertEqual(self.post("/samples/import", {"path": "Packs"})[1]["copied"], 2)        # not the one only Live reads
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "sdcard", "Packs", "Guitar Chord.aif")))
 
     def test_s4_send_through_a_lossy_link(self):
         sys.path.insert(0, HERE)

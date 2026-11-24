@@ -1,4 +1,6 @@
 """Sample library on the T95 and transfers to the Daisy (ESC F)."""
+import re
+
 from .common import *
 from .util import *
 
@@ -28,17 +30,52 @@ def fix_wav_sizes(data):
     return bytes(b)
 
 
+LIVE_ONLY = "Ableton pack format: only Live can read it"
+_live_only = {}                 # (path, size, mtime) -> verdict; headers are read once
+
+
+def live_only(path, st=None):
+    """True for an AIFF in Ableton's own compression (AIFC, type 'able': the samples of Live's
+    packs). No decoder outside Live reads those, ffmpeg included."""
+    if not path.lower().endswith((".aif", ".aiff")):
+        return False
+    try:
+        st = st or os.stat(path)
+        key = (path, st.st_size, st.st_mtime)
+        if key not in _live_only:
+            with open(path, "rb") as f:
+                b = f.read(4096)        # the COMM chunk sits past the first 512 bytes in some
+            i = b.find(b"COMM")
+            if len(_live_only) > 50000:
+                _live_only.clear()
+            _live_only[key] = b[:4] == b"FORM" and b[8:12] == b"AIFC" and i > 0 and b[i + 26:i + 30] == b"able"
+        return _live_only[key]
+    except OSError:
+        return False
+
+
+def ffmpeg_says(stderr):
+    """ffmpeg's complaint as one plain line: no addresses, no second and third error"""
+    for line in stderr.decode(errors="replace").splitlines():
+        line = re.sub(r"^\[[^\]]*\]\s*", "", line.strip())
+        if line:
+            return line[:120]
+    return "ffmpeg gave no reason"
+
+
 def convert_for_daisy(path):
     """(wav bytes, how) ready for the Daisy: mono 16-bit 48 kHz via ffmpeg;
     without ffmpeg, a WAV goes as it is (the Daisy's parser takes PCM 8-32
     bit, float, any rate, up to 8 channels and mixes down itself)"""
+    if live_only(path):
+        raise ValueError(LIVE_ONLY)
     ff = shutil.which("ffmpeg")
     if ff:
         r = subprocess.run([ff, "-v", "error", "-nostdin", "-i", path, "-map_metadata", "-1",
                             "-fflags", "+bitexact", "-ac", "1", "-ar", "48000", "-sample_fmt", "s16",
                             "-f", "wav", "-"], capture_output=True, timeout=120)
         if r.returncode != 0 or len(r.stdout) < 44:
-            raise ValueError("can't convert: " + r.stderr.decode(errors="replace").strip()[:200])
+            raise ValueError("can't read this file: " + ffmpeg_says(r.stderr))
         return fix_wav_sizes(r.stdout), "mono 16-bit 48 kHz"
     if not path.lower().endswith((".wav", ".wave")):
         raise ValueError("only WAV without ffmpeg (sudo apt install ffmpeg)")
@@ -193,7 +230,7 @@ class SamplesMixin:
         p = safe_join(root, rel)
         if p is None or not os.path.isdir(p):
             return 400, {"error": "no such folder" if root else "no SD card in the T95"}
-        dirs, files = [], []
+        dirs, files, hidden = [], [], 0
         try:
             for e in sorted(os.scandir(p), key=lambda e: e.name.lower()):
                 if e.name.startswith("."):
@@ -201,11 +238,15 @@ class SamplesMixin:
                 if e.is_dir(follow_symlinks=False):
                     dirs.append(e.name)
                 elif e.is_file(follow_symlinks=False) and e.name.lower().endswith(AUDIO_EXT):
-                    files.append({"name": e.name, "size": e.stat().st_size})
+                    st = e.stat()
+                    if live_only(e.path, st):       # nothing on the box can play it: not offered
+                        hidden += 1
+                    else:
+                        files.append({"name": e.name, "size": st.st_size})
         except OSError as e:
             return 400, {"error": str(e)}
         rel = os.path.relpath(p, os.path.realpath(root))
-        return 200, {"src": src, "path": "" if rel == "." else rel, "dirs": dirs[:500], "files": files[:2000]}
+        return 200, {"src": src, "path": "" if rel == "." else rel, "dirs": dirs[:500], "files": files[:2000], "live_only": hidden}
 
     async def preview(self, src, rel, want_wav, edit=None):
         """What the Daisy would get of a file: (code, peaks JSON) or (200, wav bytes).
@@ -401,7 +442,7 @@ class SamplesMixin:
             items = []
             for d, _, fs in os.walk(src):
                 for f in fs:
-                    if f.lower().endswith(AUDIO_EXT) and not f.startswith("."):
+                    if f.lower().endswith(AUDIO_EXT) and not f.startswith(".") and not live_only(os.path.join(d, f)):
                         full = os.path.join(d, f)
                         items.append((full, os.path.join(dest_root, os.path.relpath(full, os.path.dirname(src)))))
         for a, b in items:

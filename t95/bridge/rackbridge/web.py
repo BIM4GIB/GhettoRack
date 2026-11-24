@@ -297,8 +297,9 @@ class WebMixin:
                 else:
                     await self.reply(writer, 404, "text/plain", b"unknown UI action\n")
             elif path == "/samples":
-                code, out = self.list_samples(params.get("src", "lib"),
-                                              urllib.parse.unquote(params.get("path", "")))
+                # in a thread: a big folder on the SD card takes a while, and MIDI must not wait for it
+                code, out = await asyncio.get_running_loop().run_in_executor(
+                    None, self.list_samples, params.get("src", "lib"), urllib.parse.unquote(params.get("path", "")))
                 await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
             elif path in ("/samples/peaks", "/samples/preview"):
                 wav = path.endswith("preview")

@@ -860,7 +860,8 @@ V.samples = {
     try {
       const r = await fetch("/samples?src=" + src + "&path=" + encodeURIComponent(smpPath[src])), d = await r.json();
       if (d.error) { if (smpPath[src]) { smpPath[src] = ""; return this.load(); } this.items = []; this.say(d.error); }
-      else { this.items = (smpPath[src] ? [{ up: true }] : []).concat(d.dirs.map(n => ({ dir: n })), d.files.map(f => ({ file: f.name, size: f.size }))); }
+      else { this.items = (smpPath[src] ? [{ up: true }] : []).concat(d.dirs.map(n => ({ dir: n })), d.files.map(f => ({ file: f.name, size: f.size })));
+        this.say(d.live_only ? d.live_only + (d.live_only === 1 ? " file" : " files") + " not shown: Ableton pack format, only Live reads it" : ""); }
     } catch (e) { this.items = []; this.say("T95 bridge not answering"); }
     if (curName === "samples" && smpMode === src) this.render();
   },

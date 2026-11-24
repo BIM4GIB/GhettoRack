@@ -236,6 +236,19 @@ them one on the map (REC still arms a loop).
 
 ## T95 and pages
 
+- Samples from the box's SD card (2026-11-24): the 64 GB exFAT card Rene put in
+  is read (19800 audio files). 11076 of them are AIFF in Ableton's own
+  compression (AIFC, type `able`: the samples of Live's packs), which only Live
+  decodes; tapping one gave a three-line ffmpeg error on the page. Now those
+  are not listed (the page says how many it left out), not imported, and any
+  other file ffmpeg can't read gets one plain line. Measured on that card with
+  the new code, read-only: all 11076 found, a pass over the whole card takes
+  23 s cold, the fullest folder has 347 such files. Still listed and
+  unreadable there: 102 AIFC files whose header ffmpeg rejects, 4 with no
+  compression name, 2 that are not AIFF inside. Settings > Devices still counts
+  all 19800 as samples. Not built: turning Live's files into something
+  readable (it would take Live itself to export them).
+
 - LISTEN: measure the real delay; a lighter format than raw PCM if Wi-Fi
   needs it.
 - Add-to-home-screen for the phone (full screen, no Safari bars).
