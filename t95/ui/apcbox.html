@@ -432,6 +432,7 @@ const st = {
   log: [], daisy: false, ctl: 0, bridge: null, ver: 0,
   lp: { len: 0, count: 0, qrec: 0, qpat: 0, qmute: 0, gain: 64, mode: 0, undo: 0, redo: 0, qfx: 1 },
   sets: Array.from({ length: 8 }, () => ({ exists: false })), trans: 0, transName: "", setOp: 0, kits: [], kitPg: [-1, -1], xfer: null, caps: {},
+  sm: null,       // loop memory (SM line, report 18), in samples: { total, free, largest, claims, slot, take }
 };
 const patName = p => "ABCDEFGH"[p >> 3] + (1 + (p & 7));
 const typeOf = t => (st.synth >> t & 1) ? "303" : st.tr[t].name.startsWith("[loop") ? "loop" : "sample";
@@ -578,13 +579,25 @@ function Seg(opts, get, pick) {
 /* A looper / quantise setting: shown at once, sent, and not overwritten by the Daisy's answer for a moment */
 const lpAct = (k, v, cmd) => { st.lp[k] = v; hold("lp." + k); act(cmd, "lp." + k); };
 const LEN_OPTS = [[0, "free"], [1, "1"], [2, "2"], [4, "4"], [8, "8"]];
+/* Loop memory. A bar in samples, as the Daisy counts it, and seconds for the eye */
+const barSamples = () => Math.floor(115200000 / st.bpm);
+const smSec = n => Math.round(n / 48000);
+/* A take of the chosen length on track t that the Daisy would refuse: the words for it ("" = there is room,
+   or nothing is known). Same sums as LooperStart in daisy/box.cpp; over a track's own long loop the Daisy decides. */
+function loopNoRoom(t) {
+  const m = st.sm, bars = st.lp.len; if (!m || !m.total || !bars || typeOf(t) === "loop") return "";
+  const need = bars * barSamples(); if (need + Math.floor(need / 64) <= m.slot) return "";
+  const want = Math.ceil((need + Math.floor(need / 16)) / 16384) * 16384; if (want <= m.largest) return "";
+  return `no room: ${bars} bars at ${Math.round(st.bpm / 10)} BPM (${smSec(need)} s, longest free ${smSec(m.largest)} s)`;
+}
 /* What the looper is doing on track t, in words ("" = nothing) */
 function lrecText(t) {
   if (!st.lrec || st.lrecT !== t) return "";
   const on = st.lp.qrec ? "beat" : "bar", m = st.lp.mode;
   if (st.lrec === 1) return m === 2 ? "sample: waiting for sound" : (m === 1 ? "overdub" : "loop") + " armed: starts on the next " + on + (st.lp.count && !m ? " (count-in)" : "");
   if (m === 2) return "● recording a sample: STOP when done";
-  return "● " + (m === 1 ? "overdubbing" : "recording") + ": bar " + (st.lrecBars + 1) + (st.lp.len ? " of " + st.lp.len : "");
+  const room = !m && !st.lp.len && st.sm && st.sm.take ? Math.floor(st.sm.take / barSamples()) : 0;
+  return "● " + (m === 1 ? "overdubbing" : "recording") + ": bar " + (st.lrecBars + 1) + (st.lp.len ? " of " + st.lp.len : room ? ", room for " + room : "");
 }
 /* A button that's on while it's held (roll) */
 function HoldBtn(cls, text, down, up) {
@@ -1407,12 +1420,13 @@ V.samples = {
   SL() {
     this.S1();
     const t = st.sel, ty = typeOf(t), rec = st.lrec && st.lrecT === t, m = st.lp.mode;
-    const txt = lrecText(t) || (st.lrec ? "busy on track " + (st.lrecT + 1) : ty === "loop" ? "loop on this track: OVERDUB adds to it, REC LOOP replaces it" : ty === "303" ? "a 303 track: recording makes it a sample track" : "");
-    this.msg.textContent = txt; this.msg.classList.toggle("bad", st.lrec === 2 && rec);
+    const full = st.lrec ? "" : loopNoRoom(t);
+    const txt = lrecText(t) || (st.lrec ? "busy on track " + (st.lrecT + 1) : full ? full : ty === "loop" ? "loop on this track: OVERDUB adds to it, REC LOOP replaces it" : ty === "303" ? "a 303 track: recording makes it a sample track" : "");
+    this.msg.textContent = txt; this.msg.classList.toggle("bad", (st.lrec === 2 && rec) || !!full);
     this.mon.set(st.mon); this.cnt.set(st.lp.count); this.len.upd(); this.qr.upd();
     if (!this.gain.dragging && !isBusy("lp.gain")) this.gain.set(st.lp.gain);
     const P = this.pads, cls = (b, on, blink, dis) => { b.classList.toggle("warn", !!on); b.classList.toggle("blink", !!blink); b.disabled = !!dis; };
-    cls(P.rec, rec && m === 0, rec && m === 0 && st.lrec === 1, st.lrec && !(rec && m === 0));
+    cls(P.rec, rec && m === 0, rec && m === 0 && st.lrec === 1, (st.lrec && !(rec && m === 0)) || !!full);
     cls(P.over, rec && m === 1, rec && m === 1 && st.lrec === 1, (st.lrec && !(rec && m === 1)) || (!st.lrec && ty !== "loop"));
     cls(P.shot, rec && m === 2, rec && m === 2 && st.lrec === 1, st.lrec && !(rec && m === 2));
     cls(P.stop, false, false, !st.lrec);
@@ -1803,7 +1817,9 @@ V.system = {
       ["clock", b.clock && b.clock.on ? b.clock.source + " " + b.clock.tempo : "off"],
       ["APC40 on the Daisy", st.apc ? "yes" : "no"], ["SD card in the Daisy", st.sd ? "ok" : "none"],
       ["CPU", Math.round(st.cpu / 10) + "%"], ["browsers", String(b.clients || 0)]];
-    this.kv.textContent = ""; for (const [k, v] of rows) this.kv.append(el("span", "", k), el("span", "", v));
+    const m = st.sm;   // loop memory: amber when not even an until-stopped take (two slots) fits in one piece
+    if (m && m.total) rows.splice(7, 0, ["loop memory", `${smSec(m.free)} s free of ${smSec(m.total)} s, longest ${smSec(m.largest)} s`, m.largest < 2 * m.slot]);
+    this.kv.textContent = ""; for (const [k, v, warn] of rows) { const e = el("span", "", v); if (warn) e.style.color = "var(--amber)"; this.kv.append(el("span", "", k), e); }
   },
   S() { }, P() { this.q.forEach(x => x.upd()); }, L() { this.logEl.textContent = st.log.slice(-sz(22, 14, 9)).join("\n"); },
 };
@@ -1864,9 +1880,11 @@ function line(l) {
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); call("B"); break;
     case "VF": st.fw = rest; break;      // the firmware's version (report 17)
+    case "SM": { const f = rest.split(" ").map(Number); if (f.length < 6) break;   // loop memory (report 18)
+      st.sm = { total: f[0], free: f[1], largest: f[2], claims: f[3], slot: f[4], take: f[5] }; call("P"); call("B"); break; }
   }
 }
-const REPORT_VERSION = 17;
+const REPORT_VERSION = 18;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

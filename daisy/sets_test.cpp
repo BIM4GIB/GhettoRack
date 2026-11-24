@@ -1984,7 +1984,7 @@ int main()
     T95Tick(2200, false, false);    // the bridge died with the pad held
     CHECK(!e.PerfFxActive(2));
 
-    /* ---- 16 s slots, spare blocks for the loops that don't fit one ---- */
+    /* ---- 16 s slots, spare memory for the loops that don't fit one ---- */
     {
         auto U = [](const char* a) {
             CHECK(BoxUiCommand(a, now_ms));
@@ -2006,21 +2006,18 @@ int main()
             WaitIdle();
             Tick(5);
         };
-        auto fill = [] { // every free block taken by someone else
-            for(int b = 0; b < spare_n; b++)
-                if(spare_owner[b] < 0)
-                {
-                    spare_owner[b] = 99;
-                    spare_held[b]  = true;
-                }
+        auto fill = [] { // all the room taken by someone else
+            for(uint32_t from = 0, at, len; from < spare_gran;) // every gap, whole
+            {
+                from = SpareGap(from, &at, &len);
+                if(len)
+                    CHECK(SpareClaim(99, len * kSpareGran) >= 0);
+            }
         };
         auto unfill = [] {
-            for(int b = 0; b < spare_n; b++)
-                if(spare_owner[b] == 99)
-                {
-                    spare_owner[b] = -1;
-                    spare_held[b]  = false;
-                }
+            for(int c = 0; c < kSpareClaims; c++)
+                if(spare[c].n && spare[c].owner == 99)
+                    SpareRelease(c);
         };
         const uint32_t cap = e.SlotCapacity();
         const int      T   = 2; // track 3
@@ -2031,7 +2028,7 @@ int main()
         kit(T);
         kit(5);
         Tick(5);
-        CHECK(cap == 768u * 1024u && spare_n == 8 && spare_block == 2 * cap && SpareFree() == 8);
+        CHECK(cap == 768u * 1024u && spare_gran == 768 && spare_block == 2 * cap && SpareFree() == 8);
         U("tempo 1000"); // a bar is 2400 ms: 8 bars are 19.2 s, more than a slot holds
         U("lrec count 0");
         U("quant rec 0");
@@ -2050,12 +2047,13 @@ int main()
         const int16_t  kit_a = s.data[100], kit_b = s.data[kit_len / 2];
         CHECK(kit_len > 0 && s.data == e.HomeData(T) && !e.IsLoop(T));
 
-        /* 8 bars don't: the take gets a spare block, and the track's sound stays
-           whole where it is. Dropped, the track is back on it and the block is free */
+        /* 8 bars don't: the take claims what 8 bars need and a sixteenth more (60
+           granules, not the 96 of two slots), and the track's sound stays whole
+           where it is. Dropped, the track is back on it and the claim is free */
         U("lrec len 8");
         U("lrec arm 3");
         CHECK(until(rec, 2600));
-        CHECK(SpareFree() == 7 && SpareOf(T) >= 0 && s.capacity == spare_block);
+        CHECK(SpareFree() == 7 && SpareOf(T) >= 0 && s.capacity == 60 * kSpareGran);
         Tick(3000);
         U("lrec cancel");
         Tick(5);
@@ -2072,6 +2070,7 @@ int main()
         const int      blk      = SpareOf(T);
         const uint32_t long_len = s.length;
         CHECK(blk >= 0 && SpareFree() == 7 && s.length > cap && s.data[cap + 5000] != 0);
+        CHECK(s.capacity == 57 * kSpareGran && SpareCap(blk) == s.capacity); // kept: trimmed to what it uses
         CHECK(!LooperCan(false) && IsRecPath(slot_path[T]));
         test_in_amp = 0.f;
         float pk = 0.f; // it plays past the 16 s mark
@@ -2179,7 +2178,7 @@ int main()
         WaitIdle();
         Tick(50);
         CHECK(e.IsLoop(T) && e.LoopBars(T) == 8 && s.length == take.size());
-        CHECK(SpareOf(T) >= 0 && SpareFree() == 7 && s.capacity == spare_block);
+        CHECK(SpareOf(T) >= 0 && SpareFree() == 7 && s.capacity == 57 * kSpareGran); // what the file needs
         CHECK(s.length == take.size() && !memcmp(s.data, take.data(), take.size() * 2));
         CHECK(!memcmp(e.HomeData(T + 1), next.data(), next.size() * 2));
         /* the same, loaded straight into the track (as when the staging pool is full) */
@@ -2271,7 +2270,191 @@ int main()
         kit(V);
         U("lrec len 0");
         U("tempo 1200");
-        printf("long loops: spare blocks, refusal, cancel, sets, cut loads ok\n");
+        /* room for less than two slots (60 granules, 20 s): a take of 8 bars at
+           100 BPM fits it and is kept there, trimmed to the 57 it uses */
+        {
+            const uint32_t G = kSpareGran;
+            U("tempo 1000");
+            test_in_amp = 0.3f;
+            const int gap = SpareClaim(99, 60 * G);
+            fill();
+            SpareRelease(gap);
+            CHECK(SpareFree() == 0);
+            U("lrec len 8");
+            U("lrec arm 3");
+            CHECK(until(rec, 2600));
+            CHECK(SpareOf(T) >= 0 && SpareBase(SpareOf(T)) == spare_mem && s.capacity == 60 * G);
+            CHECK(until(idle, 8 * 2400 + 200));
+            Tick(40);
+            CHECK(e.IsLoop(T) && e.LoopBars(T) == 8 && labs((long)s.length - 921600) < 8);
+            CHECK(SpareOf(T) >= 0 && s.capacity == 57 * G && SpareCap(SpareOf(T)) == 57 * G);
+            /* the 3 granules it gave back are a gap again; 8 more bars don't fit them,
+               but go over the track's own loop in place */
+            uint32_t at = 0, len = 0;
+            SpareGap(0, &at, &len);
+            CHECK(at == 57 && len == 3);
+            U("lrec arm 6");
+            Tick(30);
+            CHECK(!e.LiveRecBusy() && strstr(popup, "no room"));
+            const int16_t* was = s.data;
+            U("lrec arm 3");
+            CHECK(until(rec, 2600));
+            CHECK(s.data == was && s.capacity == 57 * G);
+            U("lrec cancel");
+            Tick(20);
+            WaitIdle();
+            Tick(5);
+            unfill();
+            kit(T);
+            Tick(5);
+            CHECK(SpareFree() == 8);
+            /* until stopped: two slots' worth while it runs, what it used once kept */
+            U("lrec len 0");
+            U("lrec arm 3");
+            CHECK(until(rec, 2600));
+            CHECK(SpareOf(T) >= 0 && s.capacity == spare_block);
+            Tick(7 * 2400 + 200);
+            U("lrec stop");
+            CHECK(until(idle, 2600));
+            Tick(40);
+            CHECK(e.IsLoop(T) && e.LoopBars(T) == 8 && s.length > cap);
+            CHECK(SpareOf(T) >= 0 && s.capacity == 57 * G && SpareCap(SpareOf(T)) == 57 * G);
+            test_in_amp = 0.f;
+            kit(T);
+            Tick(5);
+            U("tempo 1200");
+            CHECK(SpareFree() == 8 && s.data == e.HomeData(T));
+        }
+        /* two sets with a long loop on the same track and no room for both at
+           once: the new one loads after the switch, into what the old one held,
+           late but whole (it used to be cut to the slot) */
+        {
+            U("tempo 1000");
+            char first[40];
+            snprintf(first, sizeof(first), "set load %d", slot + 1);
+            U(first); // the set with the 8 bar loop on track 3
+            WaitIdle();
+            Tick(50);
+            CHECK(SpareOf(T) >= 0 && s.length == take.size());
+            fill();
+            CHECK(SpareFree() == 0);
+            U("lrec len 8"); // another loop over it, in place, saved as a second set
+            test_in_amp = 0.15f;
+            U("lrec arm 3");
+            CHECK(until(rec, 2600));
+            CHECK(until(idle, 8 * 2400 + 200));
+            Tick(40);
+            test_in_amp = 0.f;
+            CHECK(e.IsLoop(T) && SpareOf(T) >= 0 && s.length > cap && IsRecPath(slot_path[T]));
+            CHECK(memcmp(s.data, take.data(), 20000) != 0);
+            const int slot3 = FirstFreeSlot();
+            U("set new long loop two");
+            WaitIdle();
+            CHECK(slot3 >= 0 && set_exists[slot3] && open_set == slot3 && SpareFree() == 0);
+            U(first); // back to the first: nowhere to put its loop while this one plays
+            WaitIdle();
+            Tick(200);
+            WaitIdle();
+            Tick(50);
+            CHECK(open_set == slot && e.IsLoop(T) && e.LoopBars(T) == 8 && s.length == take.size());
+            CHECK(SpareOf(T) >= 0 && s.capacity == 57 * kSpareGran && SpareFree() == 0);
+            CHECK(!memcmp(s.data, take.data(), take.size() * 2));
+            unfill();
+            CHECK(SpareFree() == 7);
+            /* a long loop whose file can't be read: its claim is given back */
+            char wavp[kPathLen];
+            snprintf(wavp, sizeof(wavp), "%s", setf.file[T]);
+            kit(T);
+            CHECK(SpareFree() == 8 && wavp[0] && wavp[0] != '@');
+            CHECK(truncate((root + "/" + wavp).c_str(), 44) == 0);
+            U(first);
+            WaitIdle();
+            Tick(200);
+            WaitIdle();
+            Tick(50);
+            CHECK(open_set == slot && SpareFree() == 8 && s.data == e.HomeData(T) && !e.IsLoop(T));
+            kit(T);
+            U("lrec len 0");
+            U("tempo 1200");
+        }
+        /* the SM line: all of it, free, the longest free piece, claims, a slot,
+           and what the loop take under way has room for */
+        {
+            const uint32_t G = kSpareGran;
+            auto sm = [](int i) {
+                unsigned long f[6] = {};
+                sscanf(rep_sm, "SM %lu %lu %lu %lu %lu %lu", f, f + 1, f + 2, f + 3, f + 4, f + 5);
+                return (uint32_t)f[i];
+            };
+            Tick(150);
+            CHECK(sm(0) == 768 * G && sm(1) == 768 * G && sm(2) == 768 * G && sm(3) == 0 && sm(4) == cap && sm(5) == 0);
+            const int a = SpareClaim(99, 100 * G), b = SpareClaim(99, 200 * G);
+            SpareRelease(a); // 100 free, 200 taken, 468 free
+            Tick(150);
+            CHECK(sm(1) == 568 * G && sm(2) == 468 * G && sm(3) == 1);
+            U("tempo 1000");
+            U("lrec len 0"); // until stopped: two slots' worth, in the gap of 100
+            test_in_amp = 0.3f;
+            U("lrec arm 3");
+            CHECK(until(rec, 2600));
+            Tick(150);
+            CHECK(sm(5) == spare_block && sm(1) == 472 * G && sm(2) == 468 * G && sm(3) == 2);
+            U("lrec cancel");
+            Tick(20);
+            WaitIdle();
+            Tick(150);
+            test_in_amp = 0.f;
+            CHECK(sm(5) == 0 && sm(1) == 568 * G);
+            SpareRelease(b);
+            U("tempo 1200");
+            Tick(150);
+            CHECK(sm(1) == 768 * G && sm(3) == 0);
+        }
+        /* the table itself: claims by size, each in one piece, the lowest gap
+           that fits, nothing overlapping, room back when one is let go */
+        {
+            const uint32_t G = kSpareGran;
+            CHECK(SpareFree() == 8 && SpareClaim(99, 769 * G) < 0); // more than there is
+            const int a = SpareClaim(99, 10 * G), b = SpareClaim(99, 100 * G), c = SpareClaim(99, G - 1);
+            CHECK(a >= 0 && b >= 0 && c >= 0 && SpareBase(a) == spare_mem);
+            CHECK(SpareBase(b) == spare_mem + 10 * G && SpareBase(c) == spare_mem + 110 * G);
+            CHECK(SpareCap(a) == 10 * G && SpareCap(b) == 100 * G && SpareCap(c) == G);
+            CHECK(SpareIndex(SpareBase(b)) == b && SpareIndex(SpareBase(b) + 1) < 0 && SpareIndex(nullptr) < 0);
+            CHECK(SpareFree() == 6); // 657 granules behind them: 6 of 96
+            SpareRelease(b);         // a gap of 100 in the middle
+            CHECK(SpareFree() == 7 && SpareIndex(spare_mem + 10 * G) < 0);
+            const int d = SpareClaim(99, 101 * G); // doesn't fit the gap: behind the last one
+            CHECK(d >= 0 && SpareBase(d) == spare_mem + 111 * G);
+            const int f = SpareClaim(99, 60 * G), g = SpareClaim(99, 40 * G); // both into the gap
+            CHECK(SpareBase(f) == spare_mem + 10 * G && SpareBase(g) == spare_mem + 70 * G);
+            const int h = SpareClaim(99, 556 * G); // exactly what is left
+            CHECK(h >= 0 && SpareBase(h) + SpareCap(h) == spare_mem + 768 * G);
+            CHECK(SpareFree() == 0 && SpareClaim(99, 1) < 0);
+            for(int x = 0; x < kSpareClaims; x++) // no two share a granule
+                for(int y = x + 1; y < kSpareClaims; y++)
+                    if(spare[x].n && spare[y].n)
+                        CHECK(spare[x].at + spare[x].n <= spare[y].at || spare[y].at + spare[y].n <= spare[x].at);
+            SpareTrim(a, 3 * G + 1); // down to 4, never up, never to nothing
+            CHECK(SpareCap(a) == 4 * G);
+            SpareTrim(a, 9 * G);
+            CHECK(SpareCap(a) == 4 * G);
+            SpareTrim(a, 0);
+            CHECK(SpareCap(a) == G && SpareIndex(spare_mem) == a);
+            unfill();
+            CHECK(SpareFree() == 8);
+            /* the table has 24 entries: small claims run out of entries before room */
+            int got = 0;
+            while(SpareClaim(99, 1) >= 0)
+                got++;
+            CHECK(got == kSpareClaims && SpareFree() == 0);
+            unfill();
+            /* a claim nobody holds whose track points elsewhere is swept */
+            const int k = SpareClaim(T);
+            SpareHold(k, false);
+            Tick(2);
+            CHECK(k >= 0 && SpareFree() == 8);
+        }
+        printf("long loops: spare memory, refusal, cancel, sets, cut loads ok\n");
     }
 
     CHECK(e.nan_count == 0);

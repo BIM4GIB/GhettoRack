@@ -1938,10 +1938,32 @@ class PageControlTest(unittest.TestCase):
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[8] == 0 and self.lp()[7] == self.s(7) + 1, 5), self.last("LP "))
                 pg.locator("button.bigpad:has-text('UNDO TAKE')").click()
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[7] == 0, 5))
-                self.do("stop", "lrec len 0")
+                # loop memory (SM line, report 18): a take until stopped says how many bars it has room for
+                self.do("stop", "lrec len 0", "tempo 1000")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 0 and self.s(5) == 1000, 5))
+                pg.locator("button.bigpad:has-text('REC LOOP')").click()
+                pg.wait_for_function("document.querySelector('.msg').textContent.includes('room for 13')")   # two slots at 100 BPM
+                self.do("lrec cancel")
+                self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0, 5))
+                # no piece long enough for the chosen bars: said before arming, REC LOOP dimmed
+                pg.wait_for_function("!document.querySelectorAll('button.bigpad')[0].disabled")
+                self.assertEqual(self.last("SM ").split()[1:6], ["12582912", "12582912", "12582912", "0", "786432"])
+                self.do("lrec len 8")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 8, 5))
+                pg.wait_for_function("document.querySelector('.lset .seg span.on').textContent === '8'")
+                self.assertNotIn("no room", pg.text_content(".msg"))
+                pg.evaluate("line('SM 12582912 2000000 491520 9 786432 0')")
+                self.assertEqual(pg.text_content(".msg"), "no room: 8 bars at 100 BPM (19 s, longest free 10 s)")
+                self.assertTrue(pg.locator("button.bigpad:has-text('REC LOOP')").is_disabled())
+                pg.evaluate("line('SM 12582912 2000000 983040 9 786432 0')")        # 20 s in one piece: it fits
+                self.assertNotIn("no room", pg.text_content(".msg"))
+                self.assertFalse(pg.locator("button.bigpad:has-text('REC LOOP')").is_disabled())
+                self.do("stop", "lrec len 0", "tempo 1200")
+                self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 0 and self.s(5) == 1200, 5))
                 # quantise on the System view
                 pg.goto("http://127.0.0.1:%d/apcbox?v=system" % self.http)
                 pg.wait_for_selector(".qrow .seg")
+                pg.wait_for_function("document.querySelector('.kv').textContent.includes('262 s free of 262 s, longest 262 s')")
                 self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"), [False, False])
                 pg.click(".qrow .qc:nth-child(1) span:text-is('step')")
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[3] == 2, 5))

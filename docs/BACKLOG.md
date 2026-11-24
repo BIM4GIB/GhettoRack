@@ -4,6 +4,32 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.20: spare memory as one region with claims by size (built 2026-11-24, NOT flashed, nothing tried on the rig)
+
+`daisy/release/ApcBox.bin` is v13.20. Control protocol 10 as before, report 18
+(`SM`). SDRAM 95.9% as before. Desktop tests and the page in a browser against
+the firmware simulator only.
+
+- The 8 fixed blocks of 32 s are a table of up to 24 claims over the same 262 s,
+  each in one piece. A take of chosen bars claims what it needs plus a
+  sixteenth; a kept take gives back what it didn't use; a take until stopped is
+  capped at 32 s (Rene's call) and trimmed once kept; a set's long loop claims
+  the length of its file.
+- Two sets with long loops and no room for both: the new set's track loads
+  after the switch, late but whole (Rene's call), silent until then. How long
+  that is on the real card is not known.
+- Fixed on the way: a staged long loop whose file could not be read kept its
+  memory for good; a built-in sound standing in for a missing loop was flagged
+  as a loop.
+- The page: looper view says "no room" with the numbers and dims REC LOOP, and
+  "room for N" bars during a take until stopped; System shows loop memory.
+- Not built: long plain samples in spare memory (still cut to a slot), a fixed
+  claim for a guitar effects module, moving claims together (no compaction: a
+  fixed user in the middle can leave much free and no piece long enough).
+- To try on the rig: 8 bar takes at 100 BPM until "no room" (about 13 should
+  fit where 8 did), a take until stopped, switching between two sets that both
+  have a long loop on the same track, the page's numbers against what happens.
+
 ## v13.19: looper and quantise settings survive a power cycle (on the rig, flashed 2026-11-24)
 
 `daisy/release/ApcBox.bin`. Control protocol 10 and report 17 as before; SDRAM

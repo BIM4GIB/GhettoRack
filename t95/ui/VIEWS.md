@@ -109,6 +109,10 @@ live, with markers and bar lines), pad, list row with waveform.
 - v13.16 (control protocol 10): 16 s slots, 8 spare blocks for loops that don't
   fit one. No page change: the looper says "no room" in the popup line.
 - v13.17 (report 17): `VF`, the firmware's version; Settings > Devices shows it.
+- v13.20 (report 18): `SM`, loop memory. The looper view says "no room: 8 bars
+  at 100 BPM (19 s, longest free 10 s)" before a take is armed and dims REC
+  LOOP, and "room for 13" during a take that runs until stopped; System >
+  Links has a "loop memory" line, amber when no piece of 32 s is free.
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

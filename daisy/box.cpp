@@ -486,67 +486,169 @@ void     SetsJobDone(const Job& j, bool ok, uint32_t len, float rate, bool defer
 void     SetsTrackLoaded(int t);
 void     StagePlace(Job& j);
 
-/* ---- long loops: spare blocks for what doesn't fit a track's slot ----
-   A block is two slots long. A track's slot points at its block while the long
-   loop is on it. A block is free again as soon as the slot points somewhere
-   else, whoever moved it (a load, a kit, a set switch, a new take): the sweep
-   in BoxPoll finds that out, nobody has to hand a block back. */
-constexpr int kSpareMax = 16;
-int16_t*      spare_mem   = nullptr;
-uint32_t      spare_block = 0;       // samples in a block
-int           spare_n     = 0;
-int8_t        spare_owner[kSpareMax]; // the track, -1 = free
-bool          spare_held[kSpareMax];  // claimed for a take or a load still under way: not swept
-int           take_block   = -1;      // the block the take under way records into
-int           take_prev    = -1;      // the block the track's long loop is in meanwhile (a dropped take goes back to it)
-bool          take_swapped = false;   // that take has its own buffer: what the track held is untouched
-int           load_block   = -1;      // the block the load under way fills
+/* ---- long loops: spare memory for what doesn't fit a track's slot ----
+   One region, handed out as claims: a start and a size in granules, each claim
+   in one piece (the audio callback only ever sees a pointer and a capacity).
+   Free space is the gaps between claims; a new claim takes the lowest gap it
+   fits. Nothing here allocates, and all of it runs in the main loop.
+   A take of a chosen length and a loaded loop claim what they need, a take
+   that runs until stopped claims two slots (spare_block), and a kept take
+   gives back what it didn't use. A track's slot points at its claim while the
+   long loop is on it. A claim is free again as soon as
+   the slot points somewhere else, whoever moved it (a load, a kit, a set
+   switch, a new take): the sweep in BoxPoll finds that out, nobody has to hand
+   it back. */
+constexpr uint32_t kSpareGran   = 16384; // samples in a granule (0.34 s)
+constexpr int      kSpareClaims = 24;
+struct SpareEntry
+{
+    uint16_t at;    // first granule
+    uint16_t n;     // granules, 0 = this entry is unused
+    int8_t   owner; // the track
+    bool     held;  // claimed for a take or a load still under way: not swept
+};
+int16_t*   spare_mem   = nullptr;
+uint32_t   spare_gran  = 0;         // granules in the region
+uint32_t   spare_block = 0;         // samples in a claim of the usual size: two slots
+SpareEntry spare[kSpareClaims];
+int        take_block   = -1;       // the claim the take under way records into
+int        take_prev    = -1;       // the claim the track's long loop is in meanwhile (a dropped take goes back to it)
+bool       take_swapped = false;    // that take has its own buffer: what the track held is untouched
+int        load_block   = -1;       // the claim the load under way fills
 
 void SpareInit()
 {
     uint32_t n  = 0;
     spare_mem   = plat->SpareMem(&n);
     spare_block = eng->SlotCapacity() * 2;
-    spare_n     = spare_mem && spare_block ? (int)(n / spare_block) : 0;
-    if(spare_n > kSpareMax)
-        spare_n = kSpareMax;
-    for(int b = 0; b < kSpareMax; b++)
-    {
-        spare_owner[b] = -1;
-        spare_held[b]  = false;
-    }
+    spare_gran  = spare_mem ? n / kSpareGran : 0;
+    if(spare_gran > 0xFFFFu)
+        spare_gran = 0xFFFFu;
+    for(int c = 0; c < kSpareClaims; c++)
+        spare[c] = SpareEntry{0, 0, -1, false};
     take_block = take_prev = load_block = -1;
     take_swapped                        = false;
 }
-int16_t* SpareBase(int b) { return spare_mem + (size_t)b * spare_block; }
-/** The block `p` is the start of, -1 = not one */
+int16_t* SpareBase(int c) { return spare_mem + (size_t)spare[c].at * kSpareGran; }
+/** Samples claim c holds */
+uint32_t SpareCap(int c) { return (uint32_t)spare[c].n * kSpareGran; }
+uint32_t SpareGranules(uint32_t samples) { return (samples + kSpareGran - 1) / kSpareGran; }
+/** The claim `p` is the start of, -1 = not one */
 int SpareIndex(const int16_t* p)
 {
-    for(int b = 0; b < spare_n; b++)
-        if(p == SpareBase(b))
-            return b;
+    if(!spare_mem || p < spare_mem)
+        return -1;
+    for(int c = 0; c < kSpareClaims; c++)
+        if(spare[c].n && p == SpareBase(c))
+            return c;
     return -1;
 }
-/** The block track t's sound is in, -1 = it's in its own slot */
+/** The claim track t's sound is in, -1 = it's in its own slot */
 int SpareOf(int t) { return SpareIndex(eng->GetSlot(t).data); }
+/** The next gap at or after granule `from`: where it starts and how long it
+    is (0 = it starts at the end of the region); returns where the claim
+    behind it ends, to go on from */
+uint32_t SpareGap(uint32_t from, uint32_t* at, uint32_t* len)
+{
+    for(;;)
+    {
+        uint32_t next = spare_gran, end = spare_gran;
+        bool     inside = false;
+        for(int c = 0; c < kSpareClaims; c++)
+        {
+            const SpareEntry& e = spare[c];
+            if(!e.n || (uint32_t)e.at + e.n <= from)
+                continue;
+            if(e.at <= from) // `from` is inside this claim: go on behind it
+            {
+                from   = (uint32_t)e.at + e.n;
+                inside = true;
+                break;
+            }
+            if(e.at < next)
+            {
+                next = e.at;
+                end  = (uint32_t)e.at + e.n;
+            }
+        }
+        if(inside)
+            continue;
+        if(from > spare_gran)
+            from = spare_gran;
+        *at  = from;
+        *len = next - from;
+        return end;
+    }
+}
+/** How many more claims of the usual size fit */
 int SpareFree()
 {
-    int n = 0;
-    for(int b = 0; b < spare_n; b++)
-        n += spare_owner[b] < 0;
-    return n;
+    const uint32_t g = SpareGranules(spare_block);
+    int            n = 0, entries = 0;
+    if(!g)
+        return 0;
+    for(int c = 0; c < kSpareClaims; c++)
+        entries += !spare[c].n;
+    for(uint32_t from = 0, at, len; from < spare_gran;)
+    {
+        from = SpareGap(from, &at, &len);
+        n += (int)(len / g);
+    }
+    return n < entries ? n : entries;
 }
-/** A free block for track t, held until whoever asked lets go; -1 = none */
-int SpareClaim(int t)
+/** `samples` of spare memory for track t (the usual size if 0), in the lowest
+    gap it fits, held until whoever asked lets go; -1 = no room */
+int SpareClaim(int t, uint32_t samples = 0)
 {
-    for(int b = 0; b < spare_n; b++)
-        if(spare_owner[b] < 0)
+    const uint32_t g = SpareGranules(samples ? samples : spare_block);
+    int            c = 0;
+    while(c < kSpareClaims && spare[c].n)
+        c++;
+    if(!g || c == kSpareClaims)
+        return -1;
+    for(uint32_t from = 0, at, len; from < spare_gran;)
+    {
+        from = SpareGap(from, &at, &len);
+        if(len >= g)
         {
-            spare_owner[b] = (int8_t)t;
-            spare_held[b]  = true;
-            return b;
+            spare[c] = SpareEntry{(uint16_t)at, (uint16_t)g, (int8_t)t, true};
+            return c;
         }
+    }
     return -1;
+}
+/** What the page shows: samples in the region, free, in the longest gap, and
+    how many claims there are */
+void SpareStat(uint32_t* total, uint32_t* free_, uint32_t* largest, int* claims)
+{
+    uint32_t fr = 0, big = 0;
+    int      n  = 0;
+    for(int c = 0; c < kSpareClaims; c++)
+        n += spare[c].n != 0;
+    for(uint32_t from = 0, at, len; from < spare_gran;)
+    {
+        from = SpareGap(from, &at, &len);
+        fr += len;
+        if(len > big)
+            big = len;
+    }
+    *total   = spare_gran * kSpareGran;
+    *free_   = fr * kSpareGran;
+    *largest = n < kSpareClaims ? big * kSpareGran : 0; // no entry left: nothing can be claimed
+    *claims  = n;
+}
+/** Held: the sweep leaves the claim alone whatever its track's slot points at */
+void SpareHold(int c, bool held) { spare[c].held = held; }
+void SpareRelease(int c) { spare[c] = SpareEntry{0, 0, -1, false}; }
+/** Claim c keeps only what `samples` need; the rest behind it is free again.
+    It never grows, and never goes below one granule. */
+void SpareTrim(int c, uint32_t samples)
+{
+    uint32_t g = SpareGranules(samples);
+    if(g < 1)
+        g = 1;
+    if(g < spare[c].n)
+        spare[c].n = (uint16_t)g;
 }
 /** Track t's slot is empty or locked and gets another sound: back to its own memory */
 void SpareHome(int t)
@@ -560,14 +662,14 @@ void SpareSweep()
     {
         /* kept or dropped: the slot says which of the two is in use now */
         if(take_block >= 0)
-            spare_held[take_block] = false;
+            SpareHold(take_block, false);
         if(take_prev >= 0)
-            spare_held[take_prev] = false;
+            SpareHold(take_prev, false);
         take_block = take_prev = -1;
     }
-    for(int b = 0; b < spare_n; b++)
-        if(spare_owner[b] >= 0 && !spare_held[b] && eng->GetSlot(spare_owner[b]).data != SpareBase(b))
-            spare_owner[b] = -1;
+    for(int c = 0; c < kSpareClaims; c++)
+        if(spare[c].n && !spare[c].held && eng->GetSlot(spare[c].owner).data != SpareBase(c))
+            SpareRelease(c);
 }
 
 constexpr int kMaxJobs = 16;
@@ -684,8 +786,8 @@ void FinishJob(bool ok)
     int t = cur_job.track;
     if(load_block >= 0)
     {
-        spare_held[load_block] = false; // the slot points at it, or it's free again
-        load_block             = -1;
+        SpareHold(load_block, false); // the slot points at it, or it's free again
+        load_block = -1;
     }
     if(cur_job.stage)
     {
@@ -748,22 +850,30 @@ void StageBegin()
         SetsJobDone(j, false, 0, 1.f, false);
         return;
     }
-    /* longer than a slot: a loop goes straight into a spare block (no staging,
-       no copy afterwards); anything else, or a loop with no block free, is cut */
+    /* longer than a slot: a loop goes straight into spare memory, as much as
+       the file needs (no staging, no copy afterwards). No room for it while
+       the old set's long loops are still there: it loads after the switch,
+       when they are gone, late but whole. Anything else is cut. */
     uint32_t want = wav.TotalFrames();
     if(want > eng->SlotCapacity())
     {
-        const int b = j.loop_bars ? SpareClaim(j.track) : -1;
-        if(b >= 0)
+        if(j.loop_bars)
         {
+            const int b = SpareClaim(j.track, want);
+            if(b < 0)
+            {
+                plat->FileClose();
+                Log("set: track %d long loop loads after the switch (no room before)", j.track + 1);
+                SetsJobDone(j, true, 0, 1.f, true);
+                return;
+            }
             j.dst = SpareBase(b); // held until the switch has happened (AfterSwap)
-            j.cap = spare_block;
+            j.cap = SpareCap(b);
             load_state = kLoadRead;
             return;
         }
         want = eng->SlotCapacity();
-        Log("set: track %d sound cut to %d s%s", j.track + 1, (int)eng->SlotSeconds(),
-            j.loop_bars ? " (no room for a long loop)" : "");
+        Log("set: track %d sound cut to %d s", j.track + 1, (int)eng->SlotSeconds());
     }
     if(want > j.cap) // too big for what's left: load it after the switch
     {
@@ -817,7 +927,7 @@ void LoaderStep(uint32_t now)
                 return;
             Slot& s  = eng->GetSlot(t);
             s.length = 0;
-            SpareHome(t); // a long loop it held is gone with this; its block frees itself
+            SpareHome(t); // a long loop it held is gone with this; its claim frees itself
             if(IsSynthPath(cur_job.path))
             {
                 eng->SetSynth(t, true);
@@ -849,12 +959,13 @@ void LoaderStep(uint32_t now)
                 FinishJob(false);
                 return;
             }
-            /* a saved loop longer than a slot: into a spare block if one is free, else cut */
+            /* a saved loop longer than a slot: into spare memory if there is room, else cut */
             if(cur_job.loop_bars && wav.TotalFrames() > eng->SlotCapacity())
             {
-                load_block = SpareClaim(t);
+                SpareSweep(); // what this track held until now is free for it
+                load_block = SpareClaim(t, wav.TotalFrames());
                 if(load_block >= 0)
-                    eng->SlotPoint(t, SpareBase(load_block), spare_block);
+                    eng->SlotPoint(t, SpareBase(load_block), SpareCap(load_block));
                 else
                     Log("track %d: no room for a long loop, cut to %d s", t + 1, (int)eng->SlotSeconds());
             }
@@ -1288,11 +1399,13 @@ bool LooperStart(int t, int mode)
             return false;
         }
     }
-    /* where the take goes: the track's own slot, or a spare block when the
-       chosen length doesn't fit a slot at this tempo. No block free: say so now,
-       before anything is armed. A take with no chosen length gets a block if
-       there is one (it moves into the slot afterwards if it fits) and the slot
-       if not. */
+    /* where the take goes: the track's own slot, or spare memory when the
+       chosen length doesn't fit a slot at this tempo: as much as the bars need
+       and a sixteenth more, in case the tempo is eased down meanwhile (what it
+       doesn't use goes back when it's kept). No room: say so now, before
+       anything is armed. A take with no chosen length gets two slots' worth if
+       there is room (it moves into the slot afterwards if it fits) and the
+       slot if not. */
     int16_t* buf = eng->HomeData(t);
     uint32_t cap = eng->SlotCapacity();
     int      blk = -1;
@@ -1302,13 +1415,13 @@ bool LooperStart(int t, int mode)
         const uint32_t need = (uint32_t)bars * eng->BarSamples();
         if(bars == 0 || need + need / 64 > cap)
         {
-            blk = SpareClaim(t);
+            blk = SpareClaim(t, bars ? need + need / 16 : 0);
             if(blk >= 0)
             {
                 buf = SpareBase(blk);
-                cap = spare_block;
+                cap = SpareCap(blk);
             }
-            else if(SpareOf(t) >= 0) // over its own long loop, in place
+            else if(SpareOf(t) >= 0 && (!bars || need <= eng->GetSlot(t).capacity)) // over its own long loop, in place
             {
                 buf = eng->GetSlot(t).data;
                 cap = eng->GetSlot(t).capacity;
@@ -1316,7 +1429,7 @@ bool LooperStart(int t, int mode)
             else if(bars)
             {
                 Popup("no room: %d bars at %d BPM", bars, (int)(eng->global.bpm + 0.5f));
-                Log("looper: no spare block free for %d bars at %d BPM on track %d", bars,
+                Log("looper: no room in spare memory for %d bars at %d BPM on track %d", bars,
                     (int)(eng->global.bpm + 0.5f), t + 1);
                 return false;
             }
@@ -1331,7 +1444,7 @@ bool LooperStart(int t, int mode)
         take_swapped = buf != eng->GetSlot(t).data;
         take_prev    = take_swapped ? SpareOf(t) : -1;
         if(take_prev >= 0)
-            spare_held[take_prev] = true;
+            SpareHold(take_prev, true);
     }
     const char* q = eng->quant_rec ? "beat" : "bar";
     if(mode == Engine::kRecOverdub)
@@ -2955,13 +3068,13 @@ void ComposeScreen(uint32_t now)
  *   K  kit page                           W  LED wanted / confirmed
  *   E  raw MIDI from the APC40            L  log text
  *   Q  303 track notes, current pattern   A  303 track knobs 0-127
- *   V  report version (once a second)
+ *   V  report version (once a second)    SM loop memory: total, free, longest free piece
  *  S fields 52-55: copy source (-1 none), open set (-1 none), unsaved, set busy
  */
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 17; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version)
+constexpr int kReportVersion = 18; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version); 18: SM (loop memory)
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -2996,6 +3109,7 @@ int      rep_notes_pat[kTracks];
 uint8_t  rep_acid[kTracks][8];
 char     rep_name[kTracks][kPathLen];
 char     rep_lp[48] = "";
+char     rep_sm[72] = "";
 void     ForgetReportedName(int t) { rep_name[t][0] = 0; }
 int      rep_browse[4] = {-2, -2, -2, -2};
 int      rep_kit[4]    = {-2, -2, -2, -2};
@@ -3027,6 +3141,7 @@ void ForceFullReport()
     rep_trans    = -1;
     rep_ck[0]    = 0;
     rep_lp[0]    = 0;
+    rep_sm[0]    = 0;
     map_report   = true;
     rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
@@ -3423,6 +3538,25 @@ void Report(uint32_t now)
         }
     }
     {
+        /* loop memory (samples): all of it, free, the longest free piece, the
+           number of claims, what a track's own slot holds, and what the loop
+           take under way has room for (0 = none) */
+        char     sm[72];
+        uint32_t total, fr, big;
+        int      n;
+        SpareStat(&total, &fr, &big, &n);
+        const bool take = eng->LiveRecState() != 0 && eng->LiveRecMode() == Engine::kRecLoop
+                          && eng->LiveRecTrack() >= 0;
+        snprintf(sm, sizeof(sm), "SM %lu %lu %lu %d %lu %lu", (unsigned long)total, (unsigned long)fr,
+                 (unsigned long)big, n, (unsigned long)eng->SlotCapacity(),
+                 (unsigned long)(take ? eng->GetSlot(eng->LiveRecTrack()).capacity : 0));
+        if(strcmp(sm, rep_sm))
+        {
+            strcpy(rep_sm, sm);
+            Out("%s", sm);
+        }
+    }
+    {
         int  step    = eng->ClockStep();
         bool playing = eng->Playing();
         if(playing != rep_cl_play || (playing && step != rep_cl_step))
@@ -3734,7 +3868,7 @@ void BoxPoll(uint32_t now)
         if(eng->TakeLiveRecDone(&t, &bars, &mode))
         {
             slot_gen[t]++;
-            /* a take in a spare block that turned out to fit the slot moves there */
+            /* a take in spare memory that turned out to fit the slot moves there */
             bool lng = SpareOf(t) >= 0;
             if(lng && mode != Engine::kRecOverdub && eng->GetSlot(t).length <= eng->SlotCapacity())
             {
@@ -3743,9 +3877,15 @@ void BoxPoll(uint32_t now)
                 eng->SlotHome(t, len);
                 lng = false;
             }
+            else if(lng && mode != Engine::kRecOverdub) // it stays: what it didn't use is free again
+            {
+                const int c = SpareOf(t);
+                SpareTrim(c, eng->GetSlot(t).length);
+                eng->SlotPoint(t, SpareBase(c), SpareCap(c));
+            }
             if(lundo.track == t)
             {
-                /* no undo for a take in a spare block, nor when what it replaced
+                /* no undo for a take in spare memory, nor when what it replaced
                    was a recording too long to keep */
                 lundo.valid = mode == Engine::kRecOverdub
                                   ? lundo.data // a long loop wasn't kept: its overdub stays
@@ -3776,7 +3916,7 @@ void BoxPoll(uint32_t now)
                 {
                     Popup("loop %d: %d bar%s", t + 1, bars, bars == 1 ? "" : "s");
                     Log("recorded a %d bar loop into track %d%s", bars, t + 1,
-                        lng ? " (long: in a spare block, no undo)" : "");
+                        lng ? " (long: in spare memory, no undo)" : "");
                 }
             }
         }

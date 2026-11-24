@@ -75,11 +75,13 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   hot-swap, sync set switching on the real card). Say so.
 - `box.cpp` is shared by the firmware and the Mac build: no Daisy-only calls
   there; Daisy specifics go in `main.cpp`, `tft.h`, `usbdev.cpp`.
-- SDRAM is ~96% used from v13.16 (16 slots of 16 s, 8 spare blocks of 32 s for
-  long loops, staging pool, one slot of looper undo). Verify against the current
+- SDRAM is ~96% used from v13.16 (16 slots of 16 s, 262 s of spare memory for
+  long loops, staging pool, one slot of looper undo). From v13.20 the spare
+  memory is one region handed out as claims by size (`Spare...` in
+  `daisy/box.cpp`), not 8 fixed blocks. Verify against the current
   build with `arm-none-eabi-size -A` before adding buffers. 64 MB total SDRAM is
   not 64 MB available for incoming samples. A sound longer than a slot is cut on
-  load; only a recorded loop can take a spare block (`Spare...` in `daisy/box.cpp`).
+  load; only a recorded loop can go into spare memory.
 - The screen (SunFounder 3.5", ST7796U behind shift registers) needs 16-bit
   command words; `tft.h` defaults to that, encoder held at power-up switches.
 
@@ -87,7 +89,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 17 are separate version numbers.
+  version 18 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features

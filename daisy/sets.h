@@ -459,6 +459,8 @@ void SetsJobDone(const Job& j, bool ok, uint32_t len, float rate, bool defer)
 {
     int t = j.track;
     stage_jobs--;
+    if((defer || !ok) && SpareIndex(j.dst) >= 0) // a long loop that didn't load: its claim back
+        SpareRelease(SpareIndex(j.dst));
     if(defer)
     {
         deferred[t] = true; // loads into the track after the switch
@@ -563,7 +565,7 @@ void LoadSetBegin(int slot)
             }
             j->stage     = true;
             j->dst       = stage_mem_p; // fixed up when it starts
-            j->loop_bars = setf.loop_bars[t]; // a loop longer than a slot may take a spare block
+            j->loop_bars = setf.loop_bars[t]; // a loop longer than a slot may go into spare memory
             stage_jobs++;
         }
     load_slot  = slot;
@@ -644,14 +646,14 @@ void LoadStep()
         case 3:
         {
             /* staged sounds back into their own slots, a piece at a time
-               (a long loop that loaded into a spare block stays there) */
+               (a long loop that loaded into spare memory stays there) */
             while(copy_t < kTracks && (!set_swap.data[copy_t] || SpareIndex(set_swap.data[copy_t]) >= 0))
             {
                 const int b = set_swap.data[copy_t] ? SpareIndex(set_swap.data[copy_t]) : -1;
                 if(b >= 0)
                 {
-                    eng->SlotPoint(copy_t, SpareBase(b), spare_block);
-                    spare_held[b] = false; // from here the slot keeps it
+                    eng->SlotPoint(copy_t, SpareBase(b), SpareCap(b));
+                    SpareHold(b, false); // from here the slot keeps it
                 }
                 copy_t++;
             }
@@ -681,7 +683,8 @@ void LoadStep()
                     if(j)
                     {
                         j->from_set  = true;
-                        j->loop_bars = setf.loop_bars[t];
+                        /* (a built-in sound standing in for a loop that didn't load is no loop) */
+                        j->loop_bars = setf.file[t][0] == '@' ? 0 : setf.loop_bars[t];
                         j->loop_bpm  = setf.loop_bpm[t];
                     }
                 }
