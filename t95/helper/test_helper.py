@@ -532,5 +532,170 @@ class HelperTest(unittest.TestCase):
         self.assertIsNone(self.proc.poll())
 
 
+CARD_FAKE = """#!/bin/sh
+# mount / systemctl for the card tests: the "mounts" file is what the helper reads
+echo "$(basename "$0") $*" >> "$FAKELOG"
+M="$FAKEDIR/mounts"
+case "$(basename "$0") $*" in
+  "mount -o remount,rw "*) [ -f "$FAKEDIR/rw-fails" ] && exit 32; sed -i.bak 's/ ro,/ rw,/' "$M" ;;
+  "mount -o remount,ro "*) sed -i.bak 's/ rw,/ ro,/' "$M" ;;
+  "systemctl stop media-sdcard.mount") [ -f "$FAKEDIR/busy" ] && { echo "umount: /media/sdcard: target is busy." >&2; exit 1; }; : > "$M" ;;
+esac
+exit 0
+"""
+
+
+def wav(data, says=None):
+    import struct
+    n = len(data) if says is None else says
+    return (b"RIFF" + struct.pack("<I", 36 + n) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 48000, 192000, 4, 16)
+            + b"data" + struct.pack("<I", n) + data)
+
+
+class CardTest(unittest.TestCase):
+    """Takes copied to the SD card and eject: a folder as the card, made-up mount / umount"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.card = os.path.join(cls.dir, "card")
+        cls.jams = os.path.join(cls.dir, "jams")
+        cls.mounts = os.path.join(cls.dir, "mounts")
+        cls.log = os.path.join(cls.dir, "calls.log")
+        cls.sock = os.path.join(cls.dir, "h.sock")
+        os.makedirs(cls.card)
+        os.makedirs(os.path.join(cls.dir, "sysblock", "mmcblk0", "device"))
+        os.makedirs(os.path.join(cls.dir, "sysblock", "mmcblk2", "device"))
+        open(os.path.join(cls.dir, "sysblock", "mmcblk0", "device", "type"), "w").write("SD\n")
+        open(os.path.join(cls.dir, "sysblock", "mmcblk2", "device", "type"), "w").write("MMC\n")      # the eMMC
+        tools = {}
+        for t in ("mount", "systemctl"):
+            tools[t] = os.path.join(cls.dir, t)
+            open(tools[t], "w").write(CARD_FAKE)
+            os.chmod(tools[t], 0o755)
+        cls.a = os.urandom(40000)                 # a take in two parts; the second one's header is wrong (cut off)
+        cls.b = os.urandom(20000)
+        d = os.path.join(cls.jams, "Friday jam 1")
+        os.makedirs(d)
+        open(os.path.join(d, "part.wav"), "wb").write(wav(cls.a))
+        open(os.path.join(d, "part-01.wav"), "wb").write(wav(cls.b + b"\x07\x07", says=0x7fffff00))
+        open(os.path.join(d, "arecord.log"), "w").write("not a part\n")
+        cls.proc = subprocess.Popen(
+            [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
+             "--netplan-dir", cls.dir, "--group", "no-such-group", "--wpa-ctrl", os.path.join(cls.dir, "wpa"), "--auto-s", "9999",
+             "--card-mount", cls.card, "--jams-dir", cls.jams, "--mounts", cls.mounts, "--sysblock", os.path.join(cls.dir, "sysblock"),
+             "--mount", tools["mount"], "--systemctl", tools["systemctl"], "--wpa-cli", "/bin/false", "--bluetoothctl", "/bin/false",
+             "--ip", "/bin/false"],
+            env=dict(os.environ, FAKELOG=cls.log, FAKEDIR=cls.dir), stdout=subprocess.DEVNULL,
+            stderr=open(os.path.join(cls.dir, "helper.log"), "w"))
+        for _ in range(100):
+            if os.path.exists(cls.sock):
+                break
+            time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+
+    ask = HelperTest.ask
+
+    def mount(self, dev="/dev/mmcblk0p1", fs="exfat", how="ro"):
+        open(self.mounts, "w").write("/dev/root / ext4 rw,relatime 0 0\n%s %s %s %s,nosuid,nodev 0 0\n" % (dev, self.card, fs, how))
+
+    def setUp(self):
+        self.mount()
+        for f in ("busy", "rw-fails"):
+            try:
+                os.remove(os.path.join(self.dir, f))
+            except OSError:
+                pass
+        open(self.log, "w").close()
+
+    def calls(self):
+        return open(self.log).read().split("\n")[:-1]
+
+    def copied(self, timeout=5):
+        end = time.time() + timeout
+        while time.time() < end:
+            c = self.ask(cmd="card_status")["copy"]
+            if c and c["state"] != "copying":
+                return c
+            time.sleep(0.05)
+        self.fail("the copy never ended")
+
+    def test_k1_status(self):
+        s = self.ask(cmd="card_status")
+        self.assertEqual((s["card"]["mounted"], s["card"]["ok"], s["card"]["fs"], s["card"]["read_only"]), (True, True, "exfat", True))
+        self.assertGreater(s["card"]["free"], 0)
+        self.assertIsNone(s["copy"])
+        open(self.mounts, "w").write("/dev/root / ext4 rw 0 0\n")
+        s = self.ask(cmd="card_status")
+        self.assertEqual((s["card"]["mounted"], s["card"]["ok"]), (False, False))
+        self.assertIn("no SD card", self.ask(cmd="card_copy", take="Friday jam 1")["error"])
+
+    def test_k2_a_take_goes_onto_the_card_as_one_wav(self):
+        r = self.ask(cmd="card_copy", take="Friday jam 1")
+        self.assertTrue(r.get("ok"), r)
+        self.assertEqual(r["copy"]["total"], 44 + 60000)
+        c = self.copied()
+        self.assertEqual((c["state"], c["bytes"], c["error"], c["file"]), ("done", 44 + 60000, None, "jams/Friday jam 1.wav"))
+        got = open(os.path.join(self.card, "jams", "Friday jam 1.wav"), "rb").read()
+        self.assertEqual(got, wav(self.a + self.b))                 # both parts' sound under one true header; the torn frame left out
+        self.assertEqual(os.listdir(os.path.join(self.card, "jams")), ["Friday jam 1.wav"])    # no half file left
+        # writable for the copy only
+        self.assertEqual(self.calls(), ["mount -o remount,rw " + self.card, "mount -o remount,ro " + self.card])
+        self.assertTrue(self.ask(cmd="card_status")["card"]["read_only"])
+        # again: said, and the card is not touched
+        open(self.log, "w").close()
+        self.assertIn("already on the card", self.ask(cmd="card_copy", take="Friday jam 1")["error"])
+        open(os.path.join(self.card, "jams", "Friday jam 1.wav"), "ab").write(b"x")
+        self.assertIn("another file of that name", self.ask(cmd="card_copy", take="Friday jam 1")["error"])
+        self.assertEqual(self.calls(), [])
+        os.remove(os.path.join(self.card, "jams", "Friday jam 1.wav"))
+
+    def test_k3_only_takes_only_onto_a_card(self):
+        for bad in ("", "..", "../jams/Friday jam 1", "Friday jam 1/..", "/etc", "nope", ".hidden", "x" * 49, 7, None):
+            self.assertEqual(self.ask(cmd="card_copy", take=bad).get("error"), "no such take", bad)
+        # the bridge has no rights and writes the takes folder: nothing is followed out of it
+        secret = os.path.join(self.dir, "secret")
+        open(secret, "wb").write(wav(b"\x01\x02\x03\x04" * 100))
+        d = os.path.join(self.jams, "linked part")
+        os.makedirs(d)
+        os.symlink(secret, os.path.join(d, "part.wav"))
+        self.assertEqual(self.ask(cmd="card_copy", take="linked part").get("error"), "no such take")
+        os.symlink(os.path.join(self.jams, "Friday jam 1"), os.path.join(self.jams, "linked take"))
+        self.assertEqual(self.ask(cmd="card_copy", take="linked take").get("error"), "no such take")
+        os.makedirs(os.path.join(self.jams, "empty"))
+        self.assertIn("nothing in that take", self.ask(cmd="card_copy", take="empty")["error"])
+        # not the eMMC, not a Linux card (the recovery card), not some other disk
+        for dev, fs in (("/dev/mmcblk2p1", "exfat"), ("/dev/mmcblk0p1", "ext4"), ("/dev/sda1", "vfat"), ("/dev/mmcblk0p1/../sda1", "vfat")):
+            self.mount(dev, fs)
+            r = self.ask(cmd="card_copy", take="Friday jam 1")
+            self.assertIn("isn't a FAT or exFAT card in the SD slot", r.get("error", ""), (dev, fs))
+            self.assertFalse(self.ask(cmd="card_status")["card"]["ok"])
+        self.assertEqual(self.calls(), [])
+        j = os.path.join(self.card, "jams")
+        self.assertEqual(os.listdir(j) if os.path.isdir(j) else [], [])       # nothing reached the card
+
+    def test_k4_a_card_that_stays_read_only(self):
+        open(os.path.join(self.dir, "rw-fails"), "w").close()
+        self.assertTrue(self.ask(cmd="card_copy", take="Friday jam 1").get("ok"))
+        c = self.copied()
+        self.assertEqual(c["state"], "failed")
+        self.assertIn("can't be made writable", c["error"])
+        self.assertFalse(os.path.exists(os.path.join(self.card, "jams", "Friday jam 1.wav")))
+        self.assertTrue(self.ask(cmd="card_status")["card"]["read_only"])
+
+    def test_k5_eject(self):
+        open(os.path.join(self.dir, "busy"), "w").close()
+        self.assertIn("in use", self.ask(cmd="card_eject")["error"])
+        self.assertTrue(self.ask(cmd="card_status")["card"]["mounted"])
+        os.remove(os.path.join(self.dir, "busy"))
+        self.assertEqual(self.ask(cmd="card_eject"), {"ok": True})
+        self.assertEqual(self.calls()[-1], "systemctl stop media-sdcard.mount")      # systemd's unmount: for the whole box
+        self.assertFalse(self.ask(cmd="card_status")["card"]["mounted"])
+        self.assertEqual(self.ask(cmd="card_eject").get("was"), "not mounted")     # twice is fine
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

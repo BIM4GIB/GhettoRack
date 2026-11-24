@@ -168,10 +168,18 @@ them one on the map (REC still arms a loop).
   a long take (over the half-hour seam), the remote, the TV, a phone, a power cut, the Daisy
   pulled mid-take, the box nearly full; those only against a made-up `arecord` in the tests.
   A restart of the bridge ends a running take (it is kept).
-  Slice 2, not built: COPY TO CARD and EJECT under Settings > Devices (the helper makes the card
-  writable for the copy only; the udev rule mounts it read-only so pulling it is always safe).
-  Open: writing exFAT in this slot is untested (reading works, `t95/README.md`), what happens
-  when the card is full. Later: a record lamp and button in the ApcBox page's top bar, a job for
+  Slice 2 built 2026-11-24: TO CARD per take and EJECT CARD on the jam page. The settings helper
+  (root) copies the take as one WAV into `jams/` on the card: it makes the card writable for the
+  copy only, read-only again after it, only a FAT / exFAT card in the SD slot, only from the takes
+  folder (no links followed), no PIN. Eject unmounts through systemd. Seen on the T95: exFAT
+  writes in the slot (256 MB at 16.6 MB/s, read back the same), the 25 s take copied and the same
+  byte for byte, read-only after it, eject and the card mounted again. On the rig an `umount` by
+  the helper turned out to unmount the card for the helper alone (its own mount namespace); it
+  goes through systemd now. NOT tried: a long take (minutes of copying), pulling the card
+  mid-copy, a full card, FAT32, the card physically taken out and put back after EJECT.
+  Open: after EJECT, Settings > Devices says "in the slot, not readable" (true, but it reads as a
+  fault); no EJECT on the Settings page itself; nothing lists or deletes what is on the card.
+  Later: a record lamp and button in the ApcBox page's top bar, a job for
   an APC40 button, takes over 3.5 minutes get no waveform in the Samples view (40 MB limit),
   set and kit backups and the library on the card.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and

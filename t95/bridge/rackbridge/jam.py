@@ -8,7 +8,8 @@ and looks at the files once in a while: no audio passes through the bridge.
 It shares the capture device with the TV sound and listening (listen.py).
 
 Takes are played and downloaded as one WAV (`/jam/file`), the parts strung
-together on the way out. Copying takes to the SD card is not here yet.
+together on the way out. COPY TO CARD is the settings helper's (root, t95/helper):
+it makes the SD card writable for the copy only; the bridge just asks it.
 """
 from .common import *
 from .util import *
@@ -147,8 +148,10 @@ class Jam:
                           "at": int(at), "recording": n == self.take})
         takes.sort(key=lambda t: t["at"], reverse=True)
         self.takes_n = len(takes)
+        c = self.b.helper_ask({"cmd": "card_status"}, timeout=5)
         return dict(self.info(), takes=takes[:JAM_TAKES_MAX], more=len(takes) > JAM_TAKES_MAX,
-                    min_free=self.min_free, split_s=self.split_s)
+                    min_free=self.min_free, split_s=self.split_s,
+                    card=c.get("card"), copy=c.get("copy"), helper="error" not in c)
 
     def repair(self):
         """Runs in a thread at start: parts a power cut left with a wrong header"""
@@ -328,6 +331,9 @@ class Jam:
             code, out = await self.stop()
             self.tell()
             return code, out
+        if path == "/jam/eject":
+            out = await loop.run_in_executor(None, self.b.helper_ask, {"cmd": "card_eject"})
+            return (200 if "error" not in out else 503 if out.get("helper") is False else 400), out
         take = d.get("take")
         src = self.take_dir(take)
         if src is None:
@@ -351,6 +357,9 @@ class Jam:
             except OSError as e:
                 return 400, {"error": str(e)}
             return 200, {"ok": True, "take": to}
+        if path == "/jam/card":
+            out = await loop.run_in_executor(None, self.b.helper_ask, {"cmd": "card_copy", "take": take})
+            return (200 if "error" not in out else 503 if out.get("helper") is False else 400), out
         if path == "/jam/library":
             return await loop.run_in_executor(None, self.to_library, take)
         return 404, {"error": "not found"}

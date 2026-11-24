@@ -22,6 +22,12 @@ helper over a local socket, and this helper does only what is on its list:
                           chip attaches once per boot and is never detached;
                           on / off is the radio's block switch
     restart_bridge, reboot, poweroff
+    card_status         the SD card in the T95's slot, and a copy under way
+    card_copy take      one take of the jam recorder onto the card, as one WAV
+                          in its folder jams. The card is made writable for
+                          the copy and read-only again after it; only a FAT or
+                          exFAT card in the SD slot, only from the takes folder
+    card_eject          unmount the card for the whole box (not during a copy)
     pin_set old new     the PIN for everything that changes something
     pin_check pin
 
@@ -52,6 +58,8 @@ import re
 import secrets
 import socket
 import socketserver
+import stat
+import struct
 import subprocess
 import tempfile
 import threading
@@ -65,6 +73,8 @@ ATTACH = "/usr/local/bin/hciattach_opi"
 BT_UNIT = "ghettorack-bluetooth.service"
 BT_ADDR_RE = re.compile(r"^[0-9A-F]{2}(:[0-9A-F]{2}){5}$")
 BT_MIDI_UUID = "03b80e5a-ede8-4b33-a751-6ce34ec4c700"      # the Bluetooth LE MIDI service
+TAKE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.-]{0,47}")     # as the bridge names takes (rackbridge/jam.py)
+WAV_MAX = 0xFFFFFFFF - 44
 BT_WHY = {"AuthenticationFailed": "it refused (if it was paired with the box before, forget the box on the device first)", "AuthenticationCanceled": "it gave up",
           "AuthenticationTimeout": "it didn't answer", "AuthenticationRejected": "it said no", "ConnectionAttemptFailed": "it didn't answer",
           "NotReady": "Bluetooth isn't ready yet", "InProgress": "it is busy, try again"}
@@ -84,6 +94,7 @@ class Helper:
         self.down_since = None      # since when the Wi-Fi has had no network
         self.fails, self.locked_until = 0, 0.0
         self.bt_cache = None        # (when, the paired devices)
+        self.card = None            # the last copy to the SD card: {take, state, bytes, total, file, error}
 
     # ---- running things ----
     def run(self, *cmd, timeout=20):
@@ -800,6 +811,203 @@ class Helper:
             return {"error": "it is still there"}
         return {"ok": True}
 
+    # ---- the SD card in the T95's slot: takes of the jam recorder copied onto it, eject ----
+    # The card is mounted read-only (udev rule, t95/bridge/99-apcbox.rules), so pulling it is
+    # always safe. It is writable only while a copy runs here.
+    def card_mount(self):
+        """(device, filesystem, read-only) of what is mounted at the card's place, or None"""
+        try:
+            with open(self.a.mounts) as f:
+                for line in f:
+                    p = line.split()
+                    if len(p) >= 4 and p[1] == self.a.card_mount:
+                        return p[0], p[2], "ro" in p[3].split(",")
+        except OSError:
+            pass
+        return None
+
+    def card_why_not(self, m):
+        """None if what is mounted there is a FAT / exFAT card in the SD slot"""
+        if m is None:
+            return "no SD card in the T95"
+        disk = re.match(r"^(mmcblk\d+)(p\d+)?$", os.path.basename(m[0]))
+        kind = ""
+        try:
+            if disk:
+                with open(os.path.join(self.a.sysblock, disk.group(1), "device", "type")) as f:
+                    kind = f.read().strip()
+        except OSError:
+            pass
+        if kind != "SD" or m[1] not in ("vfat", "exfat"):
+            return "what is mounted there isn't a FAT or exFAT card in the SD slot"
+        return None
+
+    def card_remount(self, how):
+        return self.run(self.a.mount, "-o", "remount," + how, self.a.card_mount, timeout=30)[0] == 0
+
+    @staticmethod
+    def wav_sound(fd):
+        """(offset, bytes) of the sound in an open WAV file, by what the file holds (not what its header says)"""
+        size = os.fstat(fd).st_size
+        head = os.pread(fd, 4096, 0)
+        if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+            return None
+        pos = 12
+        while pos + 8 <= len(head):
+            cid, n = head[pos:pos + 4], struct.unpack("<I", head[pos + 4:pos + 8])[0]
+            if cid == b"data":
+                return pos + 8, max(0, (size - pos - 8) // 4 * 4)
+            pos += 8 + n + (n & 1)
+        return None
+
+    def take_open(self, take):
+        """The take's parts, open: [(fd, offset, bytes)]. Plain files in the takes folder only:
+        the bridge has no rights and writes there, so nothing is followed out of it."""
+        d = os.path.join(self.a.jams_dir, take)
+        st = os.lstat(d)
+        if not stat.S_ISDIR(st.st_mode):
+            raise OSError("not a folder")
+        names = []
+        for n in os.listdir(d):
+            m = re.fullmatch(r"part(?:-(\d+))?\.wav", n)
+            if m:
+                names.append((int(m.group(1) or 0), n))
+        out = []
+        try:
+            for _, n in sorted(names):
+                fd = os.open(os.path.join(d, n), os.O_RDONLY | os.O_NOFOLLOW)
+                out.append((fd, 0, 0))
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise OSError("not a file")
+                w = self.wav_sound(fd)
+                out[-1] = (fd, w[0], w[1]) if w else (fd, 0, 0)
+        except OSError:
+            for fd, _, _ in out:
+                os.close(fd)
+            raise
+        return out
+
+    def cmd_card_status(self, d):
+        m = self.card_mount()
+        why = self.card_why_not(m)
+        card = {"mounted": m is not None, "ok": why is None, "why": why}
+        if m:
+            card.update(fs=m[1], read_only=m[2])
+            try:
+                v = os.statvfs(self.a.card_mount)
+                card.update(bytes=v.f_frsize * v.f_blocks, free=v.f_frsize * v.f_bavail)
+            except OSError:
+                pass
+        with self.lock:
+            return {"ok": True, "card": card, "copy": dict(self.card) if self.card else None}
+
+    def cmd_card_copy(self, d):
+        take = d.get("take")
+        if not isinstance(take, str) or not TAKE_RE.fullmatch(take) or ".." in take or take.endswith((" ", ".")):
+            return {"error": "no such take"}
+        why = self.card_why_not(self.card_mount())
+        if why:
+            return {"error": why}
+        with self.lock:
+            if self.card and self.card["state"] == "copying":
+                return {"error": "a copy is running: %s" % self.card["take"]}
+        try:
+            parts = self.take_open(take)
+        except OSError:
+            return {"error": "no such take"}
+        data = sum(p[2] for p in parts)
+        dst = os.path.join(self.a.card_mount, "jams", take + ".wav")
+        why = None
+        try:
+            if not data:
+                why = "nothing in that take"
+            elif data > WAV_MAX:
+                why = "over 4 GB: too long for one WAV file. Download it from the page instead"
+            elif os.path.exists(dst) and os.path.getsize(dst) == 44 + data:
+                why = "already on the card (jams/%s.wav)" % take
+            elif os.path.exists(dst):
+                why = "another file of that name is on the card"
+            elif os.statvfs(self.a.card_mount).f_frsize * os.statvfs(self.a.card_mount).f_bavail < 44 + data + (16 << 20):
+                why = "not enough room on the card"
+        except OSError as e:
+            why = "the card can't be read (%s)" % type(e).__name__
+        if why:
+            for fd, _, _ in parts:
+                os.close(fd)
+            return {"error": why}
+        with self.lock:
+            self.card = {"take": take, "state": "copying", "bytes": 0, "total": 44 + data, "file": "jams/%s.wav" % take, "error": None}
+        threading.Thread(target=self.card_copy_run, args=(parts, data, dst), daemon=True).start()
+        return {"ok": True, "copy": dict(self.card)}
+
+    def card_copy_run(self, parts, data, dst):
+        tmp = dst + ".part"
+        err = None
+        try:
+            if not self.card_remount("rw"):
+                raise OSError("the card can't be made writable")
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(tmp, "wb") as f:
+                f.write(b"RIFF" + struct.pack("<I", 36 + data) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 48000, 192000, 4, 16)
+                        + b"data" + struct.pack("<I", data))
+                done = 44
+                for fd, off, n in parts:
+                    pos = 0
+                    while pos < n:
+                        chunk = os.pread(fd, min(1 << 20, n - pos), off + pos)
+                        if not chunk:
+                            raise OSError("the take got shorter")
+                        f.write(chunk)
+                        pos += len(chunk)
+                        done += len(chunk)
+                        with self.lock:
+                            self.card["bytes"] = done
+                f.flush()
+                os.fsync(f.fileno())
+            os.rename(tmp, dst)
+        except OSError as e:
+            err = str(e) if e.args and isinstance(e.args[0], str) else (e.strerror or type(e).__name__)
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        finally:
+            for fd, _, _ in parts:
+                os.close(fd)
+            try:
+                os.sync()
+            except OSError:
+                pass
+            # read-only again, whatever happened. A card that was pulled has no mount left to change.
+            back = any(self.card_remount("ro") or time.sleep(1) for _ in range(5)) if self.card_mount() else True
+            m = self.card_mount()
+            if not back and m and not m[2]:
+                err = (err + "; " if err else "") + "the card is still writable: eject it before pulling it"
+        with self.lock:
+            self.card["state"] = "failed" if err else "done"
+            self.card["error"] = err
+        log.info("card: copy of a take %s", "failed (%s)" % err if err else "done")
+
+    def cmd_card_eject(self, d):
+        with self.lock:
+            if self.card and self.card["state"] == "copying":
+                return {"error": "a copy to the card is running"}
+        if self.card_mount() is None:
+            return {"ok": True, "was": "not mounted"}
+        try:
+            os.sync()
+        except OSError:
+            pass
+        # Through systemd, which mounted it (systemd-mount in the udev rule). This helper has a mount
+        # namespace of its own (ProtectHome): an umount run here took the card away from the helper
+        # only and left it mounted for everything else on the box (rig, 2026-11-24).
+        rc, out = self.run(self.a.systemctl, "stop", self.a.card_unit, timeout=30)
+        for _ in range(20):                      # the unmount reaches this namespace a moment later
+            if self.card_mount() is None:
+                return {"ok": True}
+            time.sleep(0.1)
+        return {"error": "the card is in use (a sample being read?): try again in a moment" if "busy" in out else "the card can't be unmounted"}
+
     def cmd_status(self, d):
         ssid, state, ip = self.wifi_now()
         with self.lock:
@@ -895,10 +1103,16 @@ def main():
     ap.add_argument("--bt-find-s", type=float, default=12, help="pairing: how long to look for the device first")
     ap.add_argument("--bt-connect-s", type=float, default=20.0, help="how long a device gets to connect before pairing")
     ap.add_argument("--bt-pair-s", type=float, default=45.0, help="how long a pairing may take (its owner has to confirm on the device)")
+    ap.add_argument("--card-mount", default="/media/sdcard", help="where the udev rule mounts the SD card")
+    ap.add_argument("--jams-dir", default="/var/lib/apcbox-bridge/jams", help="the jam recorder's takes (the bridge's folder)")
+    ap.add_argument("--card-unit", default="media-sdcard.mount", help="the mount unit systemd-mount makes for --card-mount")
+    ap.add_argument("--mounts", default="/proc/self/mounts")
+    ap.add_argument("--sysblock", default="/sys/block")
     ap.add_argument("--bt-step-s", type=float, default=1.0, help="how often a pairing looks whether the device has moved on")
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
                        ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl"),
-                       ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq")):
+                       ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq"),
+                       ("mount", "/usr/bin/mount")):
         ap.add_argument("--" + tool, default=path)
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

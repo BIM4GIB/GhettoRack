@@ -3916,6 +3916,26 @@ class JamTest(unittest.TestCase):
         with open(cls.arecord, "w") as f:
             f.write(FAKE_JAM_ARECORD % (sys.executable, cls.alog, cls.busy, cls.gone))
         os.chmod(cls.arecord, 0o755)
+        # the settings helper, as far as the recorder asks it: it keeps what it was asked
+        cls.hsock = os.path.join(cls.dir, "helper.sock")
+        cls.asked = []
+        cls.helper_says = {}
+        srv = socket.socket(socket.AF_UNIX)
+        srv.bind(cls.hsock)
+        srv.listen(8)
+
+        def helper():
+            while True:
+                try:
+                    c, _ = srv.accept()
+                except OSError:
+                    return
+                with c:
+                    d = json.loads(c.makefile().readline())
+                    cls.asked.append(d)
+                    c.sendall(json.dumps(cls.helper_says.get(d.get("cmd"), {"error": "unknown command"})).encode() + b"\n")
+        threading.Thread(target=helper, daemon=True).start()
+        cls.addClassCleanup(srv.close)
         cls.http = free_port()
         cls.proc = cls.start()
         BridgeTest.http = cls.http
@@ -3926,7 +3946,7 @@ class JamTest(unittest.TestCase):
         p = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--no-midi", "--state", os.path.join(cls.dir, "state.json"),
-             "--arecord", cls.arecord, "--asound", cls.asound, "--jam-split-s", "1"] + list(more),
+             "--arecord", cls.arecord, "--asound", cls.asound, "--jam-split-s", "1", "--helper-socket", cls.hsock] + list(more),
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
         cls.addClassCleanup(p.kill)
         return p
@@ -4046,6 +4066,43 @@ class JamTest(unittest.TestCase):
         self.assertEqual(len(lib["files"]), out["parts"])
         self.assertEqual(self.post("/jam/delete", {"take": "Friday jam 1"})[0], 400)
         self.assertEqual(self.post("/jam/nonsense", {"take": "x"})[0], 400)
+
+    def test_j3b_to_the_card_and_eject_are_the_helpers(self):
+        self.record(0.6)
+        take = self.jams()["takes"][0]["take"]
+        cls = type(self)
+        cls.helper_says = {"card_status": {"ok": True, "card": {"mounted": True, "ok": True, "fs": "exfat", "read_only": True, "free": 5 << 30},
+                                           "copy": None},
+                           "card_copy": {"ok": True, "copy": {"take": take, "state": "copying", "bytes": 0, "total": 1000}},
+                           "card_eject": {"ok": True}}
+        j = self.jams()
+        self.assertEqual((j["helper"], j["card"]["ok"], j["card"]["free"], j["copy"]), (True, True, 5 << 30, None))
+        del cls.asked[:]
+        code, out = self.post("/jam/card", {"take": take})
+        self.assertEqual((code, out["copy"]["state"]), (200, "copying"))
+        self.assertEqual(cls.asked, [{"cmd": "card_copy", "take": take}])
+        # only a take that exists is passed on, and what the helper refuses is said as it says it
+        del cls.asked[:]
+        for bad in ("nope", "../x", "", None):
+            self.assertEqual(self.post("/jam/card", {"take": bad}), (400, {"error": "no such take"}))
+        self.assertEqual(cls.asked, [])
+        cls.helper_says["card_copy"] = {"error": "not enough room on the card"}
+        self.assertEqual(self.post("/jam/card", {"take": take}), (400, {"error": "not enough room on the card"}))
+        self.assertEqual(self.post("/jam/eject", {}), (200, {"ok": True}))
+        self.assertEqual(cls.asked[-1], {"cmd": "card_eject"})
+        cls.helper_says["card_eject"] = {"error": "a copy to the card is running"}
+        self.assertEqual(self.post("/jam/eject", {})[0], 400)
+        # no helper on the box: said, and the takes are still listed
+        os.rename(self.hsock, self.hsock + ".off")
+        try:
+            code, out = self.post("/jam/card", {"take": take})
+            self.assertEqual(code, 503)
+            self.assertIn("settings helper isn't running", out["error"])
+            j = self.jams()
+            self.assertEqual((j["helper"], j["card"], len(j["takes"])), (False, None, 1))
+        finally:
+            os.rename(self.hsock + ".off", self.hsock)
+        self.assertEqual(self.post("/jam/delete", {"take": take})[0], 200)
 
     def test_j4_the_daisy_leaves_mid_take(self):
         code, out = self.post("/jam/start", {})

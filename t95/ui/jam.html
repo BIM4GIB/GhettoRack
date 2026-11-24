@@ -39,6 +39,9 @@ button.on{color:var(--amber);border-color:var(--amber);box-shadow:0 0 9px #ff9a1
 .bar{flex:1;height:10px;border-radius:3px;background:var(--off);overflow:hidden;position:relative}
 .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,var(--green) 0 70%,var(--yellow) 70% 90%,var(--red) 90%);background-size:420px 100%;transition:width .12s linear}
 .hint{color:var(--dim);font-size:13px}
+.prog{height:6px;border-radius:3px;background:var(--off);overflow:hidden;margin:6px 0 10px;display:none}
+.prog.on{display:block}
+.prog i{display:block;height:100%;width:0;background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .err{color:#ff9d94;font-size:13px;min-height:1.4em;margin-top:10px}
 .take{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:8px}
 .take.live{border-color:var(--red)}
@@ -55,6 +58,7 @@ audio.on{display:block}
   <h1>JAM RECORDER</h1>
   <span id="c-audio" class="chip">Daisy audio: ?</span>
   <span id="c-free" class="chip">room: ?</span>
+  <span id="c-card" class="chip">SD card: ?</span>
   <span style="flex:1"></span>
   <button id="home">Modules</button>
 </header>
@@ -73,7 +77,12 @@ audio.on{display:block}
   <div class="err" id="err"></div>
   <p class="hint">Records what the Daisy plays (its master, 48 kHz stereo) onto the T95. A take is kept in half-hour files, so a power cut costs the open one at most. Play or download a take as one WAV.</p>
 
-  <h2>Takes</h2>
+  <div class="row" style="display:flex;align-items:center;gap:12px;margin-top:22px">
+    <h2 style="margin:0;flex:1">Takes</h2>
+    <button id="eject">Eject card</button>
+  </div>
+  <div class="sub" id="copy"></div>
+  <div class="prog" id="prog"><i id="progbar"></i></div>
   <audio id="player" controls preload="none"></audio>
   <div id="takes"></div>
 </main>
@@ -82,7 +91,7 @@ audio.on{display:block}
 const $ = id => document.getElementById(id);
 const tv = new URLSearchParams(location.search).has("tv");
 if (tv) document.body.classList.add("tv");
-let J = null, takes = [], at = 0, playing = null;
+let J = null, takes = [], at = 0, playing = null, cardOk = false, copying = false, lastCopy = "";
 
 async function post(path, body) {
   try {
@@ -118,6 +127,26 @@ function show() {
   if (J.error && !J.recording) $("err").textContent = J.error;
   tick();
 }
+/* The SD card in the T95's slot: read-only except while a take is copied onto it (the helper does that) */
+function card(j) {
+  const c = j.card, k = j.copy;
+  cardOk = !!(c && c.ok);
+  copying = !!(k && k.state === "copying");
+  if (j.helper === false) chip("c-card", "SD card: the settings helper isn't running", "bad");
+  else if (!c || !c.mounted) chip("c-card", "no SD card", "");
+  else if (!c.ok) chip("c-card", "SD card: not usable (" + c.fs + ")", "warn");
+  else chip("c-card", "SD card: " + size(c.free || 0) + " free" + (c.read_only ? "" : ", writing"), c.read_only ? "ok" : "warn");
+  $("eject").disabled = !(c && c.mounted) || copying;
+  $("prog").classList.toggle("on", copying);
+  if (copying) {
+    $("progbar").style.width = (k.total ? 100 * k.bytes / k.total : 0) + "%";
+    $("copy").textContent = "Copying " + k.take + " to the card: " + size(k.bytes) + " of " + size(k.total) + ". Leave the card in.";
+  } else if (k && k.take + k.state !== lastCopy && lastCopy !== "") {
+    $("copy").textContent = k.state === "done" ? k.take + " is on the card (" + k.file + ")." : "Copy of " + k.take + " failed: " + k.error;
+  }
+  if (k) lastCopy = copying ? "copying" : k.take + k.state;
+  else if (lastCopy === "") lastCopy = "none";
+}
 function tick() {
   if (!J) return;
   $("time").textContent = clock(J.recording ? J.seconds + (performance.now() - at) / 1000 : 0);
@@ -151,6 +180,11 @@ function list() {
         const r = await post("/jam/library", { take: t.take });
         if (!r.error) $("err").textContent = r.files.length ? "In the sample library, folder jams: " + r.files.join(", ") : "Already in the sample library (folder jams).";
       }, "lib");
+      const tc = btn("To card", async () => {
+        const r = await post("/jam/card", { take: t.take });
+        if (!r.error) load();
+      }, "card");
+      tc.disabled = !cardOk || copying;
       btn("Delete", async () => {
         if (!confirm('Delete "' + t.take + '" (' + clock(t.seconds) + ")? It can't be undone.")) return;
         if (playing === t.take) stopPlayer();
@@ -174,6 +208,7 @@ async function load() {
   try {
     const j = await (await fetch("/jam?json=1")).json();
     takes = j.takes; J = j; at = performance.now();
+    card(j);
     show(); list();
   } catch (e) { chip("c-audio", "the box isn't answering", "bad"); }
 }
@@ -184,6 +219,11 @@ async function toggle() {
   await load();
 }
 $("rec").onclick = toggle;
+$("eject").onclick = async () => {
+  const r = await post("/jam/eject");
+  if (!r.error) $("copy").textContent = "The card can be taken out.";
+  load();
+};
 $("home").onclick = () => { location.href = "/" + (tv ? "?tv=1" : ""); };
 
 /* Remote: ok does the focused button (REC to begin with), play / stop record and stop, arrows walk the buttons */
@@ -213,6 +253,7 @@ es.addEventListener("jam", e => {
 });
 load();
 setInterval(() => { if (!J || !J.recording) load(); }, 5000);
+setInterval(() => { if (copying) load(); }, 1000);
 if (tv) $("rec").focus();
 </script>
 </body>
