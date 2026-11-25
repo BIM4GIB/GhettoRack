@@ -54,6 +54,16 @@ rep('\t{ .compatible = "waveshare,rpi-lcd-35" },\n\t{ .compatible = "ozzmaker,pi
     '\t{ .compatible = "ghettorack,sunfounder35-st7796" },')
 rep('\t{ "rpi-lcd-35", 0 },\n\t{ "piscreen", 0 },', '\t{ "sunfounder35-st7796", 0 },')
 rep('"Ilitek ILI9486"', '"ST7796U, 16-bit shift register"')
+# The kernel's mode has a 1 kHz pixel clock, which works out as a refresh rate of
+# 0.0065 Hz. A Wayland compositor and Chromium pace their frames by that rate:
+# under 2 frames a second on the Pi, with the SPI link nearly idle. Say 30 Hz;
+# the flush itself still takes as long as it takes.
+rep("\tDRM_SIMPLE_MODE(480, 320, 73, 49),\n",
+    "\t.type = DRM_MODE_TYPE_DRIVER,\n"
+    "\t.clock = 480 * 320 * 30 / 1000,\n"
+    "\t.hdisplay = 480, .hsync_start = 480, .hsync_end = 480, .htotal = 480,\n"
+    "\t.vdisplay = 320, .vsync_start = 320, .vsync_end = 320, .vtotal = 320,\n"
+    "\t.width_mm = 73, .height_mm = 49,\n")
 rep("Ilitek ILI9486 DRM driver", "ST7796U behind a 16-bit shift register, DRM driver")
 rep("ILI9486_MADCTL", "ST7796_MADCTL", every=True)
 rep("ili9486", "st7796sr", every=True)

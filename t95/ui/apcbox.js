@@ -1475,7 +1475,9 @@ function smTop() {
   T.zoom = el("button", "tb zm" + (smZoom ? " on" : ""), "ZOOM");
   T.zoom.onclick = () => { smZoom = !smZoom; try { localStorage.setItem("apcbox-small-zoom", smZoom ? "1" : "0"); } catch (e) { } T.zoom.classList.toggle("on", smZoom); show(curName); };
   T.leds = el("span", "leds");
-  top.append(T.play, T.rec, T.bpm, T.pat, T.pos, el("span", "sp"), T.leds, T.pg, T.zoom);
+  /* no step position here: it changes 8 times a second, and with the playhead that is one changed
+     area from the top bar to the bottom of the grid, all of it sent over SPI again */
+  top.append(T.play, T.rec, T.bpm, T.pat, el("span", "sp"), T.leds, T.pg, T.zoom);
   topS(); topStatus();
 }
 function smTopS() { if (T.pg) { const x = st.sel < 8 ? "1-8" : "9-16"; if (T.pg.textContent !== x) T.pg.textContent = x; } }
@@ -1622,7 +1624,9 @@ V.sm_mix = {
   S() { smTopS(); if (smZoom && this.page !== st.sel >> 3) return show(curName);
     for (const x of this.st) { x.s.classList.toggle("sel", st.sel === x.t); x.s.classList.toggle("shed", ovOut(x.t)); x.m.set(st.mute >> x.t & 1); x.so.set(st.solo >> x.t & 1); } },
   M() { if (!this.mf.dragging && !isBusy("g0")) this.mf.set(st.glob[0]); const x = fmt.pct(st.glob[0]); if (this.mv.textContent !== x) this.mv.textContent = x; },
-  H() { for (const x of this.st) x.f.meter(st.meters[x.t]); this.mf.meter(st.meters[16], 0); this.mf.meter(st.meters[17], 1); },
+  /* 17 meters across the whole width are one changed area as wide as the screen: 7 times a second is what the link carries */
+  H() { const now = performance.now(); if (now - (this.hAt || 0) < 140) return; this.hAt = now;
+    for (const x of this.st) x.f.meter(st.meters[x.t]); this.mf.meter(st.meters[16], 0); this.mf.meter(st.meters[17], 1); },
 };
 
 let smPatMode = "";
@@ -1780,6 +1784,12 @@ V.sm_sys = {
   L() { this.log.textContent = st.log.slice(-4).join("\n"); },
 };
 
+/* A touch acts when the finger lands, not when it lifts: a press on this resistive panel lasts
+   0.2 to 0.3 s, and a click only comes at its end. The click that follows is swallowed. */
+if (SMALL) { let fired = null; const hit = e => e.target.closest ? e.target.closest("button, i.s-c") : null;
+  document.addEventListener("pointerdown", e => { const t = hit(e); fired = null; if (!t || !t.onclick || t.disabled || e.pointerType === "mouse") return; fired = t; t.onclick(e); }, true);
+  document.addEventListener("click", e => { if (fired && e.isTrusted) { e.stopPropagation(); e.preventDefault(); } fired = null; }, true); }
+
 /* ---------- shell ---------- */
 const TABS = SMALL ? SM_TABS : [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
 function buildTabs() {
@@ -1880,6 +1890,9 @@ window.addEventListener("resize", refit);
 window.addEventListener("orientationchange", () => setTimeout(refit, 200));
 if (window.visualViewport) visualViewport.addEventListener("resize", refit);
 document.addEventListener("gesturestart", e => e.preventDefault());   /* iOS: no pinch zoom over the controls */
+/* A kiosk (the TV, the small screen): the mouse pointer goes away after 5 s without a mouse moving, and comes back with it */
+if (SMALL || tv) { let idle = 0; const wake = () => { document.body.classList.remove("nocursor"); clearTimeout(idle); idle = setTimeout(() => document.body.classList.add("nocursor"), 5000); };
+  document.addEventListener("pointermove", e => { if (e.pointerType === "mouse") wake(); }); document.addEventListener("mousedown", wake); wake(); }
 
 buildTop();
 let start = Q.get("v"); try { start = start || localStorage.getItem(VIEW_KEY); } catch (e) { }

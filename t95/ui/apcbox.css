@@ -373,6 +373,9 @@ body.short .apcrow{min-height:24px;gap:5px}body.short .apcrow b,body.short .apcr
 /* overload: the Daisy is leaving this 303 out */
 .shed{opacity:.45;outline:1px solid var(--red)}
 
+/* kiosks: no mouse pointer while no mouse moves */
+body.nocursor,body.nocursor *{cursor:none!important}
+
 /* ---------- the small layout: 480x320 (?small), the touch screen on the companion box ----------
    No glows or shadows: they cost paint area on a slow SPI screen. Content is 439 x 296. */
 body.small{font:11px/1.2 var(--mono)}

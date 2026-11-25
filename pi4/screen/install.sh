@@ -10,7 +10,7 @@
 # Touches no disks or partitions.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
-VER=1.0
+VER=1.1
 SRC=/usr/src/st7796sr-$VER
 CFG=/boot/firmware/config.txt
 MARK="# GhettoRack: SunFounder 3.5 inch screen on the header (pi4/screen)"
@@ -21,8 +21,11 @@ grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null || { echo "this is fo
 [ -f "$CFG" ] || { echo "no $CFG"; exit 1; }
 
 if [ "${1:-}" = "--remove" ]; then
-  [ -x "$DKMS" ] && $DKMS remove "st7796sr/$VER" --all 2>/dev/null || true
-  rm -rf "$SRC"
+  for old in 1.0 "$VER"; do
+    [ -x "$DKMS" ] && $DKMS remove "st7796sr/$old" --all 2>/dev/null || true
+    rm -rf "/usr/src/st7796sr-$old"
+  done
+  command -v update-initramfs >/dev/null && update-initramfs -u -k all
   rm -f /boot/firmware/overlays/ghettorack-screen.dtbo /etc/udev/rules.d/98-ghettorack-touch.rules
   # the three lines this script added, nothing else
   sed -i "\|^$MARK\$|,+2d" "$CFG"
@@ -45,8 +48,10 @@ curl -fsSL -o "$TMP/ili9486.c" \
 python3 "$HERE/mkdriver.py" "$TMP/ili9486.c" "$TMP/st7796sr.c" \
   || { echo "the kernel's ili9486.c changed: mkdriver.py needs a look"; exit 1; }
 
-$DKMS remove "st7796sr/$VER" --all >/dev/null 2>&1 || true
-rm -rf "$SRC"
+for old in 1.0 "$VER"; do
+  $DKMS remove "st7796sr/$old" --all >/dev/null 2>&1 || true
+  rm -rf "/usr/src/st7796sr-$old"
+done
 mkdir -p "$SRC"
 install -m 644 "$TMP/st7796sr.c" "$SRC/st7796sr.c"
 printf 'obj-m += st7796sr.o\nall:\n\t$(MAKE) -C /lib/modules/$(KVER)/build M=$(CURDIR) modules\n' > "$SRC/Makefile"
@@ -60,14 +65,23 @@ CLEAN="true"
 AUTOINSTALL="yes"
 EOF
 $DKMS add "st7796sr/$VER"
-$DKMS build "st7796sr/$VER"
-$DKMS install "st7796sr/$VER"
+# For every kernel on the box, not only the one running: the apt line above can
+# bring a newer kernel, and the next boot is into that one.
+for k in /lib/modules/*; do
+  [ -e "$k/build" ] || continue
+  $DKMS install "st7796sr/$VER" -k "$(basename "$k")" || echo "note: no st7796sr for kernel $(basename "$k")"
+done
+# The module is loaded from the boot image (initramfs): without this the next
+# boot runs the copy from before.
+if command -v update-initramfs >/dev/null; then update-initramfs -u -k all; fi
 
 dtc -@ -I dts -O dtb -o /boot/firmware/overlays/ghettorack-screen.dtbo "$HERE/ghettorack-screen-overlay.dts" 2>/dev/null
 [ -f "$CFG.before-screen" ] || cp "$CFG" "$CFG.before-screen"
 grep -q "^dtoverlay=ghettorack-screen" "$CFG" || printf '\n%s\ndtparam=spi=on\ndtoverlay=ghettorack-screen\n' "$MARK" >> "$CFG"
 
-install -m 644 "$HERE/98-ghettorack-touch.rules" /etc/udev/rules.d/98-ghettorack-touch.rules
+# Touch calibration: a starting point from one screen. One made on this box
+# (sudo python3 pi4/screen/calibrate.py) is kept.
+[ -f /etc/udev/rules.d/98-ghettorack-touch.rules ] || install -m 644 "$HERE/98-ghettorack-touch.rules" /etc/udev/rules.d/98-ghettorack-touch.rules
 udevadm control --reload
 udevadm trigger --action=change --subsystem-match=input
 

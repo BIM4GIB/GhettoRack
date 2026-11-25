@@ -56,7 +56,8 @@
 				pinctrl-names = "default";
 				pinctrl-0 = <&grscreen_pins>;
 
-				spi-max-frequency = <16000000>;
+				/* clean and about 30 frames a second on the Pi 4 rig; 16 MHz carried 8 */
+				spi-max-frequency = <48000000>;
 				rotation = <0>;
 				/* the level on the wire, as the kernel's piscreen overlay
 				   gives it to this kind of driver */

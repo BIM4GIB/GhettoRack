@@ -27,9 +27,11 @@ been measured yet.**
 | Seed's card | 32 GB SDHC, FAT32, filled with `tools/sdprep.py --go` (4 kits, 19 folders, 4,123 files). The Seed lists the four kits. Not a copy of the T95 rig's card: that one also has a kit `stk` and its settings files |
 | Ping Pi to Daisy | 300 pings: min 0.29, avg 0.60, p99 5.1, max 6.3 ms. After a reboot, 36 pings: avg 0.48, max 1.27. **Not comparable with the T95's figures yet:** this Seed has no screen, APC40 or audio attached, and the T95 figures are from v13.6 to v13.9 |
 | Seed's loop | Its own log: slowest pass 119.5 ms in 10 s, of which 114.9 ms in the screen code, with no screen attached. The firmware still draws for a screen that is on the Pi now |
-| Kiosk | cage + Chromium 156 on the 3.5" screen, software rendering (pixman), about 9% of one core idle, no restarts. HDMI not tried |
-| Screen | Picture right (colours, fit, landscape) by eye on a test pattern. 16 MHz SPI, not pushed further; frame rate not measured |
-| Touch | Four corner taps read; calibration installed; ten taps then landed within about 12 px of where they were made (centre: 234,160 of 240,160) |
+| Kiosk | cage + Chromium 156 on the 3.5" screen, software rendering (pixman), no restarts. HDMI not tried |
+| Frame rate | With the kernel's placeholder mode (a 1 kHz pixel clock, 0.0065 Hz refresh) the page got about 1 frame a second with the SPI link nearly idle: compositor and browser pace by the refresh rate. With a 30 Hz mode in the driver and the link at 48 MHz (`pi4/screen/framerate.py`, sequencer playing, after a reboot): 28 to 32 frames a second in all six views, 33 ms between frames, worst 49 ms; STEP and MIX send about 1.4 MB/s. At 16 MHz MIX managed 8 frames a second: every frame was half the screen. Rene at the panel: clean |
+| Touch delay | `pi4/screen/touchlag.py`, 7 taps: the touch is in the page 4 to 14 ms after the kernel has it. The second Rene felt was the rest: a press lasts 0.2 to 0.3 s and a click only comes at its end, and then 0.1 to 0.5 s until the frame was out at 8 frames a second. Now the page acts when the finger lands, the top bar no longer shows the step position (with the playhead that was one changed area from top to bottom), and the mixer's meters move 7 times a second. Rene after these changes: fast. Not timed again |
+| Screen | Picture right (colours, fit, landscape) by eye on a test pattern, first at 16 MHz SPI, then clean at 48 MHz |
+| Touch | `screen/calibrate.py`: five crosses on the screen, the chip's own numbers fitted to them; 1.2 px left over at the worst cross (2026-11-25). The first calibration, guessed from four corner taps, was about 4% off in height. Not checked by tapping targets afterwards |
 | Survives a reboot | Driver, touch, kiosk and bridge came back by themselves (one reboot) |
 | Bluetooth | The Pi's own radio; the bridge's Bluetooth MIDI side reports ready. Nothing paired |
 | IR / remote | No IR receiver. The bridge took the HDMI port's CEC device (`vc4-hdmi-0`) for a remote. Not tried with a TV |
@@ -74,12 +76,13 @@ DRM driver, which the kiosk's compositor needs.
 sudo pi4/screen/install.sh            # module (DKMS), overlay, touch, kiosk; then reboot
 sudo pi4/screen/install.sh --remove
 sudo systemctl stop kiosk && sudo python3 pi4/screen/testpattern.py
+sudo python3 pi4/screen/calibrate.py           # touch: five crosses to tap (--wait N seconds each)
 python3 pi4/screen/shot.py /tmp/kiosk.png      # what the kiosk's page looks like
 ```
 
 `config.txt` gets `dtparam=spi=on` and `dtoverlay=ghettorack-screen`; the
 copy from before is `/boot/firmware/config.txt.before-screen`. Overlay
-parameters: `speed` (Hz, default 16000000), `rotate` (0, 90, 180, 270),
+parameters: `speed` (Hz, default 48000000), `rotate` (0, 90, 180, 270),
 `invx`, `invy`, `swapxy` for touch.
 
 The kiosk draws on this screen only when `/etc/default/kiosk` has
@@ -89,9 +92,9 @@ WLR_DRM_DEVICES=/dev/dri/by-path/platform-fe204000.spi-cs-0-card
 WLR_RENDERER=pixman
 ```
 
-Touch calibration is one line in `screen/98-ghettorack-touch.rules`, worked
-out from four corner taps on this one screen. Another screen may want other
-numbers.
+Touch calibration is one line in `/etc/udev/rules.d/98-ghettorack-touch.rules`.
+`screen/98-ghettorack-touch.rules` is the one made on this screen, installed
+only where there is none; `calibrate.py` makes one for the screen at hand.
 
 ## Open
 
@@ -99,10 +102,10 @@ numbers.
   2026-11-25: the kiosk opens `/apcbox?small=1` (`KIOSK_URL` in
   `/etc/default/kiosk`). Seen through the kiosk's own browser on the Pi with
   the real Seed: all six views dense and zoomed, a step, mute, track select,
-  pattern change and a fader reaching the Daisy and coming back. Not seen: how
-  it reads on the panel itself, touch on the small targets (calibration is
-  good to about 12 px, the smallest targets are 14 px), the frame rate with
-  the mixer's meters moving, LIBRARY with files in it.
+  pattern change and a fader reaching the Daisy and coming back. Rene: looks
+  good on the panel. Not seen: touch on the 14 px cells after the new
+  calibration, the frame rate with the mixer's meters moving, LIBRARY with
+  files in it.
 - Chromium will not make a window narrower than 500 px. The small layout is
   drawn in the left 480, so nothing is cut off; the start screen and Settings
   are still the TV pages.
@@ -111,6 +114,9 @@ numbers.
   attached, then the T95's measurements repeated here (ping under load,
   bridge CPU, Wi-Fi ping with a page open, page speed, boot time, Bluetooth
   MIDI reconnect), ideally once more with the Seeds swapped.
-- SPI speed and frame rate of the screen.
+- The link runs at 48 MHz, the overlay's default (`speed=` on the `dtoverlay` line in `config.txt`
+  changes it). Faster was not tried.
+- A kernel update: `install.sh` builds the driver for every kernel on the box and refreshes the
+  boot image. Before that a reboot into a new kernel brought the old driver back (seen once).
 - `install.sh` fetches `ili9486.c` for the running kernel line from GitHub;
   a kernel that changes that file enough stops `mkdriver.py` with a message.
