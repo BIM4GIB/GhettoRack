@@ -1,0 +1,3 @@
+# GhettoRack: touch on the SunFounder 3.5 inch screen. Both axes run backwards and the
+# panel reaches only part of the chip range (four corner taps, 2026-11-25).
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="ADS7846 Touchscreen", ENV{LIBINPUT_CALIBRATION_MATRIX}="-1.107 0 1.062 0 -1.1122 1.0533"

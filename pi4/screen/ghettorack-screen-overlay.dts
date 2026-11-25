@@ -1,0 +1,90 @@
+/*
+ * GhettoRack: the SunFounder 3.5" IPS touch screen (ST7796U behind a 16-bit
+ * shift register, XPT2046 touch) on a Raspberry Pi's header.
+ * After the Raspberry Pi kernel's piscreen overlay: same pins.
+ *   picture: SPI0 CE0, DC = GPIO 24 (pin 18), RST = GPIO 25 (pin 22)
+ *   touch:   SPI0 CE1, IRQ = GPIO 17 (pin 11)
+ * Needs the st7796sr module (pi4/screen/install.sh builds it).
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&spi0>;
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target = <&spidev0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@2 {
+		target = <&spidev1>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@3 {
+		target = <&gpio>;
+		__overlay__ {
+			grscreen_pins: grscreen_pins {
+				brcm,pins = <17 25 24>;
+				brcm,function = <0 1 1>; /* in out out */
+			};
+		};
+	};
+
+	fragment@4 {
+		target = <&spi0>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			grscreen: grscreen@0 {
+				compatible = "ghettorack,sunfounder35-st7796";
+				reg = <0>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&grscreen_pins>;
+
+				spi-max-frequency = <16000000>;
+				rotation = <0>;
+				/* the level on the wire, as the kernel's piscreen overlay
+				   gives it to this kind of driver */
+				reset-gpios = <&gpio 25 0>;
+				dc-gpios = <&gpio 24 0>;
+			};
+
+			grscreen_ts: grscreen-ts@1 {
+				compatible = "ti,ads7846";
+				reg = <1>;
+
+				spi-max-frequency = <2000000>;
+				interrupts = <17 2>; /* high-to-low edge */
+				interrupt-parent = <&gpio>;
+				pendown-gpio = <&gpio 17 1>;
+				touchscreen-swapped-x-y;
+				ti,x-plate-ohms = /bits/ 16 <100>;
+				ti,pressure-max = /bits/ 16 <255>;
+			};
+		};
+	};
+
+	__overrides__ {
+		speed =		<&grscreen>,"spi-max-frequency:0";
+		rotate =	<&grscreen>,"rotation:0";
+		xohms =		<&grscreen_ts>,"ti,x-plate-ohms;0";
+		invx =		<&grscreen_ts>,"touchscreen-inverted-x?";
+		invy =		<&grscreen_ts>,"touchscreen-inverted-y?";
+		swapxy =	<&grscreen_ts>,"touchscreen-swapped-x-y!";
+	};
+};
