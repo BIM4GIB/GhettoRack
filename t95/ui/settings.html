@@ -151,10 +151,220 @@ header a{white-space:nowrap}
   </div>
 </main>
 <div id="pad"><div class="box"><span class="dim" id="pad-for">PIN</span><div id="pad-val"></div><div id="pad-keys"></div></div></div>
+<script src="/small.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id), el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const Q = new URLSearchParams(location.search), tv = Q.has("tv");
+
+/* The 480x320 touch screen (?small): one section a screen, lists in pages, the PIN on a number
+   pad, names and passwords on the screen's own keyboard. The same helper commands as the page
+   below; frame, pager, keyboard and number pad: small.js. */
+function small() {
+  const E = Small.el, B = Small.btn;
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname), secure = location.protocol === "https:" || local;
+  let st = null, bst = null, tab = Q.get("s") || "net", pin = "", pinOk = false, nets = null, pick = "", sure = "", trial = null,
+    btseen = null, btbusy = "", prof = "all", note = "", noteCls = "", msgT = 0, U = {}, lastScan = "", down = false;
+  const F = Small.frame({ title: "SETTINGS", tabs: [["net", "NET"], ["hot", "HOT"], ["bt", "BT"], ["ir", "IR"], ["dev", "DEV"], ["sys", "SYS"]],
+    onTab: id => { tab = id; pick = ""; sure = ""; build(); poll(); } });
+  const pinB = B("PIN", () => askPin()); pinB.classList.add("g-pin"); F.top.insertBefore(pinB, F.top.lastChild);
+
+  /* one line at the bottom: a result goes away by itself (good 3 s, bad and note 6 s), a standing one stays */
+  function say(t, cls) { clearTimeout(msgT); note = t || ""; noteCls = cls || "";
+    if (U.msg) { U.msg.textContent = note; U.msg.className = "g-msg" + (cls === "bad" ? " bad" : ""); }
+    const ms = { good: 3000, bad: 6000, note: 6000 }[cls]; if (note && ms) msgT = setTimeout(() => say(""), ms); }
+  const tmo = ms => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+  const get = async u => { try { return await (await fetch(u, { cache: "no-store", signal: tmo(4000) })).json(); } catch (e) { return null; } };
+  async function sys(cmd, extra, risky) {
+    const d = Object.assign({ cmd }, extra || {}); if (risky) d.pin = pin;
+    try { return await (await fetch("/sys/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d),
+      signal: tmo(cmd === "bt_pair" ? 95000 : cmd === "scan" || cmd === "bt_scan" ? 25000 : 12000) })).json(); }
+    catch (e) { return { error: "the box isn't answering", gone: true }; }
+  }
+  const bpost = async (path, body) => { try { return await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: tmo(6000) })).json(); } catch (e) { return {}; } };
+  const helper = () => !!(st && st.helper !== false && !st.error);
+  async function checkPin() { pinOk = false; if (st && st.pin_set && secure && pin.length >= 4) { const o = await sys("pin_check", { pin }); pinOk = !!o.ok; } top(); return pinOk; }
+  async function askPin() { if (st && !st.pin_set) { say("No PIN set yet: SYS, SET PIN", "bad"); return false; }
+    const v = await Small.numpad({ title: "PIN" }); if (v === null) return false; pin = v;
+    if (!(await checkPin())) { say("Wrong PIN", "bad"); return false; } return true; }
+  async function needPin() { if (!secure) { say("Needs the secure page (https)", "bad"); return false; } if (st && !st.pin_set) { say("Set a PIN first: SYS, SET PIN", "bad"); return false; } return pinOk || await askPin(); }
+  function top() { const h = helper(); F.status(!st ? "box not answering" : h ? "helper ok" : "helper not running", !st ? "bad" : h ? "ok" : "warn");
+    pinB.textContent = !h ? "PIN ?" : !st.pin_set ? "NO PIN" : pinOk ? "UNLOCKED" : "LOCKED"; pinB.classList.toggle("on", pinOk); }
+
+  const netList = () => nets || [], bars = n => "▮".repeat(n) + "▯".repeat(4 - n);
+  const btAll = () => { const paired = (st && st.bt_devices) || [], have = new Set(paired.map(d => d.addr)); return paired.concat((btseen || []).filter(d => !have.has(d.addr))); };
+  function build() {
+    F.view.textContent = ""; U = {};
+    const root = E("div", "g-set"), head = E("div", "g-shead"), body = E("div", "g-sbody"); U.msg = E("div", "g-msg" + (noteCls === "bad" ? " bad" : ""), note);
+    U.now = E("b"); U.sub = E("span", "g-dim"); head.append(U.now, U.sub);
+    const col = E("div", "g-col"), list = (per, row) => { const p = Small.pager(per, row); p.el.className = "g-rows4"; p.el.style.gridTemplateRows = "repeat(" + per + ",1fr)"; return p; };
+    if (tab === "net") {
+      U.pg = list(4, n => { const r = E("button", "g-li" + (n.ssid === pick ? " on" : "")); if (n.hint) { r.appendChild(E("span", "g-nm", n.hint)); r.disabled = true; return r; }
+        r.append(E("span", "g-nm", n.ssid), E("span", "g-d", [n.current ? "connected" : n.saved ? "saved" : "", n.secure ? "" : "open"].filter(Boolean).join(" ") + "  " + bars(Math.max(1, Math.min(4, Math.ceil(n.signal / 25))))));
+        r.onclick = () => { pick = n.ssid; sure = ""; show(); }; return r; });
+      U.scan = B("SCAN", scan); U.join = B("JOIN", join); U.forget = B("FORGET", forget); U.host = B("BOX NAME", hostname);
+      col.style.gridTemplateRows = "repeat(4,1fr) 40px"; col.append(U.scan, U.join, U.forget, U.host, U.pg.nav); body.append(U.pg.el, col);
+    } else if (tab === "hot") {
+      U.text = E("div", "g-text"); U.tog = B("", hotToggle); U.psk = B("SET PASSWORD", hotPsk); U.auto = B("", hotAuto);
+      col.append(U.tog, U.psk, U.auto); body.append(U.text, col);
+    } else if (tab === "bt") {
+      U.pg = list(4, d => { const r = E("button", "g-li" + (d.addr === pick ? " on" : "")); if (d.hint) { r.appendChild(E("span", "g-nm", d.hint)); r.disabled = true; return r; }
+        r.append(E("span", "g-nm", d.name || "(no name)"), E("span", "g-d", [d.midi ? "MIDI" : "", d.connected ? "connected" : d.paired ? "paired" : ""].filter(Boolean).join(", ")));
+        r.onclick = () => { pick = d.addr; sure = ""; show(); }; return r; });
+      U.tog = B("", btToggle); U.scan = B("SCAN", btScan); U.vis = B("VISIBLE", btVisible); U.pair = B("PAIR", btPair);
+      col.style.gridTemplateRows = "repeat(4,1fr) 40px"; col.append(U.tog, U.scan, U.vis, U.pair, U.pg.nav); body.append(U.pg.el, col);
+    } else if (tab === "ir") {
+      U.pg = list(5, a => { const r = E("button", "g-li" + (a.name === pick ? " on" : "")); r.append(E("span", "g-nm", a.name.replace("_", " ")), E("span", "g-d", "tap " + a.tap + "   hold " + a.hold));
+        r.onclick = () => { pick = a.name; show(); }; return r; });
+      U.prof = B("", () => { const n = (bst && bst.ir && bst.ir.profile_names) || ["all"]; prof = n[(n.indexOf(prof) + 1) % n.length]; show(); });
+      U.tap = B("LEARN TAP", () => learn("tap")); U.hold = B("LEARN HOLD", () => learn("hold"));
+      U.clear = B("CLEAR", async () => { for (const press of ["tap", "hold"]) await bpost("/ir/forget", { profile: prof, action: pick, press }); pollBridge(); });
+      col.style.gridTemplateRows = "repeat(4,1fr) 40px"; col.append(U.prof, U.tap, U.hold, U.clear, U.pg.nav); body.append(U.pg.el, col);
+    } else if (tab === "dev") {
+      U.kv = E("div", "g-kv tight"); U.tv = B("", async () => { await bpost("/settings", { hdmi_audio: !(bst && bst.hdmi_audio && bst.hdmi_audio.on) }); await pollBridge(); setTimeout(pollBridge, 2500); });
+      U.text = E("div", "g-text"); col.style.gridTemplateRows = "56px 1fr"; col.append(U.tv, U.text); body.append(U.kv, col);
+    } else {
+      body.className = "g-sbody wide"; const box = E("div", "g-sys"); U.kv = E("div", "g-kv tight");
+      const stp = E("div", "g-stepper"); U.auto = E("span");
+      const mv = async d => { const cur = ((st && st.bridge) || {}).autostart_s || 0, v = Math.max(0, Math.min(60, cur + d)); const r = await bpost("/settings", { autostart_s: v }); if (r.error) say(r.error, "bad"); poll(); };
+      stp.append(E("span", "g-dim", "at boot, open the last module after"), B("‹", () => mv(-1)), U.auto, B("›", () => mv(1)));
+      const pw = E("div", "g-row3"); U.pw = {};
+      for (const [k, cmd, t, done] of [["bridge", "restart_bridge", "RESTART BRIDGE", "Bridge restarting, back in seconds"], ["reboot", "reboot", "REBOOT", "Rebooting, back in about a minute"],
+        ["off", "poweroff", "SHUT DOWN", "Shutting down. Wait for the box's light before unplugging"]]) { const b = B(t, () => power(k, cmd, done)); b.dataset.t = t; U.pw[k] = b; pw.appendChild(b); }
+      const pr = E("div", "g-row2"); U.setpin = B("", setPin); U.pinhint = E("div", "g-text"); pr.style.gridTemplateColumns = "150px 1fr"; pr.append(U.setpin, U.pinhint);
+      box.append(U.kv, stp, pw, pr); body.appendChild(box);
+    }
+    root.append(head, body, U.msg); F.view.appendChild(root);
+    show();
+  }
+  const kv = rows => { const key = JSON.stringify(rows); if (U.kvKey === key) return; U.kvKey = key; U.kv.textContent = ""; for (const [a, b] of rows) U.kv.append(E("span", "g-dim", a), E("span", "", b)); };
+  const setList = items => { const key = JSON.stringify([items, pick]); if (U.listKey === key) return; U.listKey = key; U.pg.set(items); };
+  const gb = n => n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1) + " GB" : Math.round(n / 1e6) + " MB";
+  function show() {
+    top(); if (!st || !U.now) return;
+    const h = helper(), w = st.wifi || {}, b = st.bt || {}, hs = st.hotspot || {}, br = st.bridge || {};
+    if (!h && !trial) { if (!down) say(st.error || "The settings helper isn't running"); down = true; } else if (h && down) { down = false; say(""); }
+    if (tab === "net") {
+      U.now.textContent = h ? (w.state === "COMPLETED" ? w.ssid : w.state ? "not connected (" + w.state.toLowerCase() + ")" : "no Wi-Fi") : "?"; U.sub.textContent = h && w.ip ? w.ip : "";
+      setList(!nets ? [{ hint: "SCAN shows the networks in range" }] : nets.length ? nets : [{ hint: "No networks found. Try SCAN again" }]);
+      const n = netList().find(x => x.ssid === pick);
+      U.join.textContent = n && n.saved ? "RETRY" : "JOIN"; U.join.disabled = !n || n.current || !!trial;
+      U.forget.textContent = sure === "f:" + pick ? "SURE?" : "FORGET"; U.forget.classList.toggle("warn", sure === "f:" + pick); U.forget.disabled = !n || !n.saved || n.current || !!trial;
+      U.host.disabled = !h;
+    } else if (tab === "hot") {
+      U.now.textContent = !h ? "?" : hs.on ? "on: " + hs.ssid : "hotspot off";
+      U.sub.textContent = h && hs.on ? hs.clients + (hs.clients === 1 ? " device on it" : " devices on it") + (hs.by === "itself" ? ", started by itself" : "") : "";
+      U.tog.textContent = sure === "hot" ? "SURE?" : hs.on ? "TURN OFF" : "TURN ON"; U.tog.classList.toggle("warn", sure === "hot"); U.tog.disabled = !h || (!hs.on && (!hs.set || !hs.tool));
+      U.psk.textContent = hs.set ? "NEW PASSWORD" : "SET PASSWORD"; U.psk.disabled = !h;
+      U.auto.textContent = hs.auto ? "BY ITSELF: ON" : "BY ITSELF: OFF"; U.auto.classList.toggle("on", !!hs.auto); U.auto.disabled = !h;
+      U.text.textContent = !h ? "" : !hs.tool ? "The hotspot needs one small package on the box (dnsmasq-base)." : !hs.set ? "The box's own Wi-Fi network, for where there is none. Set a password first: the box never opens a network without one."
+        : "The box's own Wi-Fi network, for where there is none. On a phone or laptop: join " + hs.ssid + ", then open https://" + hs.addr + ":8443. BY ITSELF: it starts when the box finds no known Wi-Fi for half a minute."
+          + (hs.on ? "" : " Turned on here, the box leaves the Wi-Fi it is on; if nobody joins within two minutes it goes back.");
+    } else if (tab === "bt") {
+      U.now.textContent = !h ? "?" : !b.tool ? "Bluetooth not set up" : b.on ? (b.powered ? "Bluetooth on" : "on, radio starting") : "Bluetooth off";
+      const vs = (((br.ble_midi || {}).box) || {}).visible_s || 0, all = btAll();
+      U.sub.textContent = vs ? "visible " + Math.floor(vs / 60) + ":" + String(vs % 60).padStart(2, "0") : "";
+      setList(!b.on ? [{ hint: b.tool ? "Bluetooth is off" : "The radio's tool isn't on the box" }] : all.length ? all : [{ hint: btseen ? "Nothing found. Put the device in pairing mode, SCAN again" : "No paired devices. SCAN shows what is in reach" }]);
+      const d = all.find(x => x.addr === pick), k = "b:" + pick;
+      U.tog.textContent = b.on ? "TURN OFF" : "TURN ON"; U.tog.disabled = !h || !b.tool;
+      U.scan.textContent = btbusy === "scan" ? "SCANNING" : "SCAN"; U.scan.disabled = !b.on || !b.powered || !!btbusy;
+      U.vis.classList.toggle("on", !!vs); U.vis.disabled = !b.on || !b.powered || ((br.ble_midi || {}).box || {}).state !== "ready";
+      U.pair.textContent = !d ? "PAIR" : !d.paired ? (btbusy === d.addr ? "PAIRING" : "PAIR") : sure === k ? "SURE?" : "FORGET"; U.pair.classList.toggle("warn", !!d && sure === k); U.pair.disabled = !d || !!btbusy;
+    } else if (tab === "ir") {
+      const ir = (bst && bst.ir) || {}, binds = (ir.profiles || {})[prof] || {}, L = ir.learning, code = v => v === undefined ? "-" : v.toString(16);
+      U.now.textContent = ir.device ? "receiver: " + (ir.name || "found") : "no receiver found"; U.sub.textContent = lastScan ? "last button: " + lastScan : "";
+      setList((ir.actions || []).map(a => ({ name: a, tap: code(binds[a + "/tap"]), hold: code(binds[a + "/hold"]) })));
+      U.prof.textContent = "PROFILE: " + prof; const wait = p => !!L && L.profile === prof && L.action === pick && L.press === p;
+      U.tap.textContent = wait("tap") ? "PRESS IT" : "LEARN TAP"; U.hold.textContent = wait("hold") ? "PRESS IT" : "LEARN HOLD";
+      U.tap.classList.toggle("warn", wait("tap")); U.hold.classList.toggle("warn", wait("hold"));
+      U.tap.disabled = U.hold.disabled = !pick; U.clear.disabled = !pick || (binds[pick + "/tap"] === undefined && binds[pick + "/hold"] === undefined);
+      if (L) say("Press the remote button: " + L.action.replace("_", " ") + ", " + L.press + " (" + L.profile + ")"); else if (note.startsWith("Press the remote")) say("");
+    } else if (tab === "dev") {
+      const sd = bst && bst.devices && bst.devices.sd, hd = (bst && bst.hdmi_audio) || {}, cards = (bst && bst.devices && bst.devices.cards) || [];
+      U.now.textContent = "Devices"; U.sub.textContent = "";
+      kv([["Daisy", br.daisy ? "connected" + (br.firmware ? ", firmware " + br.firmware : "") : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
+        ["BT MIDI", !br.ble_midi ? "?" : br.ble_midi.state !== "running" ? br.ble_midi.state : br.ble_midi.connected.length ? br.ble_midi.connected.map(x => x.name).join(", ") : br.ble_midi.paired ? br.ble_midi.paired + " paired, none in reach" : "none paired"],
+        ["box SD card", !sd ? "?" : sd.state === "none" ? "none in the slot" : sd.state !== "ready" ? "not readable" : [sd.bytes ? gb(sd.bytes) : "", sd.free != null ? gb(sd.free) + " free" : "", sd.samples == null ? "" : sd.samples + " samples"].filter(Boolean).join(", ")]]
+        .concat(cards.slice(0, 8).map(c => [c.name || c.id, c.use === "daisy" ? "the Daisy's sound" : c.use === "tv" ? "TV sound" : c.use === "midi" ? "MIDI only" : "not used"])));
+      U.tv.textContent = "TV SOUND: " + (hd.on ? "ON" : "OFF"); U.tv.classList.toggle("on", !!hd.on);
+      U.text.textContent = (!hd.on ? "" : hd.running ? "Playing on the TV. " : !hd.hdmi_card ? "No HDMI sound card. " : !hd.daisy_card ? "Waiting for the Daisy. " : hd.error ? hd.error + ". " : "Starting. ")
+        + "Passes the Daisy's output on to the TV (HDMI), about 40 ms late: for listening, not for playing.";
+    } else {
+      U.now.textContent = st.hostname || "?"; U.sub.textContent = w.ip || "";
+      kv([["Wi-Fi", w.ssid || "?"], ["helper", h ? "running" : "not running"], ["page", secure ? "secure" : "plain http: read-only"]]);
+      const a = br.autostart_s || 0; U.auto.textContent = a ? a + " s" : "stay";
+      for (const k in U.pw) { U.pw[k].textContent = sure === k ? "SURE?" : U.pw[k].dataset.t; U.pw[k].classList.toggle("warn", sure === k); U.pw[k].disabled = !h; }
+      U.setpin.textContent = st.pin_set ? "CHANGE PIN" : "SET PIN"; U.setpin.disabled = !h;
+      U.pinhint.textContent = st.pin_set ? "The PIN is asked for whatever changes the box." : "4 to 8 digits. Whoever sets it first owns the box's settings.";
+    }
+  }
+
+  async function scan() { U.scan.disabled = true; U.scan.textContent = "SCANNING"; const o = await sys("scan"); if (U.scan) { U.scan.disabled = false; U.scan.textContent = "SCAN"; }
+    if (o.error) return say(o.error, "bad"); nets = o.networks; if (tab === "net") show(); }
+  async function join() {
+    const n = netList().find(x => x.ssid === pick); if (!n) return;
+    let psk = "";
+    if (n.secure) { psk = await Small.keyboard({ title: "password for " + n.ssid, secret: true, max: 63 }); if (psk === null) return;
+      if (psk.length < 8 || psk.length > 63) return say("Password: 8 to 63 characters", "bad"); }
+    if (!(await needPin())) return;
+    const o = await sys("join", { ssid: n.ssid, psk }, true);
+    if (o.error && !o.gone) return say(o.error, "bad");       /* no answer at all: the box may have left this network for the try already */
+    trial = { ssid: n.ssid, lost: 0, seen: false }; say("Connecting to " + n.ssid + "..."); show();
+  }
+  async function forget() { const k = "f:" + pick; if (sure !== k) { sure = k; return show(); } sure = ""; if (!(await needPin())) return show();
+    const o = await sys("forget", { ssid: pick }, true); say(o.error || "Forgot " + pick, o.error ? "bad" : "good"); if (!o.error) scan(); else show(); }
+  async function hostname() { const v = await Small.keyboard({ title: "box name", value: (st && st.hostname) || "", max: 32 }); if (v === null || !v.trim()) return; if (!(await needPin())) return;
+    const o = await sys("hostname", { name: v.trim() }, true); say(o.error || "Box name: " + v.trim(), o.error ? "bad" : "good"); poll(); }
+  /* a network on trial: the box tries it without touching what it has saved, and goes back by itself */
+  async function trialTick() {
+    if (st && st.trial && !trial) trial = { ssid: st.trial.ssid, lost: 0, seen: true };
+    if (!trial) return;
+    if (!st || st.error || st.helper === false) { if (++trial.lost >= 2) say(trial.lost < 16 ? "Trying " + trial.ssid + ": the box is away for a moment" : "Still away. If it joined " + trial.ssid + ", this screen comes back by itself"); return; }
+    trial.lost = 0; const t = st.trial;
+    if (t && t.phase === "connected") { const o = await sys("confirm");
+      if (o.kept) { say("Joined " + trial.ssid + ", saved", "good"); trial = null; show(); scan(); } else if (o.error) { say(o.error, "bad"); trial = null; show(); scan(); } }
+    else if (t) say("Connecting to " + t.ssid + "... " + t.left_s + " s");
+    else { const l = st.last && st.last.ssid === trial.ssid ? st.last : null;
+      if (l && l.ok) say("Joined " + trial.ssid + ", saved", "good"); else say(trial.ssid + ": " + (l ? l.why : "not joined") + ". Back on " + (st.wifi.ssid || "the old network"), "bad");
+      trial = null; show(); scan(); }
+  }
+  async function hotToggle() { const hs = st.hotspot || {}, on = !hs.on; if (on && sure !== "hot") { sure = "hot"; return show(); } sure = ""; if (!(await needPin())) return show();
+    const o = await sys("hotspot", { on }, true); say(o.error && !o.gone ? o.error : on ? "Hotspot starting: join " + hs.ssid : "Hotspot off, back to the Wi-Fi", o.error && !o.gone ? "bad" : "note"); poll(); }
+  async function hotPsk() { const psk = await Small.keyboard({ title: "hotspot password, 8 to 63", secret: true, max: 63 }); if (psk === null) return;
+    if (psk.length < 8) return say("Password: 8 to 63 characters", "bad"); if (!(await needPin())) return;
+    const o = await sys("hotspot_set", { psk }, true); say(o.error || "Hotspot password saved" + (st.hotspot && st.hotspot.on ? ", used from the next start" : ""), o.error ? "bad" : "good"); poll(); }
+  async function hotAuto() { if (!(await needPin())) return; const o = await sys("hotspot_set", { auto: !(st.hotspot && st.hotspot.auto) }, true); if (o.error) say(o.error, "bad"); poll(); }
+  async function btToggle() { if (!(await needPin())) return; const on = !(st.bt && st.bt.on); say(on ? "Starting Bluetooth, up to 20 s" : "");
+    const o = await sys("bt", { on }, true); say(o.error || (on ? "Bluetooth starting, about 10 s" : "Bluetooth off"), o.error ? "bad" : "good"); poll(); }
+  async function btScan() { btbusy = "scan"; show(); const o = await sys("bt_scan"); btbusy = ""; if (o.error) say(o.error, "bad"); else btseen = o.devices; show(); }
+  async function btVisible() { const on = !(((st.bridge || {}).ble_midi || {}).box || {}).visible_s; if (on && !(await needPin())) return;
+    const o = await sys("bt_visible", { on }, on); say(o.error || (on ? "Visible for 3 minutes: pick " + (st.hostname || "the box") + " in the app's Bluetooth MIDI devices" : "Not visible any more"), o.error ? "bad" : on ? "note" : "good"); poll(); }
+  async function btPair() { const d = btAll().find(x => x.addr === pick); if (!d) return; const name = d.name || "(no name)";
+    if (!d.paired) { if (!(await needPin())) return; btbusy = d.addr; say("Pairing with " + name + ": if it shows a code, confirm it there"); show();
+      const o = await sys("bt_pair", { addr: d.addr }, true); btbusy = ""; say(o.error || "Paired with " + name, o.error ? "bad" : "good"); if (!o.error && btseen) btseen = btseen.filter(x => x.addr !== d.addr); return poll(); }
+    const k = "b:" + d.addr; if (sure !== k) { sure = k; return show(); } sure = ""; if (!(await needPin())) return show();
+    const o = await sys("bt_forget", { addr: d.addr }, true); say(o.error || "Forgot " + name, o.error ? "bad" : "good"); poll(); }
+  async function learn(press) { const L = bst && bst.ir && bst.ir.learning, wait = L && L.profile === prof && L.action === pick && L.press === press;
+    await bpost(wait ? "/ir/cancel" : "/ir/learn", wait ? {} : { profile: prof, action: pick, press }); pollBridge(); }
+  async function power(k, cmd, text) { if (sure !== k) { sure = k; return show(); } sure = ""; if (!(await needPin())) return show();
+    const o = await sys(cmd, {}, true); say(o.error || text, o.error ? "bad" : cmd === "poweroff" ? "" : "note"); show(); }
+  async function setPin() {
+    if (!secure) return say("Needs the secure page (https)", "bad");
+    let old = ""; if (st.pin_set) { old = await Small.numpad({ title: "old PIN" }); if (old === null) return; }
+    const nw = await Small.numpad({ title: "new PIN, 4 to 8 digits" }); if (nw === null) return;
+    const o = await sys("pin_set", { old, new: nw }); say(o.error || "PIN set", o.error ? "bad" : "good");
+    if (!o.error) { pin = nw; await poll(); checkPin(); }
+  }
+  async function pollBridge() { const s = await get("/state"); if (s) { bst = s; if (tab === "ir" || tab === "dev") show(); } }
+  async function poll() { if (tab === "ir" || tab === "dev" || !bst) pollBridge(); st = await get("/sys/state"); show(); await trialTick(); }
+  try { const es = new EventSource("/events?view=settings");
+    es.addEventListener("irraw", e => { try { lastScan = String(JSON.parse(e.data).scan); if (tab === "ir") show(); } catch (err) {} });
+    es.addEventListener("irlearned", () => pollBridge()); } catch (e) {}
+  F.tab(["net", "hot", "bt", "ir", "dev", "sys"].includes(tab) ? tab : "net");
+  setInterval(poll, 2500);
+}
+
+function big() {
 if (tv) $("back").href = "/?tv=1";
 const TABS = [["net", "Network"], ["hot", "Hotspot"], ["bt", "Bluetooth"], ["sys", "System"], ["dev", "Devices"], ["ir", "Remote"]];
 const SHORT = { net: "Wi-Fi", hot: "Hotspot", bt: "BT", sys: "System", dev: "Devices", ir: "Remote" };
@@ -491,6 +701,11 @@ $("y-pin").onclick = async () => {
 let pinT = null; $("pin").addEventListener("input", () => { clearTimeout(pinT); pinT = setTimeout(checkPin, 500); });
 addEventListener("resize", () => { if (tab === "net") drawNets(); if (tab === "bt") drawBt(); });
 nav(); poll(); setInterval(poll, 2500);
+/* the page's state and its redraw, reachable from outside as they were before this was a function (the tests set a state and look) */
+for (const [k, f] of [["st", () => st], ["pad", () => pad]]) Object.defineProperty(window, k, { get: f, configurable: true });
+window.draw = draw; window.act = act;
+}
+if (Small.on) small(); else big();
 </script>
 </body>
 </html>

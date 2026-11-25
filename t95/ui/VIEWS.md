@@ -1,5 +1,8 @@
 # GhettoRack screens
 
+What each screen shows. How a screen is made, and the rules it must keep:
+[`docs/CANON.md`](../../docs/CANON.md).
+
 Every screen the T95 shows, on the TV (1920x1080, remote) and on a phone.
 Rules: one purpose per view, everything relevant visible, no scrolling,
 instant switching (number keys on the remote, tabs, bottom bar on the phone).
@@ -163,6 +166,10 @@ finger lands, no pointer unless a mouse moves. Class names start with `g-`.
 Small sticks to the browser: opened once with `?small=1`, every page of the box
 stays small there, whatever link led to it (the TV pages' HOME is a plain `/`);
 `?small=0` ends it. The kiosk has a browser of its own.
+Typing, with no keyboard on the box: `Small.keyboard()` (four rows of ten keys,
+SHIFT, a symbols layer, SPACE, DEL; a password shows as dots until SHOW) and
+`Small.numpad()` for a PIN. Both cover the frame and give the text back, or
+nothing on CANCEL.
 The ApcBox page has its own copy of these rules (it is one self-contained
 file) and is the model for the rest.
 
@@ -172,12 +179,12 @@ file) and is the model for the rest.
 | Jam recorder (`/jam`) | built | REC: the button, time, levels, room left, the box's SD card and EJECT. TAKES: five to a page, TO LIBRARY, TO CARD, DELETE (asks). No playing (the box has no speaker), no renaming yet (no keyboard on the screen) |
 | Clock (`/clock`) | built | CLOCK: tempo, position, beat lamps, START / CONTINUE, -1 -0.1 +0.1 +1 TAP, clock on, send when stopped, share on Link. FROM: where the tempo comes from. OUT: who gets the clock. STATS: timing |
 | MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (named "preset N": no keyboard on the screen yet), DELETE (asks) |
-| Settings | not yet | opens in its TV layout |
+| Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, TV SOUND. SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
 
 Not there: editing 303 notes, the looper, recording from a microphone, the
 APC40 map, sets rename and delete, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
-Settings has no small layout yet.
+Every page of the box has a small layout now.
 
 ## Phone
 

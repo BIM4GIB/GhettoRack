@@ -852,7 +852,7 @@ class RouterTest(unittest.TestCase):
             pg.wait_for_selector(".g-b.warn")
             self.assertIn("preset 1", self.routes()["presets"])
             pg.locator(".g-b", has_text="SURE?").click()
-            pg.wait_for_function("document.querySelectorAll('.g-li').length === 0")
+            pg.wait_for_function("![...document.querySelectorAll('.g-li .g-nm')].some(e => e.textContent === 'preset 1')")    # (other tests leave presets of their own)
             self.assertNotIn("preset 1", self.routes()["presets"])
             # the network list
             pg.locator(".g-tab", has_text="NET").click()
@@ -3975,6 +3975,146 @@ class SettingsTest(unittest.TestCase):
                 pg.close()
             b.close()
         self.assertEqual(errors, [])
+
+    def test_s35_the_small_page(self):
+        """?small: Settings on the 480x320 touch screen. Six sections inside the panel; the PIN on a number pad, a Wi-Fi
+        password and the box name on the screen's keyboard; a join on trial, confirmed by the page"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        if not self.state()["pin_set"]:
+            self.assertEqual(self.post("/sys/do", {"cmd": "pin_set", "new": "2468"}), (200, {"ok": True}))
+        url = "http://127.0.0.1:%d/settings?small=1" % self.http
+        inside = """() => { const bad = [];
+            for (const e of document.querySelectorAll('.g-top, .g-top *, .g-tab, .g-b, .g-li, .g-msg, .g-text, .g-kv, .g-shead')) { const r = e.getBoundingClientRect();
+                if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+            return [bad, [document.documentElement.scrollWidth, document.documentElement.scrollHeight], document.querySelectorAll('style').length]; }"""
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            # (a refused request, such as the wrong PIN below, is logged by the browser as a failed load: not a fault of the page)
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" and "Failed to load resource" not in m.text else None)
+            tab = lambda t: pg.locator(".g-tab", has_text=t).click()
+            msg = lambda text, timeout=8000: pg.wait_for_function("t => document.querySelector('.g-msg').textContent.includes(t)", arg=text, timeout=timeout)
+            def keys(text):                      # type on the screen's keyboard, switching layout as needed
+                for c in text:
+                    if c == " ":
+                        pg.locator(".g-kfoot .g-b", has_text="SPACE").click()
+                        continue
+                    mode = pg.evaluate("document.querySelector('.g-keys').dataset.m")
+                    want = "lower" if c in "1234567890qwertyuiopasdfghjkl-zxcvbnm._@" else "upper" if c in "QWERTYUIOPASDFGHJKLZXCVBNM,!?" else "sym"
+                    if want != mode:
+                        pg.locator(".g-kfoot .g-b").nth(1 if want == "sym" or (mode == "sym" and want == "lower") else 0).click()
+                        if want == "upper" and mode == "sym":
+                            pg.locator(".g-kfoot .g-b").nth(0).click()
+                        pg.wait_for_function("m => document.querySelector('.g-keys').dataset.m === m", arg=want)
+                    pg.locator(".g-keys .g-b", has_text=re.compile("^" + re.escape(c) + "$")).click()
+            def pad(digits):
+                pg.wait_for_selector(".g-np")
+                for d in digits:
+                    pg.locator(".g-nkeys .g-b", has_text=re.compile("^" + d + "$")).click()
+                pg.locator(".g-nkeys .g-b", has_text="OK").click()
+            pg.goto(url)
+            pg.wait_for_function("document.querySelector('.g-led') && document.querySelector('.g-led').textContent === 'helper ok'")
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["NET", "HOT", "BT", "IR", "DEV", "SYS", "HOME"])
+            for t in ("NET", "HOT", "BT", "IR", "DEV", "SYS"):
+                tab(t)
+                pg.wait_for_function("document.querySelector('.g-shead b').textContent.length > 0")
+                pg.wait_for_timeout(200)
+                self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "settings, " + t)
+            self.assertEqual(pg.locator(".g-pin").text_content(), "LOCKED")
+            # NET: scan, pick the open network, join. The PIN is asked for on a number pad; a wrong one sends nothing
+            tab("NET")
+            pg.wait_for_function("document.querySelector('.g-shead b').textContent === 'Home Net'")
+            pg.locator(".g-col .g-b", has_text="SCAN").click()
+            pg.wait_for_selector(".g-li:not(:disabled)")
+            while not pg.locator(".g-li", has_text="Cafe Open").count():
+                pg.locator(".g-nav .g-b").nth(1).click()
+            pg.locator(".g-li", has_text="Cafe Open").click()
+            self.wpa.mode = "ok"
+            pg.locator(".g-col .g-b", has_text="JOIN").click()
+            pad("1357")
+            msg("Wrong PIN")
+            self.assertEqual(self.state()["trial"], None)
+            pg.locator(".g-col .g-b", has_text="JOIN").click()
+            pad("2468")
+            msg("Joined Cafe Open, saved")
+            self.assertEqual(pg.locator(".g-pin").text_content(), "UNLOCKED")
+            self.assertTrue(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+            # FORGET asks twice; the PIN is not asked for again
+            while not pg.locator(".g-li", has_text="Cafe Open").count():
+                pg.locator(".g-nav .g-b").nth(1).click()
+            pg.locator(".g-li", has_text="Cafe Open").click()
+            pg.wait_for_function("!document.querySelectorAll('.g-col .g-b')[2].disabled")
+            pg.locator(".g-col .g-b").nth(2).click()
+            pg.wait_for_function("document.querySelectorAll('.g-col .g-b')[2].textContent === 'SURE?'")
+            pg.locator(".g-col .g-b").nth(2).click()
+            msg("Forgot Cafe Open")
+            self.assertFalse(os.path.exists(os.path.join(self.netplan, "40-ghettorack-wifi.yaml")))
+            # a network with a password: typed on the screen's keyboard, shown as dots until SHOW; too short is said, nothing sent
+            while not pg.locator(".g-li", has_text="Home Net").count():
+                pg.locator(".g-nav .g-b").nth(0).click()
+            secured = pg.evaluate("fetch('/sys/do', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({cmd: 'scan'})}).then(r => r.json()).then(o => o.networks.filter(n => n.secure && !n.current).map(n => n.ssid))")
+            if secured:
+                while not pg.locator(".g-li", has_text=secured[0]).count():
+                    pg.locator(".g-nav .g-b").nth(1).click()
+                pg.locator(".g-li", has_text=secured[0]).click()
+                pg.locator(".g-col .g-b", has_text=re.compile("JOIN|RETRY")).click()
+                pg.wait_for_selector(".g-kb")
+                self.assertEqual(pg.evaluate(inside)[0], [], "the keyboard")
+                keys("Ab1!")
+                self.assertEqual(pg.locator(".g-kval").text_content(), "\u2022\u2022\u2022\u2022\u258f")
+                pg.locator(".g-khead .g-b").click()
+                self.assertEqual(pg.locator(".g-kval").text_content(), "Ab1!\u258f")
+                pg.locator(".g-kfoot .g-b", has_text="OK").click()
+                msg("8 to 63 characters")
+                self.assertEqual(self.state()["trial"], None)
+            # the box name, on the keyboard: CANCEL leaves it, OK sets it
+            before = self.state()["hostname"]
+            pg.locator(".g-col .g-b", has_text="BOX NAME").click()
+            pg.wait_for_selector(".g-kb")
+            pg.locator(".g-kfoot .g-b", has_text="CANCEL").click()
+            pg.wait_for_function("!document.querySelector('.g-kb')")
+            self.assertEqual(self.state()["hostname"], before)
+            pg.locator(".g-col .g-b", has_text="BOX NAME").click()
+            pg.wait_for_selector(".g-kb")
+            for _ in range(len(before)):
+                pg.locator(".g-kfoot .g-b", has_text="DEL").click()
+            keys("rack-2")
+            pg.locator(".g-kfoot .g-b", has_text="OK").click()
+            msg("Box name: rack-2")
+            self.assertIn("hostnamectl set-hostname rack-2", open(self.calls).read())
+            # SYS: the start-up delay steps at once; a power button asks twice; HOT, BT, IR and DEV say what they have
+            tab("SYS")
+            pg.wait_for_function("document.querySelector('.g-stepper span:nth-child(3)').textContent.length > 0")
+            a0 = self.state()["bridge"]["autostart_s"]
+            pg.locator(".g-stepper .g-b").nth(1).click()
+            pg.wait_for_function("a => document.querySelector('.g-stepper span:nth-child(3)').textContent === (a + 1) + ' s'", arg=a0)
+            pg.locator(".g-stepper .g-b").nth(0).click()
+            pg.wait_for_function("a => document.querySelector('.g-stepper span:nth-child(3)').textContent === (a ? a + ' s' : 'stay')", arg=a0)
+            pg.locator(".g-row3 .g-b", has_text="REBOOT").click()
+            pg.wait_for_function("document.querySelectorAll('.g-row3 .g-b')[1].textContent === 'SURE?'")
+            self.assertNotIn("systemctl reboot", open(self.calls).read())
+            tab("HOT")
+            pg.wait_for_function("document.querySelector('.g-shead b').textContent.includes('hotspot off') || document.querySelector('.g-shead b').textContent.startsWith('on:')")
+            tab("IR")
+            pg.wait_for_selector(".g-li")
+            self.assertEqual(pg.locator(".g-li").count(), 5)
+            self.assertEqual(pg.locator(".g-nav span").text_content(), "1 / 5")           # 24 buttons, five to a page
+            tab("DEV")
+            pg.wait_for_function("document.querySelector('.g-kv').textContent.includes('the Daisy\\'s sound')")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "settings, DEV with cards")
+            # without small: the TV / phone page, untouched
+            pg.goto("http://127.0.0.1:%d/settings?small=0" % self.http)
+            pg.wait_for_selector("#n-scan")
+            self.assertEqual(pg.locator(".g-app").count(), 0)
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.post("/sys/do", {"cmd": "hostname", "name": before, "pin": "2468"})
 
 
 class ListenTest(unittest.TestCase):

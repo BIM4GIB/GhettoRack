@@ -70,6 +70,48 @@ const Small = (() => {
     return p;
   }
 
+  /* Typing on a screen with no keyboard. keyboard({ title, value, max, secret }) and
+     numpad({ title, max }) cover the frame and resolve with the text, or null on CANCEL.
+     secret: shown as dots until SHOW is tapped (a password is easier typed in sight). */
+  const ROWS = { lower: ["1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm._@"], upper: ["1234567890", "QWERTYUIOP", "ASDFGHJKL-", "ZXCVBNM,!?"],
+                 sym: ["!\"#$%&'()*", "+,-./:;<=>", "?@[\\]^_`{|", "}~"] };
+  function sheet(cls) { const o = el("div", "g-sheet " + cls); document.querySelector(".g-app").appendChild(o); return o; }
+  function keyboard(opts) {
+    return new Promise(done => {
+      const o = sheet("g-kb"), max = opts.max || 63;
+      let val = opts.value || "", mode = "lower", show = !opts.secret;
+      const head = el("div", "g-khead"), title = el("span", "g-dim", opts.title || ""), out = el("span", "g-kval"), eye = btn("SHOW", () => { show = !show; draw(); });
+      head.append(title, out); if (opts.secret) head.appendChild(eye);
+      const keys = el("div", "g-keys"), foot = el("div", "g-kfoot");
+      const end = v => { o.remove(); done(v); };
+      const shift = btn("SHIFT", () => { mode = mode === "upper" ? "lower" : "upper"; draw(); }), sym = btn("#+=", () => { mode = mode === "sym" ? "lower" : "sym"; draw(); });
+      foot.append(shift, sym, btn("SPACE", () => { if (val.length < max) val += " "; draw(); }), btn("DEL", () => { val = val.slice(0, -1); draw(); }),
+        btn("CANCEL", () => end(null)), btn("OK", () => end(val), "go"));
+      o.append(head, keys, foot);
+      function draw() {
+        const t = show ? val : "•".repeat(val.length);       /* a long text: its end stays in sight */
+        out.textContent = (t.length > 40 ? "…" + t.slice(-39) : t) + "▏"; eye.textContent = show ? "HIDE" : "SHOW";
+        shift.classList.toggle("on", mode === "upper"); sym.classList.toggle("on", mode === "sym");
+        if (keys.dataset.m === mode) return; keys.dataset.m = mode; keys.textContent = "";
+        for (const row of ROWS[mode]) for (let i = 0; i < 10; i++) { const c = row[i];
+          if (c === undefined) { keys.appendChild(el("span")); continue; }
+          keys.appendChild(btn(c, () => { if (val.length < max) val += c; if (mode === "upper") mode = "lower"; draw(); })); }
+      }
+      draw();
+    });
+  }
+  function numpad(opts) {
+    return new Promise(done => {
+      const o = sheet("g-np"), max = opts.max || 8; let val = "";
+      const head = el("div", "g-khead"), out = el("span", "g-kval"); head.append(el("span", "g-dim", opts.title || "PIN"), out);
+      const keys = el("div", "g-nkeys"), end = v => { o.remove(); done(v); }, draw = () => { out.textContent = "•".repeat(val.length) + "▏"; };
+      for (const k of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "DEL", "0", "OK"])
+        keys.appendChild(btn(k, () => { if (k === "OK") return end(val); if (k === "DEL") val = val.slice(0, -1); else if (val.length < max) val += k; draw(); }, k === "OK" ? "go" : ""));
+      const foot = el("div", "g-kfoot"); foot.style.gridTemplateColumns = "1fr"; foot.appendChild(btn("CANCEL", () => end(null)));
+      o.append(head, keys, foot); draw();
+    });
+  }
+
   if (on) {
     /* A touch acts when the finger lands, not when it lifts: a press on this resistive panel
        lasts 0.2 to 0.3 s and a click only comes at its end. The click that follows is swallowed. */
@@ -84,5 +126,5 @@ const Small = (() => {
     document.addEventListener("pointermove", mouse); document.addEventListener("pointerdown", mouse);
     document.addEventListener("DOMContentLoaded", wake);
   }
-  return { on, W, H, el, url, frame, btn, pager };
+  return { on, W, H, el, url, frame, btn, pager, keyboard, numpad };
 })();
