@@ -1879,6 +1879,70 @@ class PageControlTest(unittest.TestCase):
         self.assertEqual(errors, [])
         self.do("mute 3 2", "track 1", "pat 1")
 
+    def test_p56_the_small_start_screen(self):
+        """?small on the start page: the shared frame (small.css, small.js), tiles inside 480x320, the countdown as a bar"""
+        for name, kind in (("small.css", "text/css"), ("small.js", "text/javascript")):
+            code, ctype, body = BridgeTest.get("/" + name)
+            self.assertEqual(code, 200, name)
+            self.assertIn(kind, ctype)
+            self.assertEqual(body, open(os.path.join(HERE, "..", "ui", name), "rb").read())
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        base = "http://127.0.0.1:%d" % self.http
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            pg.goto(base + "/?small=1")
+            pg.wait_for_selector("button.g-tile")
+            pg.wait_for_function("document.querySelector('.g-led') !== null")
+            out = pg.evaluate("""() => { const bad = [];
+                for (const e of document.querySelectorAll('.g-top, .g-tile, .g-b, .g-bar')) { const r = e.getBoundingClientRect();
+                    if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className); }
+                return [[...document.querySelectorAll('button.g-tile b')].map(e => e.textContent), bad,
+                        [document.documentElement.scrollWidth, document.documentElement.scrollHeight], document.querySelectorAll('style').length]; }""")
+            self.assertIn("ApcBox groovebox", out[0])
+            self.assertEqual(out[0][-2:], ["Jam recorder", "Settings"])
+            self.assertEqual(out[1:], [[], [500, 320], 0], "the small start screen: off the panel, scrolling, or the TV styles still there")
+            # a tile opens its module in the same layout, and that module becomes the last used
+            pg.locator("button.g-tile", has_text="ApcBox").click()
+            pg.wait_for_url("**/apcbox?small=1")
+            pg.wait_for_selector(".tab.on")
+            # from ApcBox back to the start screen, still small
+            pg.locator(".tab", has_text="SYS").click()
+            pg.locator(".sm-sys .b", has_text="MODULES").click()
+            pg.wait_for_url("**/?small=1")
+            pg.wait_for_selector("button.g-tile.last")
+            self.assertEqual(pg.locator("button.g-tile.last b").text_content(), "ApcBox groovebox")
+            # at boot: the countdown as a bar, STAY HERE stops it
+            pg.goto(base + "/?small=1&boot=1")
+            pg.wait_for_selector(".g-bar.count")
+            self.assertIn("opening ApcBox groovebox in", pg.locator(".g-bar").text_content())
+            pg.locator(".g-b", has_text="STAY HERE").click()
+            pg.wait_for_function("!document.querySelector('.g-bar').classList.contains('count')")
+            pg.wait_for_timeout(1500)
+            self.assertTrue(pg.url.endswith("/?small=1&boot=1"), "the countdown went on after STAY HERE")
+            # small sticks: a plain link to the start page or to ApcBox (the TV pages' HOME, a bookmark)
+            # stays in the small layout on this browser
+            pg.goto(base + "/")
+            pg.wait_for_selector("button.g-tile")
+            pg.goto(base + "/apcbox")
+            pg.wait_for_function("document.body.classList.contains('small')")
+            # ?small=0 ends it: the TV / phone pages, untouched
+            pg.goto(base + "/?small=0")
+            pg.wait_for_selector("button.module")
+            self.assertEqual(pg.locator(".g-app").count(), 0)
+            pg.goto(base + "/apcbox")
+            pg.wait_for_selector(".tab.on")
+            self.assertNotIn("small", pg.evaluate("document.body.className"))
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))
         pk = json.loads(body)

@@ -57,6 +57,15 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
                 self.selector = f.read()
         except (OSError, TypeError):
             log.warning("no selector page at %s", args.selector)
+        # small.css, small.js: the frame every page shares on the 480x320 touch screen (?small).
+        # They sit beside the start page.
+        self.shared = {}
+        for name in ("small.css", "small.js"):
+            try:
+                with open(os.path.join(os.path.dirname(os.path.abspath(args.selector)), name), "rb") as f:
+                    self.shared[name] = f.read()
+            except (OSError, TypeError):
+                log.warning("no %s beside the start page: pages opened with ?small stay empty", name)
         self.pages = {}
         for name, path in (("clock", args.clock_page), ("apcbox", args.apcbox_page), ("settings", args.settings_page),
                            ("jam", args.jam_page)):

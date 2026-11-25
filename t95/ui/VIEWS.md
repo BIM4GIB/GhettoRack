@@ -154,10 +154,27 @@ in the browser. No shadows or glows, and plain elements instead of a canvas:
 the panel is on a slow SPI link and only what changed is sent. Class names
 start with `s-` so the other layouts' styles cannot reach them.
 
+The frame and the parts are shared from 2026-11-25: `small.css` and `small.js`
+(the bridge serves them at `/small.css` and `/small.js`). A page loads
+`small.js` and, opened with `?small`, builds itself with `Small.frame()`: the
+24 px top bar, a rail on the left with HOME last, content that never scrolls
+(`Small.pager` for anything longer than the screen), a touch that acts when the
+finger lands, no pointer unless a mouse moves. Class names start with `g-`.
+Small sticks to the browser: opened once with `?small=1`, every page of the box
+stays small there, whatever link led to it (the TV pages' HOME is a plain `/`);
+`?small=0` ends it. The kiosk has a browser of its own.
+The ApcBox page has its own copy of these rules (it is one self-contained
+file) and is the model for the rest.
+
+| Page | `?small` | Content |
+|---|---|---|
+| Start (`/`) | built | the modules, the jam recorder and Settings as tiles, three across; "last used" in green; at boot the countdown as a bar with STAY HERE |
+| Jam recorder, Clock, MIDI hub, Settings | not yet | they open in their TV layout |
+
 Not there: editing 303 notes, the looper, recording from a microphone, the
 APC40 map, sets rename and delete, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
-start screen and Settings have no small layout yet.
+Jam recorder, Clock, MIDI hub and Settings have no small layout yet.
 
 ## Phone
 

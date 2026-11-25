@@ -11,7 +11,10 @@ const Q = new URLSearchParams(location.search);
 const tv = Q.has("tv");
 /* ?small: the 480x320 touch screen on the companion box's own header (a Pi). Its views are
    further down, under "the small layout". */
-const SMALL = Q.has("small"), SMALL_W = 480, SMALL_H = 320, VIEW_KEY = SMALL ? "apcbox-small-view" : "apcbox-view";
+/* ?small=1 once and this browser stays small on every page of the box (as in small.js); ?small=0 ends it */
+let smallOn = Q.has("small") ? Q.get("small") !== "0" : null;
+try { if (smallOn === null) smallOn = localStorage.getItem("gr-small") === "1"; else localStorage.setItem("gr-small", smallOn ? "1" : "0"); } catch (e) { smallOn = !!smallOn; }
+const SMALL = smallOn, SMALL_W = 480, SMALL_H = 320, VIEW_KEY = SMALL ? "apcbox-small-view" : "apcbox-view";
 /* One layout drawn for a 1920 px wide screen (TV, Mac, iPad on its side) and one
    for a 390 px wide phone held upright (also an iPad held upright). Whichever
    fits is scaled to the window, so nothing is ever cut off and the view bar is
@@ -1760,7 +1763,7 @@ V.sm_sys = {
     view.className = "sm sm-sys";
     this.kv = el("div", "s-kv"); this.log = el("div", "s-log");
     const bt = el("div", "s-bt");
-    [["MODULES", () => { location.href = "/"; }], ["SETTINGS", () => { location.href = "/settings"; }], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
+    [["MODULES", () => { location.href = "/?small=1"; }], ["SETTINGS", () => { location.href = "/settings?small=1"; }], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
     view.append(this.kv, this.log, bt);
     this.key = ""; this.L();
   },

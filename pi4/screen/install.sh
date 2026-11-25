@@ -91,7 +91,7 @@ udevadm trigger --action=change --subsystem-match=input
 # no GPU behind it), opening the page's 480x320 layout. An /etc/default/kiosk
 # someone else wrote is left alone.
 if [ ! -f /etc/default/kiosk ] || grep -q "^WLR_DRM_DEVICES=.*spi" /etc/default/kiosk; then
-  printf 'WLR_DRM_DEVICES=/dev/dri/by-path/platform-fe204000.spi-cs-0-card\nWLR_RENDERER=pixman\nCHROMIUM_FLAGS=\nKIOSK_URL=http://127.0.0.1:8040/apcbox?small=1\n' > /etc/default/kiosk
+  printf 'WLR_DRM_DEVICES=/dev/dri/by-path/platform-fe204000.spi-cs-0-card\nWLR_RENDERER=pixman\nCHROMIUM_FLAGS=\nKIOSK_URL=http://127.0.0.1:8040/?boot=1&small=1\n' > /etc/default/kiosk
 else
   echo "note: /etc/default/kiosk exists and is not ours; see pi4/README.md for the two lines the screen needs"
 fi

@@ -1,0 +1,51 @@
+/* GhettoRack at 480x320: the frame and the parts every page shares on the 3.5" touch
+   screen (?small). Served by the bridge at /small.css, with small.js beside it.
+   The ApcBox page (apcbox.css, "the small layout") is the model: same sizes, same
+   colours, no glows or shadows (they cost paint area on a slow SPI screen).
+   Content is 439 x 296 with the rail, 480 x 296 without. */
+:root{--bg:#0b0c0d;--panel:#15171a;--line:#2a2d31;--text:#d9dcdf;--dim:#7d848c;--green:#35d05a;--red:#ff4b3e;--yellow:#ffb833;--amber:#ff9a1f;--blue:#4aa3ff;--off:#23262a;--mono:ui-monospace,Menlo,monospace}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:11px/1.2 var(--mono);overflow:hidden;-webkit-user-select:none;user-select:none}
+body.nocursor,body.nocursor *{cursor:none!important}
+button{font:inherit;color:inherit;appearance:none;margin:0;-webkit-tap-highlight-color:transparent}
+.g-app{position:absolute;left:0;top:0;width:480px;height:320px;transform-origin:0 0;display:grid;grid-template-columns:40px 440px;grid-template-rows:24px 296px}
+.g-app.norail{grid-template-columns:480px}
+.g-top{grid-column:1 / -1;display:flex;align-items:center;gap:6px;padding:0 5px;border-bottom:1px solid var(--line);background:#101214;min-width:0}
+.g-top .g-title{font-size:13px;font-weight:600;white-space:nowrap}
+.g-top .g-sp{flex:1}
+.g-led{display:inline-flex;align-items:center;gap:4px;color:var(--dim);white-space:nowrap}
+.g-led::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--green)}
+.g-led.bad{color:var(--red)}.g-led.bad::before{background:var(--red)}
+.g-led.warn::before{background:var(--yellow)}.g-led.off::before{background:var(--off)}
+.g-rail{display:flex;flex-direction:column;border-right:1px solid var(--line);background:#101214;min-height:0}
+.g-tab{flex:1;border:none;border-left:3px solid transparent;background:none;color:var(--dim);padding:0;border-radius:0}
+.g-tab.on{background:#1d2024;color:var(--text);border-left-color:var(--yellow)}
+.g-tab.home{flex:0 0 40px;border-top:1px solid var(--line)}
+.g-view{min-width:0;min-height:0;overflow:hidden;position:relative}
+/* parts */
+.g-b{border:1px solid #33373c;background:#1d2024;color:var(--dim);border-radius:3px;padding:0;display:flex;align-items:center;justify-content:center;text-align:center;min-width:0}
+.g-b.on{color:var(--text);border-color:var(--yellow)}
+.g-b.go{color:#0b0c0d;background:var(--green);border-color:var(--green)}
+.g-b.warn{color:#0b0c0d;background:var(--yellow);border-color:var(--yellow)}
+.g-b.rec{color:#0b0c0d;background:var(--red);border-color:var(--red)}
+.g-b:disabled{opacity:.35}
+.g-li{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:none;color:var(--dim);font-size:12px;border-radius:3px;padding:0 6px;min-width:0;text-align:left}
+.g-li.on{background:var(--off);border-color:var(--yellow);color:var(--text)}
+.g-li .g-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.g-li .g-d{font-size:10px;color:var(--dim);white-space:nowrap}
+.g-nav{display:grid;grid-template-columns:36px 1fr 36px;gap:2px;align-items:stretch;text-align:center}.g-nav span{align-self:center;color:var(--dim)}
+.g-msg{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.g-msg.bad{color:var(--red)}
+.g-dim{color:var(--dim)}
+/* start screen */
+.g-start{display:grid;grid-template-rows:1fr 44px;gap:4px;padding:4px;height:100%}
+.g-tiles{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;gap:4px;min-height:0}
+.g-tile{border:1px solid var(--line);background:var(--panel);border-radius:3px;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:5px 8px;text-align:left;min-width:0;color:var(--dim)}
+.g-tile b{font-size:14px;font-weight:600;color:var(--text)}
+.g-tile .g-about{font-size:11px;line-height:1.3;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.g-tile .g-tag{margin-top:auto}
+.g-tile .g-tag{color:var(--green)}.g-tile .g-tag.bad{color:var(--red)}
+.g-tile.last{border-color:var(--green)}.g-tile.last b{color:var(--green)}
+.g-tile:disabled{opacity:.4}
+.g-tile.empty{background:none;border-style:dashed;align-items:center;justify-content:center;color:var(--line)}
+.g-foot{display:grid;grid-template-columns:1fr 100px;gap:4px;min-height:0}
+.g-foot .g-bar{border:1px solid var(--line);border-radius:3px;display:flex;align-items:center;padding:0 8px;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden}
+.g-foot .g-bar.count{border-color:var(--yellow);color:var(--yellow)}

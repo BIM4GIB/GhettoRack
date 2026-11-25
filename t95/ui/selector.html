@@ -97,11 +97,63 @@ td.code.set{color:var(--green)}
   <div id="modules" class="modules"></div>
   <div id="countdown" class="banner"></div>
 </main>
+<script src="/small.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const tv = params.has("tv"), boot = params.has("boot");
+
+/* The 480x320 touch screen (?small): tiles for the modules, the jam recorder and
+   Settings, and the start-up countdown as a bar. Frame and parts: small.js. */
+function small() {
+  const F = Small.frame({ title: "GHETTORACK" }), el = Small.el;
+  const root = el("div", "g-start"), tiles = el("div", "g-tiles"), foot = el("div", "g-foot"), bar = el("div", "g-bar"), stay = Small.btn("STAY HERE", () => stop());
+  foot.append(bar, stay); root.append(tiles, foot); F.view.appendChild(root);
+  let st = null, timer = null, jam = null, bridge = null;
+  const go = async m => { stop(); if (m.id) await fetch("/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: m.id }) }).catch(() => {});
+    location.href = Small.url(m.url); };
+  function stop() { if (timer) { clearInterval(timer); timer = null; } idle(); }
+  function idle() { stay.style.visibility = "hidden"; bar.classList.remove("count");
+    bar.textContent = st ? "tap a module" : ""; }
+  function draw() {
+    if (!st) return;
+    tiles.textContent = "";
+    const all = st.modules.map(m => ({ id: m.id, name: m.name, about: m.about, url: m.url, ready: m.ready,
+        tag: m.id === st.last ? "last used" : m.ready && m.missing && m.missing.length ? "no " + m.missing.map(n => n === "daisy" ? "Daisy" : n).join(", ") + " yet" : "", last: m.id === st.last }))
+      .concat([{ name: "Jam recorder", about: "record what the Daisy plays", url: "/jam", ready: true, tag: jam && jam.recording ? "recording" : "", bad: jam && jam.recording },
+               { name: "Settings", about: "network, Bluetooth, remote, system", url: "/settings", ready: true, tag: "" }]);
+    const cells = Math.max(6, Math.ceil(all.length / 3) * 3);     /* whole rows of three */
+    for (let i = 0; i < cells; i++) {
+      const m = all[i];
+      if (!m) { tiles.appendChild(el("div", "g-tile empty", "")); continue; }
+      const b = el("button", "g-tile" + (m.last ? " last" : "")); b.disabled = !m.ready;
+      b.append(el("b", "", m.name), el("span", "g-about", m.about), el("span", "g-tag" + (m.bad ? " bad" : ""), m.tag));
+      b.onclick = () => go(m); tiles.appendChild(b);
+    }
+    tiles.style.gridTemplateRows = "repeat(" + cells / 3 + ",minmax(0,1fr))";
+    if (!timer) idle();
+  }
+  function status() { if (!bridge) return;
+    const n = (bridge.controllers || []).length;
+    F.status(bridge.daisy ? "Daisy ok" + (n ? "   " + n + " controller" + (n > 1 ? "s" : "") : "") : "no Daisy", bridge.daisy ? "ok" : "bad"); }
+  function countdown() {
+    const m = st.modules.find(x => x.id === st.last && x.ready);
+    if (!boot || !m || !st.autostart_s) return;
+    let left = st.autostart_s;
+    const tick = () => { if (left <= 0) return go(m); bar.textContent = "opening " + m.name + " in " + left + " s"; bar.classList.add("count"); stay.style.visibility = "visible"; left--; };
+    tick(); timer = setInterval(tick, 1000);
+  }
+  /* any touch on the screen stops the countdown (the tile under it still opens) */
+  document.addEventListener("pointerdown", e => { if (timer && !(e.target.closest && e.target.closest(".g-tile"))) stop(); }, true);
+  const es = new EventSource("/events?view=selector");
+  es.addEventListener("bridge", e => { try { bridge = JSON.parse(e.data); if (bridge.jam) jam = bridge.jam; status(); draw(); } catch (err) {} });
+  es.addEventListener("jam", e => { try { jam = JSON.parse(e.data); draw(); } catch (err) {} });
+  es.addEventListener("irraw", () => stop());
+  fetch("/state").then(r => r.json()).then(s => { st = s; draw(); countdown(); }).catch(() => { bar.textContent = "the bridge is not answering"; });
+}
+
+function big() {
 if (tv) { $("settings").href = "/settings?tv=1"; $("jam").href = "/jam?tv=1"; }
 if (tv) document.body.classList.add("tv");
 let st = null, countdown = null;
@@ -210,6 +262,8 @@ load().then(() => {
   const first = document.querySelector(".module:not(:disabled)");
   if (first) first.focus();
 });
+}
+if (Small.on) small(); else big();
 </script>
 </body>
 </html>

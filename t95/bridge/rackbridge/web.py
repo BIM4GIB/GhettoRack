@@ -272,6 +272,12 @@ class WebMixin:
                 await self.reply(writer, 405, "text/plain", b"GET or POST\n")
             elif path in ("/", "/index.html"):
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.selector)
+            elif path in ("/small.css", "/small.js"):
+                body = self.shared.get(path[1:])
+                if body is None:
+                    await self.reply(writer, 404, "text/plain", b"not installed\n")
+                else:
+                    await self.reply(writer, 200, "text/css; charset=utf-8" if path.endswith(".css") else "text/javascript; charset=utf-8", body)
             elif path == "/clock" and "json" not in params:
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["clock"])
             elif path == "/clock":

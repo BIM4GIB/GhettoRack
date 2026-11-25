@@ -28,7 +28,7 @@ ExecStartPre=/bin/sh -c 'for i in $(seq 60); do wget -q -O /dev/null http://127.
 ExecStartPre=/bin/sh -c 'rm -f /var/lib/kiosk/chromium/SingletonLock /var/lib/kiosk/chromium/SingletonSocket /var/lib/kiosk/chromium/SingletonCookie'
 # KIOSK_URL in the same file opens another page than the selector, e.g. the
 # 480x320 layout on a Pi with the 3.5" screen on its header (pi4/screen):
-#   KIOSK_URL=http://127.0.0.1:8040/apcbox?small=1
+#   KIOSK_URL=http://127.0.0.1:8040/?boot=1&small=1
 # ($$ in ExecStart: systemd passes a single $ on to the shell)
 # Extra Chromium flags to try without editing this file, e.g.
 #   echo 'CHROMIUM_FLAGS=--ignore-gpu-blocklist --enable-gpu-rasterization' | sudo tee /etc/default/kiosk
