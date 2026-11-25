@@ -2436,6 +2436,26 @@ int main()
             U("lrec len 0");
             U("tempo 1200");
         }
+        /* the OV line: which 303s the engine is leaving out (overload), and the reverb */
+        {
+            Tick(50);
+            CHECK(!strcmp(rep_ov, "OV 0 0"));
+            U("type 15 303");
+            U("type 16 303");
+            Tick(50);
+            e.shed = 1;
+            Tick(50);
+            CHECK(!strcmp(rep_ov, "OV 32768 0")); // the highest 303 first
+            e.shed = 3;
+            Tick(50);
+            CHECK(!strcmp(rep_ov, "OV 49152 1")); // both, and the reverb
+            e.shed = 0;
+            Tick(50);
+            CHECK(!strcmp(rep_ov, "OV 0 0"));
+            U("type 15 sample");
+            U("type 16 sample");
+            Tick(50);
+        }
         /* the SM line: all of it, free, the longest free piece, claims, a slot,
            and what the loop take under way has room for */
         {

@@ -44,9 +44,14 @@ const st = {
   log: [], daisy: false, ctl: 0, bridge: null, ver: 0,
   lp: { len: 0, count: 0, qrec: 0, qpat: 0, qmute: 0, gain: 64, mode: 0, undo: 0, redo: 0, qfx: 1 },
   sets: Array.from({ length: 8 }, () => ({ exists: false })), trans: 0, transName: "", setOp: 0, kits: [], kitPg: [-1, -1], xfer: null, caps: {},
+  ov: { mask: 0, rev: 0 },   // overload (OV line, report 19): 303 tracks left out (a bit each), reverb out
   sm: null,       // loop memory (SM line, report 18), in samples: { total, free, largest, claims, slot, take }
 };
 const patName = p => "ABCDEFGH"[p >> 3] + (1 + (p & 7));
+/* overload: how many 303 voices the Daisy is leaving out, in words */
+const ovOut = t => (st.ov.mask >> t & 1) === 1;
+function ovText() { let out = 0, all = 0; for (let t = 0; t < 16; t++) { out += st.ov.mask >> t & 1; all += st.synth >> t & 1; }
+  return st.ov.rev ? `OVERLOAD: all ${all} 303s + reverb out` : `OVERLOAD: ${out} of ${all} 303s out`; }
 const typeOf = t => (st.synth >> t & 1) ? "303" : st.tr[t].name.startsWith("[loop") ? "loop" : "sample";
 function trackName(t) {
   let n = st.tr[t].name;
@@ -381,6 +386,7 @@ function topStatus() {
   ].concat(st.ext ? [["ext clock", "warn", ""]] : []).concat([
     ["cpu " + Math.round(st.cpu / 10) + "%", "ok", ""],
   ]);
+  if (st.ov.mask || st.ov.rev) parts.unshift([ovText(), "bad", "lighten the pattern"]);
   if (sendErr) parts.unshift([sendErr, "bad", ""]);
   if (st.ver && st.ver !== REPORT_VERSION) parts.unshift(["page and firmware don't match: reload", "bad", ""]);
   const key = JSON.stringify(parts);
@@ -423,7 +429,7 @@ function Strip(t, pots, opt) {
     T() { const v = st.tr[t].v; for (const [k, i] of P) if (!k.dragging && !isBusy("k" + t + "." + i)) k.set(v[i]); if (!f.dragging && !isBusy("k" + t + ".0")) f.set(v[0]);
       if (side) { const x = ["A+B", "A", "B"][v[12]] || "A+B"; if (side.textContent !== x) side.textContent = x; side.classList.toggle("on", v[12] > 0); } },
     N() { const n = trackName(t); if (n !== name) nmt.textContent = name = n; },
-    S() { s.classList.toggle("sel", st.sel === t); m.set(st.mute >> t & 1); so.set(st.solo >> t & 1); if (arm) arm.set(st.lrec && st.lrecT === t, st.lrec === 1); this.G(); },
+    S() { s.classList.toggle("sel", st.sel === t); s.classList.toggle("shed", ovOut(t)); m.set(st.mute >> t & 1); so.set(st.solo >> t & 1); if (arm) arm.set(st.lrec && st.lrecT === t, st.lrec === 1); this.G(); },
     G() { if (!leds) return; const row = st.grid.substr(t * 16, 16), key = row + (st.playing ? st.step : -1); if (key === ledKey) return; ledKey = key;
       for (let i = 0; i < 16; i++) leds[i].className = st.playing && i === st.step ? "ph" : row[i] === "2" ? "ac" : row[i] === "1" ? "on" : ""; },
     H() { f.meter(st.meters[t]); } };
@@ -1429,6 +1435,7 @@ V.system = {
       ["clock", b.clock && b.clock.on ? b.clock.source + " " + b.clock.tempo : "off"],
       ["APC40 on the Daisy", st.apc ? "yes" : "no"], ["SD card in the Daisy", st.sd ? "ok" : "none"],
       ["CPU", Math.round(st.cpu / 10) + "%"], ["browsers", String(b.clients || 0)]];
+    if (st.ov.mask || st.ov.rev) rows.splice(6, 0, ["overload", ovText() + " (tracks " + [...Array(16).keys()].filter(ovOut).map(t => t + 1).join(", ") + ")", true]);
     const m = st.sm;   // loop memory: amber when not even an until-stopped take (two slots) fits in one piece
     if (m && m.total) rows.splice(7, 0, ["loop memory", `${smSec(m.free)} s free of ${smSec(m.total)} s, longest ${smSec(m.largest)} s`, m.largest < 2 * m.slot]);
     this.kv.textContent = ""; for (const [k, v, warn] of rows) { const e = el("span", "", v); if (warn) e.style.color = "var(--amber)"; this.kv.append(el("span", "", k), e); }
@@ -1492,11 +1499,13 @@ function line(l) {
     case "L": st.log.push(new Date().toTimeString().slice(0, 8) + "  " + rest); if (st.log.length > 200) st.log.splice(0, 100); call("L"); break;
     case "V": st.ver = +rest; topStatus(); call("B"); break;
     case "VF": st.fw = rest; break;      // the firmware's version (report 17)
+    case "OV": { const f = rest.split(" ").map(Number); if (f.length < 2) break;   // overload (report 19)
+      st.ov = { mask: f[0], rev: f[1] }; topStatus(); call("S"); call("B"); break; }
     case "SM": { const f = rest.split(" ").map(Number); if (f.length < 6) break;   // loop memory (report 18)
       st.sm = { total: f[0], free: f[1], largest: f[2], claims: f[3], slot: f[4], take: f[5] }; call("P"); call("B"); break; }
   }
 }
-const REPORT_VERSION = 18;
+const REPORT_VERSION = 19;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

@@ -116,6 +116,10 @@ live, with markers and bar lines), pad, list row with waveform.
 - v13.21: a sample longer than 16 s goes into the same memory whole (from the
   card, a kit, a set or the T95's library, which sends up to 98 s). No page
   change: "(cut to fit)" after a send now only shows when there was no room.
+- v13.24 (report 19): `OV`, overload. While the Daisy leaves 303 voices out
+  the top bar of every view has a red "OVERLOAD: 4 of 8 303s out", the mixer
+  strips of those tracks are dimmed with a red outline, and System > Links
+  names the tracks. The Daisy's own screen shows the same line in a red bar.
 - Still missing in the firmware: sample browser on the Daisy's card from the
   T95.
 

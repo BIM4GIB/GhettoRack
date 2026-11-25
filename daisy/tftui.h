@@ -753,6 +753,29 @@ void TftPopup(uint32_t now)
     TText(x + 12, y + 12, kFontBig, popup, cTx);
 }
 
+/* ---- overload: voices are left out (Engine::shed), over any view ---- */
+void TftOverload(uint32_t now)
+{
+    uint32_t mask = eng->ShedMask();
+    if(!mask && !eng->ShedReverb())
+        return;
+    int out = 0, all = eng->ShedMax() - 1;
+    for(int t = 0; t < kTracks; t++)
+        out += (mask >> t) & 1;
+    char buf[48];
+    if(eng->ShedReverb())
+        snprintf(buf, sizeof(buf), "OVERLOAD: all %d 303s + reverb out", all);
+    else
+        snprintf(buf, sizeof(buf), "OVERLOAD: %d of %d 303s out", out, all);
+    int w = TTextW(kFontBig, buf) + 24;
+    if(w > kTftW - 8)
+        w = kTftW - 8;
+    int x = (kTftW - w) / 2, y = 30;
+    TFill(x, y, w, 36, ((now / 400) & 1) ? cRed : Rgb(120, 30, 28));
+    TRect(x, y, w, 36, cTx);
+    TText(x + 12, y + 10, kFontBig, buf, cTx);
+}
+
 /** Draws the current view; returns which 16-row bands changed */
 bool TouchCalActive();
 void TouchCalDraw(uint32_t now);
@@ -782,6 +805,7 @@ uint32_t TftCompose(uint32_t now)
         case 3: ViewTrack(); break;
         default: ViewSystem(now); break;
     }
+    TftOverload(now);
     TftPopup(now);
     TouchMarkDraw(now);
 

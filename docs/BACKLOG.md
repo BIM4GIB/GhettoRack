@@ -4,6 +4,25 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.24: the overload shows (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.24, the binary on the Seed. Report 19 (`OV`),
+control 10, SDRAM as before. Firmware and page go together.
+
+- `OV mask reverb`: the 303 tracks left out and whether the reverb is. The
+  ApcBox page has a red "OVERLOAD: 4 of 8 303s out" in the top bar of every
+  view, dims the mixer strips of those tracks with a red outline, and names
+  them under System > Links. The Daisy's screen has the same line in a red
+  bar under the header, and a popup when it sets in.
+- Seen on the rig with the eight-303 pattern: `OV 61440 0` (tracks 13 to 16),
+  the chip and the four dimmed strips on the page, `OV 0 0` after stop.
+  Desktop: `sets_test` (the line), the page test (the chip, from an injected
+  line; the Mac cannot build the firmware simulator, so not end to end).
+- Not seen: the bar on the Daisy's own screen (nobody looked), the OLED, the
+  page on the TV and on a phone. Nothing on the APC40's lights.
+- Rene has listened to v13.22 and v13.23 (said 2026-11-25); how the guard
+  cutting in sounds was not part of that.
+
 ## v13.23: overload guard (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.23, the binary on the Seed. Control 10,
@@ -22,9 +41,8 @@ report 18, SDRAM as before. No report line for it: it says so in the log.
   stop; all back within 10 s of stopping. One main loop pass of 248 ms as it
   set in. 8 sample tracks plus one 303 (57 %): the guard did nothing.
   Desktop: `acid_engine_test` checks that shed 303s are silent, their notes
-  still fire and they come back. Rene has not heard it cut in.
-- Open: nothing on the APC40, the screen or the pages says voices are out,
-  only the log line ("OVERLOAD: 4 of 8 303 voices left out"). A voice is cut
+  still fire and they come back.
+- Open: a voice is cut
   without a fade. Between 65 % and 93 % nothing comes back by itself, so a
   heavy pattern keeps its dropped voices until it gets lighter. Sample
   tracks are never dropped. Single blocks still peak over 100 % in that
@@ -46,7 +64,7 @@ sound, the protocol (control 10, report 18) or SDRAM.
   one 303 with 4 notes): stopped 28 % (was 38 to 44), 8 tracks 53 % (was 67
   to 71), with the 303 60 % average and 80 % peak (was 71 to 76 and up to
   124). The main loop's slowest pass 16 ms (was 40 to 55). USB audio whole.
-  A 20 s take of it: no gaps. Rene has not listened to this build.
+  A 20 s take of it: no gaps.
 - `python3 daisy/check_itcm.py` after a build: checks on the desk that the
   copy puts the right bytes at the right addresses and that nothing the reset
   code needs sits in the ITCM. A build that fails it does not boot. Three

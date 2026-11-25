@@ -369,3 +369,6 @@ body.short .apcinfo{padding:8px 10px;gap:4px}body.short .apcinfo h3{font-size:13
 .apcbtns{display:flex;flex-wrap:wrap;gap:8px}.apcbtns .b.am{color:var(--amber);border-color:#8a6a20}
 body.phone .apcinfo{height:190px}body.phone .apcrow{min-height:28px;gap:6px}body.phone .apcrow b,body.phone .apcrow em{font-size:13px}body.phone .apcrow .b,body.phone .apcbtns .b{height:28px;padding:0 8px;font-size:11px}body.phone .apcbtns{gap:5px}
 body.short .apcrow{min-height:24px;gap:5px}body.short .apcrow b,body.short .apcrow em{font-size:11px}body.short .apcrow .b,body.short .apcbtns .b{height:22px;padding:0 6px;font-size:10px}body.short .apcbtns{gap:4px}body.short .apcrow .lbl{width:34px}
+
+/* overload: the Daisy is leaving this 303 out */
+.shed{opacity:.45;outline:1px solid var(--red)}

@@ -1,4 +1,4 @@
-# ApcBox serial protocol (report version 18)
+# ApcBox serial protocol (report version 19)
 
 The Daisy's USB-C is a composite USB device, full speed (12 Mbit/s):
 
@@ -109,8 +109,9 @@ types and ignore them. Source: `daisy/box.cpp`, search for `Out("`.
 | `LP len count qrec qpat qmute gain mode undo redo qfx` | v13.12: looper and quantise settings as set with `lrec len`, `lrec count`, `quant ...`, `ingain`; `mode` is what the current or last take is (0 loop, 1 overdub, 2 one-shot); `undo` is the track (1-16) whose last take `lrec undo` would take back, 0 = none. v13.13 (report 14) adds `redo` (the track `lrec redo` would bring a take back on, 0 = none) and `qfx`; from v13.14 (report 15) `undo` / `redo` are 101 or 102 when it is a kit load on tracks 1-8 or 9-16 that would be taken back; undo and redo also cover a sample changed with the APC40's browse buttons. On change |
 | `MB from hex` | v13.15: the button map, 40 buttons a line from `from` (0, 40, 80): 4 hex digits each, the job alone and the job with SHIFT (`L`, +0x80 = `L`'s SHIFT job, `ff` = nothing). After `ESC R` and on change |
 | `MC hex` | v13.15: the knob and fader map, 27 x 2 hex digits |
+| `OV mask reverb` | v13.24 (report 19): overload. The Daisy leaves 303 voices out when the audio takes more than its time, so it stays in control (v13.23). `mask`: the 303 tracks left out now, a bit per track (bit 0 = track 1), highest track first; `reverb`: 1 when the reverb is out too. `0 0` when all is well. On change and after `ESC R` |
 | `SM total free largest claims slot take` | v13.20 (report 18): loop memory, in samples at 48 kHz. `total`: the spare memory long loops go into; `free`: what is free of it; `largest`: the longest free piece (a loop needs one piece; 0 when the table of claims is full); `claims`: how many pieces are taken; `slot`: what a track's own slot holds; `take`: what the loop take under way has room for, 0 when there is none. On change and after `ESC R` |
-| `V n` | Report version (18). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
+| `V n` | Report version (19). Bump it in `box.cpp` and `ui/apcbox-ui.html` together when a line changes |
 | `VF text` | v13.17 (report 17): the firmware's own version, e.g. `13.17`. Once a second with `V`. The bridge shows it in `/health` (`firmware`) and on Settings > Devices |
 
 ### S fields

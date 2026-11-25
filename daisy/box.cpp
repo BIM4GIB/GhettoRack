@@ -3078,7 +3078,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 18; // 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version); 18: SM (loop memory)
+constexpr int kReportVersion = 19; // 19: OV (overload: voices left out); 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version); 18: SM (loop memory)
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -3114,6 +3114,7 @@ uint8_t  rep_acid[kTracks][8];
 char     rep_name[kTracks][kPathLen];
 char     rep_lp[48] = "";
 char     rep_sm[72] = "";
+char     rep_ov[24] = "";
 void     ForgetReportedName(int t) { rep_name[t][0] = 0; }
 int      rep_browse[4] = {-2, -2, -2, -2};
 int      rep_kit[4]    = {-2, -2, -2, -2};
@@ -3146,6 +3147,7 @@ void ForceFullReport()
     rep_ck[0]    = 0;
     rep_lp[0]    = 0;
     rep_sm[0]    = 0;
+    rep_ov[0]    = 0;
     map_report   = true;
     rep_kitpg[0] = -9; // KP again; the kit names only after ESC R or when the list changes
 }
@@ -3558,6 +3560,19 @@ void Report(uint32_t now)
         {
             strcpy(rep_sm, sm);
             Out("%s", sm);
+        }
+    }
+    {
+        /* overload: the 303 tracks the engine is leaving out (a bit per track)
+           and whether the reverb is out too; 0 0 when all is well */
+        char ov[24];
+        snprintf(ov, sizeof(ov), "OV %lu %d", (unsigned long)eng->ShedMask(), eng->ShedReverb() ? 1 : 0);
+        if(strcmp(ov, rep_ov))
+        {
+            if(!strcmp(rep_ov, "OV 0 0") && strcmp(ov, "OV 0 0"))
+                Popup("OVERLOAD: voices left out");
+            strcpy(rep_ov, ov);
+            Out("%s", ov);
         }
     }
     {

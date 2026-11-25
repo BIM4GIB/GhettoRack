@@ -1981,6 +1981,14 @@ class PageControlTest(unittest.TestCase):
                 self.assertFalse(pg.locator("button.bigpad:has-text('REC LOOP')").is_disabled())
                 self.do("stop", "lrec len 0", "tempo 1200")
                 self.assertTrue(self.box.wait_for(lambda c: self.lp()[0] == 0 and self.s(5) == 1200, 5))
+                # overload (OV line, report 19): a red chip in the top bar for as long as voices are out
+                self.assertEqual(pg.locator(".led.bad", has_text="OVERLOAD").count(), 0)
+                pg.evaluate("line('OV 49152 0')")
+                pg.wait_for_function("[...document.querySelectorAll('.led.bad')].some(e => e.textContent.includes('OVERLOAD: 2 of'))")
+                pg.evaluate("line('OV 49152 1')")
+                pg.wait_for_function("[...document.querySelectorAll('.led.bad')].some(e => e.textContent.includes('reverb out'))")
+                pg.evaluate("line('OV 0 0')")
+                pg.wait_for_function("![...document.querySelectorAll('.led.bad')].some(e => e.textContent.includes('OVERLOAD'))")
                 # quantise on the System view
                 pg.goto("http://127.0.0.1:%d/apcbox?v=system" % self.http)
                 pg.wait_for_selector(".qrow .seg")

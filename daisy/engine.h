@@ -436,6 +436,9 @@ class Engine
      *  on, so they come back in time when it is taken down again. */
     volatile uint8_t shed = 0;
     /** How far `shed` can go right now: the 303 tracks, plus one for the reverb */
+    /** The 303 tracks left out right now (bit per track), and whether the reverb is */
+    uint32_t ShedMask() const { return shed_mask_; }
+    bool     ShedReverb() const { return shed_reverb_; }
     int ShedMax() const
     {
         int n = 1;
