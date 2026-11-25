@@ -171,12 +171,13 @@ file) and is the model for the rest.
 | Start (`/`) | built | the modules, the jam recorder and Settings as tiles, three across; "last used" in green; at boot the countdown as a bar with STAY HERE |
 | Jam recorder (`/jam`) | built | REC: the button, time, levels, room left, the box's SD card and EJECT. TAKES: five to a page, TO LIBRARY, TO CARD, DELETE (asks). No playing (the box has no speaker), no renaming yet (no keyboard on the screen) |
 | Clock (`/clock`) | built | CLOCK: tempo, position, beat lamps, START / CONTINUE, -1 -0.1 +0.1 +1 TAP, clock on, send when stopped, share on Link. FROM: where the tempo comes from. OUT: who gets the clock. STATS: timing |
-| MIDI hub, Settings | not yet | they open in their TV layout |
+| MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (named "preset N": no keyboard on the screen yet), DELETE (asks) |
+| Settings | not yet | opens in its TV layout |
 
 Not there: editing 303 notes, the looper, recording from a microphone, the
 APC40 map, sets rename and delete, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
-MIDI hub and Settings have no small layout yet.
+Settings has no small layout yet.
 
 ## Phone
 

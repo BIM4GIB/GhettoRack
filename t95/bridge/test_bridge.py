@@ -778,6 +778,96 @@ class RouterTest(unittest.TestCase):
         self.keys.play([0x90, 0x30, 0x30])
         self.assertEqual(self.synth.received(0.5).hex(), "903030")
 
+    def test_r65_small_hub_page(self):
+        """?small on the MIDI hub: the grid, the editor, presets and the network list inside 480x320; a route made on it carries MIDI"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.post("/select", {"module": "midihub"})
+        self.post("/routes", {"routes": []})
+        inside = """() => { const bad = [];
+            for (const e of document.querySelectorAll('.g-top, .g-tab, .g-b, .g-li, .g-ch, .g-rh, .g-msg, .g-hint, .g-etitle')) { const r = e.getBoundingClientRect();
+                if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+            return [bad, [document.documentElement.scrollWidth, document.documentElement.scrollHeight]]; }"""
+        def routes_are(want):
+            end = time.time() + 3
+            while time.time() < end and self.routes()["routes"] != want:
+                time.sleep(0.05)
+            self.assertEqual(self.routes()["routes"], want)
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            pg.goto("http://127.0.0.1:%d/midihub?small=1" % self.http)
+            pg.wait_for_selector(".g-matrix .g-cell")
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["ROUTE", "NET", "SAVED", "HOME"])
+            self.assertEqual(pg.locator(".g-rh").all_text_contents(), ["any device", "APC40", "LPK25", "Synth", ""])
+            self.assertEqual(pg.locator(".g-ch").all_text_contents(), ["APC40", "LPK25", "Synth", "Daisy", ""])
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320]], "hub, ROUTE")
+            cell = lambda row, col: pg.locator(".g-matrix .g-cell").nth(row * 4 + col)       # 4 senders x 4 receivers
+            self.assertTrue(cell(2, 1).is_disabled(), "LPK25 to itself")
+            self.assertTrue(pg.locator(".g-hfoot .g-b", has_text="EDIT").is_disabled())
+            # tap: connected and selected
+            cell(2, 2).click()
+            pg.wait_for_selector(".g-cell.sel")
+            routes_are([{"from": "LPK25", "to": "Synth"}])
+            # the editor: channel 1 to channel 10, notes only; every tap is applied at once
+            pg.locator(".g-hfoot .g-b", has_text="EDIT").click()
+            pg.wait_for_selector(".g-hedit")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320]], "hub, editor")
+            shots = os.environ.get("APCBOX_SHOTS")
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "small-hub-edit.png"))
+            pg.locator(".g-step").nth(0).locator(".g-b").nth(1).click()
+            routes_are([{"from": "LPK25", "to": "Synth", "ch": 1}])
+            for k in range(10):
+                pg.locator(".g-step").nth(1).locator(".g-b").nth(1).click()
+                pg.wait_for_function("k => document.querySelectorAll('.g-step')[1].children[2].textContent === String(k)", arg=k + 1)
+            for t in ("CC", "PROGRAM", "PRESSURE", "BEND", "SYSEX", "CLOCK"):
+                n = pg.locator(".g-types .g-b.on").count()
+                pg.locator(".g-types .g-b", has_text=t).click()
+                pg.wait_for_function("n => document.querySelectorAll('.g-types .g-b.on').length === n - 1", arg=n)
+            routes_are([{"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10, "types": ["note"]}])
+            self.drain()
+            self.keys.play([0x90, 0x3C, 0x64, 0xB0, 0x01, 0x02])
+            self.assertEqual(self.synth.received(0.4).hex(), "993c64")
+            pg.locator(".g-b", has_text="BACK TO THE GRID").click()
+            pg.wait_for_selector(".g-matrix")
+            self.assertEqual(cell(2, 2).text_content(), "1>10 note")
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "small-hub-grid.png"))
+            # presets: saved under a name of its own (no keyboard on the screen), loaded, deleted after asking
+            pg.locator(".g-tab", has_text="SAVED").click()
+            pg.locator(".g-b", has_text="SAVE AS NEW").click()
+            pg.wait_for_selector(".g-li.on")
+            self.assertEqual(pg.locator(".g-li.on .g-nm").text_content(), "preset 1")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320]], "hub, SAVED")
+            self.post("/routes", {"routes": []})
+            pg.locator(".g-b", has_text="LOAD").click()
+            routes_are([{"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10, "types": ["note"]}])
+            pg.locator(".g-b", has_text="DELETE").click()
+            pg.wait_for_selector(".g-b.warn")
+            self.assertIn("preset 1", self.routes()["presets"])
+            pg.locator(".g-b", has_text="SURE?").click()
+            pg.wait_for_function("document.querySelectorAll('.g-li').length === 0")
+            self.assertNotIn("preset 1", self.routes()["presets"])
+            # the network list
+            pg.locator(".g-tab", has_text="NET").click()
+            pg.wait_for_selector(".g-hint")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320]], "hub, NET")
+            # REMOVE on the grid
+            pg.locator(".g-tab", has_text="ROUTE").click()
+            cell(2, 2).click()
+            pg.wait_for_selector(".g-cell.sel")
+            pg.locator(".g-hfoot .g-b", has_text="REMOVE").click()
+            routes_are([])
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+
     def test_r6_hub_page_in_a_browser(self):
         try:
             from playwright.sync_api import sync_playwright
@@ -1918,6 +2008,13 @@ class PageControlTest(unittest.TestCase):
             pg.wait_for_url("**/?small=1")
             pg.wait_for_selector("button.g-tile.last")
             self.assertEqual(pg.locator("button.g-tile.last b").text_content(), "ApcBox groovebox")
+            # "last used" follows the tile opened last, the jam recorder included; the box still boots into the module
+            pg.locator("button.g-tile", has_text="Jam recorder").click()
+            pg.wait_for_selector(".g-recbtn")
+            pg.locator(".g-tab", has_text="HOME").click()
+            pg.wait_for_selector("button.g-tile.last")
+            self.assertEqual(pg.locator("button.g-tile.last b").all_text_contents(), ["Jam recorder"])
+            self.assertEqual(json.loads(BridgeTest.get("/state")[2])["last"], "apcbox")
             # at boot: the countdown as a bar, STAY HERE stops it
             pg.goto(base + "/?small=1&boot=1")
             pg.wait_for_selector(".g-bar.count")

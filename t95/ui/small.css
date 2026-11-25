@@ -73,3 +73,15 @@ button{font:inherit;color:inherit;appearance:none;margin:0;-webkit-tap-highlight
 .g-hint{font-size:11px;line-height:1.35;overflow:hidden}
 .g-stats{display:grid;grid-template-rows:1fr 18px;padding:8px;height:100%}
 .g-kv{display:grid;grid-template-columns:150px 1fr;gap:8px 8px;align-content:start;font-size:12px}
+/* MIDI hub */
+.g-hub{display:grid;grid-template-rows:1fr 40px 18px;gap:4px;padding:4px;height:100%}
+.g-none{align-self:center;text-align:center;padding:0 40px;font-size:12px;line-height:1.4}
+.g-matrix{display:grid;grid-template-columns:104px repeat(5,1fr);grid-template-rows:22px repeat(5,1fr);gap:3px;min-height:0}
+.g-ch,.g-rh{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:center}
+.g-ch{text-align:center}.g-rh.act{color:var(--green)}
+.g-cell{font-size:10px}.g-cell.def{color:var(--amber);border-color:#7a4d12}.g-cell.sel{outline:2px solid var(--yellow);outline-offset:-2px}
+.g-hfoot{display:grid;grid-template-columns:1fr 1fr 64px 76px;gap:4px;min-height:0}
+.g-hedit{display:grid;grid-template-rows:22px 44px 44px 1fr 44px 18px;gap:6px;padding:6px;height:100%}
+.g-etitle{font-size:13px;color:var(--yellow);align-self:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.g-step{display:grid;grid-template-columns:110px 60px 1fr 60px;gap:6px;align-items:stretch}.g-step span{align-self:center}.g-step span:nth-child(3){text-align:center;font-size:16px;color:var(--text)}
+.g-types{display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:1fr;gap:5px;min-height:0}

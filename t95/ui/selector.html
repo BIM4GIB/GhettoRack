@@ -111,7 +111,11 @@ function small() {
   const root = el("div", "g-start"), tiles = el("div", "g-tiles"), foot = el("div", "g-foot"), bar = el("div", "g-bar"), stay = Small.btn("STAY HERE", () => stop());
   foot.append(bar, stay); root.append(tiles, foot); F.view.appendChild(root);
   let st = null, timer = null, jam = null, bridge = null;
-  const go = async m => { stop(); if (m.id) await fetch("/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: m.id }) }).catch(() => {});
+  /* "last used" is the tile opened last on this screen, the jam recorder and Settings included.
+     The bridge's own "last" is the module (it sets the MIDI routing and what the box boots into). */
+  const mark = () => { try { return localStorage.getItem("gr-last-tile"); } catch (e) { return null; } };
+  const go = async m => { stop(); try { localStorage.setItem("gr-last-tile", m.name); } catch (e) {}
+    if (m.id) await fetch("/select", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ module: m.id }) }).catch(() => {});
     location.href = Small.url(m.url); };
   function stop() { if (timer) { clearInterval(timer); timer = null; } idle(); }
   function idle() { stay.style.visibility = "hidden"; bar.classList.remove("count");
@@ -120,9 +124,11 @@ function small() {
     if (!st) return;
     tiles.textContent = "";
     const all = st.modules.map(m => ({ id: m.id, name: m.name, about: m.about, url: m.url, ready: m.ready,
-        tag: m.id === st.last ? "last used" : m.ready && m.missing && m.missing.length ? "no " + m.missing.map(n => n === "daisy" ? "Daisy" : n).join(", ") + " yet" : "", last: m.id === st.last }))
+        tag: m.ready && m.missing && m.missing.length ? "no " + m.missing.map(n => n === "daisy" ? "Daisy" : n).join(", ") + " yet" : "" }))
       .concat([{ name: "Jam recorder", about: "record what the Daisy plays", url: "/jam", ready: true, tag: jam && jam.recording ? "recording" : "", bad: jam && jam.recording },
                { name: "Settings", about: "network, Bluetooth, remote, system", url: "/settings", ready: true, tag: "" }]);
+    const lastMod = st.modules.find(m => m.id === st.last), was = all.find(m => m.name === mark() && m.ready) || all.find(m => lastMod && m.name === lastMod.name);
+    if (was) { was.last = true; if (!was.bad) was.tag = "last used"; }
     const cells = Math.max(6, Math.ceil(all.length / 3) * 3);     /* whole rows of three */
     for (let i = 0; i < cells; i++) {
       const m = all[i];

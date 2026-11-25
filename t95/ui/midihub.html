@@ -116,11 +116,125 @@ input[type=number],input[type=text],select{background:#0b0c0d;border:1px solid #
   </div>
   <table class="list" id="presets" style="margin-top:8px"></table>
 </main>
+<script src="/small.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const tv = params.has("tv");
+
+/* The 480x320 touch screen (?small). ROUTE: the grid, 5 senders by 5 receivers a page; tap a
+   square to connect and select it, EDIT for its channel and message types, REMOVE to take it
+   out. NET: what is on the network. SAVED: presets, routings kept under a name. Frame and parts: small.js. */
+function small() {
+  const el = Small.el, ROWS = 5, COLS = 5;
+  const TYPES = { note: "NOTES", cc: "CC", pc: "PROGRAM", at: "PRESSURE", pb: "BEND", sysex: "SYSEX", clock: "CLOCK" };
+  let R = null, H = null, tab = "route", sel = null, editing = false, rp = 0, cp = 0, pick = "", sure = "", note = "", lastIn = {}, U = {};
+  const F = Small.frame({ title: "MIDI HUB", tabs: [["route", "ROUTE"], ["net", "NET"], ["preset", "SAVED"]], onTab: id => { tab = id; editing = false; pick = ""; sure = ""; build(); } });
+  const post = async (path, body) => { try { const j = await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
+      say(j.error || "", !!j.error); return j; } catch (e) { say("the box isn't answering", true); return { error: "x" }; } };
+  function say(t, bad) { note = t; if (U.msg) { U.msg.textContent = t; U.msg.classList.toggle("bad", !!bad); } }
+  const nm = d => d === "*" ? "any device" : d === "daisy" ? "Daisy" : d;
+  const find = (list, f, t) => list.findIndex(r => r.from === f && r.to === t);
+  const short = r => { const p = []; if (r.ch) p.push(r.ch + (r.remap ? ">" + r.remap : "")); else if (r.remap) p.push(">" + r.remap);
+    if (r.types) p.push(r.types.length === 1 ? r.types[0] : r.types.length + "t"); return p.join(" ") || "on"; };
+  const route = () => sel ? R.routes[find(R.routes, sel.from, sel.to)] : null;
+  async function put(r) { const i = find(R.routes, r.from, r.to), routes = R.routes.slice(); if (i < 0) return; routes[i] = r; await post("/routes", { routes }); await load(); }
+  function build() {
+    F.view.textContent = ""; U = { msg: el("div", "g-msg", note) };
+    if (!R) { F.view.appendChild(U.msg); return; }
+    if (tab === "route" && editing && route()) {
+      const r = route(), root = el("div", "g-hedit");
+      root.appendChild(el("div", "g-etitle", nm(r.from) + "  to  " + nm(r.to)));
+      const step = (label, key, none) => { const row = el("div", "g-step"), val = el("span", "", r[key] ? String(r[key]) : none);
+        const mv = d => { const v = ((r[key] || 0) + d + 17) % 17, n = Object.assign({}, r); if (v) n[key] = v; else delete n[key]; put(n); };
+        row.append(el("span", "g-dim", label), Small.btn("‹", () => mv(-1)), val, Small.btn("›", () => mv(1))); return row; };
+      root.append(step("channel", "ch", "all"), step("to channel", "remap", "same"));
+      const tb = el("div", "g-types");
+      for (const t of R.types) { const on = !r.types || r.types.includes(t);
+        tb.appendChild(Small.btn(TYPES[t] || t, () => { const cur = r.types ? r.types.slice() : R.types.slice(), k = cur.indexOf(t); if (k >= 0) cur.splice(k, 1); else cur.push(t);
+          const n = Object.assign({}, r); if (cur.length < R.types.length) n.types = R.types.filter(x => cur.includes(x)); else delete n.types; put(n); }, on ? "on" : "")); }
+      const foot = el("div", "g-row2");
+      foot.append(Small.btn("BACK TO THE GRID", () => { editing = false; build(); }), Small.btn("REMOVE", async () => { const routes = R.routes.filter(x => !(x.from === r.from && x.to === r.to)); sel = null; editing = false; await post("/routes", { routes }); load(); }));
+      root.append(tb, foot, U.msg); F.view.appendChild(root);
+    } else if (tab === "route") {
+      const srcs = ["*"].concat(R.sources), dsts = R.destinations, root = el("div", "g-hub");
+      if (!R.sources.length) { root.appendChild(el("div", "g-dim g-none", "No MIDI devices yet: plug one into the box, or connect one over the network.")); root.appendChild(U.msg); F.view.appendChild(root); status(); return; }
+      const rpages = Math.max(1, Math.ceil(srcs.length / ROWS)), cpages = Math.max(1, Math.ceil(dsts.length / COLS));
+      rp = Math.min(rp, rpages - 1); cp = Math.min(cp, cpages - 1);
+      const grid = el("div", "g-matrix"); grid.appendChild(el("span"));
+      const cols = dsts.slice(cp * COLS, cp * COLS + COLS), rows = srcs.slice(rp * ROWS, rp * ROWS + ROWS);
+      for (let i = 0; i < COLS; i++) grid.appendChild(el("span", "g-ch", cols[i] !== undefined ? nm(cols[i]) : ""));
+      U.dots = {};
+      for (let j = 0; j < ROWS; j++) {
+        const s0 = rows[j], h = el("span", "g-rh", s0 !== undefined ? nm(s0) : ""); if (s0 !== undefined && s0 !== "*") U.dots[s0] = h;
+        grid.appendChild(h);
+        for (let i = 0; i < COLS; i++) {
+          const d = cols[i];
+          if (s0 === undefined || d === undefined) { grid.appendChild(el("span")); continue; }
+          const k = find(R.routes, s0, d), dk = find(R.defaults, s0, d);
+          const b = Small.btn(k >= 0 ? short(R.routes[k]) : dk >= 0 ? short(R.defaults[dk]) : "", () => cell(s0, d), "g-cell" + (k >= 0 ? " go" : dk >= 0 ? " def" : "") + (sel && sel.from === s0 && sel.to === d ? " sel" : ""));
+          b.disabled = s0 === d; grid.appendChild(b);
+        }
+      }
+      const foot = el("div", "g-hfoot"), nav = (label, get, set, pages) => { const n = el("div", "g-nav");
+        const a = Small.btn("‹", () => { set(get() - 1); build(); }), z = Small.btn("›", () => { set(get() + 1); build(); }); a.disabled = get() === 0; z.disabled = get() >= pages - 1;
+        n.append(a, el("span", "", label + " " + (get() + 1) + "/" + pages), z); return n; };
+      const ed = Small.btn("EDIT", () => { editing = true; build(); }), rm = Small.btn("REMOVE", async () => { const routes = R.routes.filter(x => !(x.from === sel.from && x.to === sel.to)); sel = null; await post("/routes", { routes }); load(); });
+      ed.disabled = rm.disabled = !route();
+      foot.append(nav("from", () => rp, v => { rp = v; }, rpages), nav("to", () => cp, v => { cp = v; }, cpages), ed, rm);
+      if (!note) U.msg.textContent = sel && route() ? nm(sel.from) + " to " + nm(sel.to) + ": " + short(route()) : "rows send, columns receive. tap a square to connect it";
+      root.append(grid, foot, U.msg); F.view.appendChild(root);
+    } else if (tab === "net") {
+      const root = el("div", "g-takes"), n = R.net, rows = new Map();
+      if (n && n.on) {
+        for (const x of n.seen) rows.set(x.name, { name: x.name, st: "found" });
+        for (const x of n.inviting) { const r = rows.get(x) || { name: x }; r.st = "connecting"; rows.set(x, r); }
+        for (const x of n.sessions) { const r = rows.get(x) || { name: x }; r.st = "connected"; rows.set(x, r); }
+        for (const x of n.never) { const r = rows.get(x) || { name: x }; r.st = "never"; rows.set(x, r); }
+      }
+      const pg = Small.pager(5, r => { const b = el("button", "g-li" + (r.name === pick ? " on" : "")); b.append(el("span", "g-nm", r.name), el("span", "g-d", r.st)); b.onclick = () => { pick = r.name; build(); }; return b; });
+      pg.el.className = "g-rows"; pg.set([...rows.values()]);
+      const cur = rows.get(pick), side = el("div", "g-side"); side.style.gridTemplateRows = "1fr 56px 40px";
+      const nv = Small.btn(cur && cur.st === "never" ? "ALLOW" : "NEVER CONNECT", async () => { await post("/net/never", { name: pick, never: cur.st !== "never" }); load(); }); nv.disabled = !cur;
+      side.append(el("div", "g-hint g-dim", !n || !n.on ? "Network MIDI is off." : "Others see this box as \"" + n.name + "\". Everything found is connected by itself." + (n.avahi === false ? " Nothing can be found here: only devices that connect to the box appear." : "")), nv, pg.nav);
+      if (!note) U.msg.textContent = rows.size ? "" : "nothing on the network yet";
+      root.append(pg.el, side, U.msg); F.view.appendChild(root);
+    } else {
+      const root = el("div", "g-takes");
+      const pg = Small.pager(5, p => { const b = el("button", "g-li" + (p === pick ? " on" : "")); b.appendChild(el("span", "g-nm", p)); b.onclick = () => { pick = p; sure = ""; build(); }; return b; });
+      pg.el.className = "g-rows"; pg.set(R.presets);
+      const has = R.presets.includes(pick), side = el("div", "g-side"); side.style.gridTemplateRows = "repeat(3,1fr) 40px";
+      const ld = Small.btn("LOAD", async () => { const r = await post("/presets/load", { name: pick }); sel = null; if (!r.error) say(pick + " loaded"); load(); }, has ? "go" : ""); ld.disabled = !has;
+      const dl = Small.btn(sure === pick && has ? "SURE?" : "DELETE", async () => { if (sure !== pick) { sure = pick; return build(); } sure = ""; await post("/presets/delete", { name: pick }); pick = ""; load(); }, sure === pick && has ? "warn" : ""); dl.disabled = !has;
+      const sv = Small.btn("SAVE AS NEW", async () => { let k = 1; while (R.presets.includes("preset " + k)) k++; const r = await post("/presets/save", { name: "preset " + k }); if (!r.error) { pick = "preset " + k; say("saved as preset " + k); } load(); });
+      side.append(ld, sv, dl, pg.nav);
+      if (!note) U.msg.textContent = R.presets.length ? "" : "no presets yet: SAVE AS NEW keeps the routing as it is now";
+      root.append(pg.el, side, U.msg); F.view.appendChild(root);
+    }
+    status();
+  }
+  async function cell(f, t) {
+    if (find(R.defaults, f, t) >= 0) return say("that one comes with the module and stays");
+    note = "";
+    if (find(R.routes, f, t) < 0) { const r = await post("/routes", { routes: R.routes.concat([{ from: f, to: t }]) }); if (r.error) return; }
+    sel = { from: f, to: t };
+    await load();
+  }
+  function status() { const n = R && R.net; F.status(!n || !n.on ? "network MIDI off" : "network: " + n.name + (n.sessions.length ? " (" + n.sessions.length + ")" : ""), !n || !n.on ? "warn" : n.sessions.length ? "ok" : "off"); }
+  let key = "";
+  async function load() { try { R = await (await fetch("/routes")).json(); const k = JSON.stringify(R) + tab + editing + pick + sure + JSON.stringify(sel) + rp + cp; if (k !== key) { key = k; build(); } } catch (e) { F.status("the box isn't answering", "bad"); } }
+  /* a sender's name lights for a moment when messages come from it */
+  setInterval(async () => { try { H = await (await fetch("/health")).json(); } catch (e) { return; }
+    for (const c of H.controllers || []) { const h = U.dots && U.dots[c.name]; if (h) h.classList.toggle("act", lastIn[c.name] !== undefined && c.in !== lastIn[c.name]); lastIn[c.name] = c.in; } }, 1000);
+  setInterval(() => { if (!editing) load(); }, 4000);
+  const es = new EventSource("/events?view=midihub");
+  es.addEventListener("bridge", () => { if (!editing) load(); });
+  F.tab("route");
+  load();
+}
+
+function big() {
 if (tv) document.body.classList.add("tv");
 const TYPE_NAMES = { note: "notes", cc: "CC", pc: "program", at: "pressure", pb: "pitch bend", sysex: "sysex", clock: "clock" };
 let R = null, H = null, sel = null, lastIn = {};
@@ -383,6 +497,8 @@ es.addEventListener("bridge", () => { load().then(openEdit).catch(() => {}); });
 
 poll();
 load().then(() => { const c = document.querySelector(".cell:not(:disabled)"); if (c) c.focus(); });
+}
+if (Small.on) small(); else big();
 </script>
 </body>
 </html>
