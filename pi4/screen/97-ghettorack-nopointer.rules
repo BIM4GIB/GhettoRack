@@ -1,0 +1,5 @@
+# GhettoRack on a Pi: the HDMI ports' remote-control (CEC) devices are tagged as
+# pointing sticks, so the kiosk's compositor thinks a mouse is there and draws an
+# arrow that never goes away. libinput (the compositor) leaves them alone; the
+# bridge reads the TV remote from the device itself and is not affected.
+ACTION=="add|change", SUBSYSTEM=="input", ATTRS{name}=="vc4-hdmi-*", ENV{LIBINPUT_IGNORE_DEVICE}="1"

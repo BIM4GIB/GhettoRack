@@ -1156,15 +1156,39 @@ void LoadBrowsedFile(bool audition)
 
 void BrowseStep(uint32_t now)
 {
-    if(browse_accum == 0 || now - browse_time < 120 || num_files == 0)
+    if(browse_accum == 0 || now - browse_time < 120)
         return;
-    int i = cur_file < 0 ? 0 : cur_file + browse_accum;
-    i %= num_files;
-    if(i < 0)
-        i += num_files;
+    /* Past either end of a folder, or in one with no files (the top one): on
+       to the next folder that has some. So the encoder alone reaches every
+       sample on the card; the APC40's folder buttons still jump. */
+    const int dir = browse_accum > 0 ? 1 : -1;
+    int       i   = cur_file < 0 ? (dir > 0 ? 0 : num_files - 1) : cur_file + browse_accum;
+    bool      moved = false;
+    if(num_files == 0 || i < 0 || i >= num_files)
+    {
+        int tries = num_folders;
+        do
+        {
+            cur_folder = (cur_folder + dir + num_folders) % (num_folders > 0 ? num_folders : 1);
+            ScanFiles(cur_folder);
+        } while(num_files == 0 && --tries > 0);
+        if(num_files == 0)
+        {
+            browse_accum = 0;
+            Popup("no samples on the card");
+            return;
+        }
+        i     = dir > 0 ? 0 : num_files - 1;
+        moved = true;
+    }
     cur_file     = i;
     browse_accum = 0;
     LoadBrowsedFile(true);
+    if(moved)
+    {
+        const char* f = strrchr(folders[cur_folder], '/');
+        Popup("%s: %s", f ? f + 1 : folders[cur_folder], files[cur_file]);
+    }
 }
 
 /* ---- project file ---- */
@@ -3053,6 +3077,10 @@ void ComposeScreen(uint32_t now)
     }
     const char* st = !plat->ControllerUp() ? "no APC" : (sd_ok ? "SD" : "no SD");
     Text(128 - TextWidth(kFontSmall, st), 55, kFontSmall, st);
+    /* what a turn of the encoder does now: in a box, so it reads as a mode */
+    const char* ej = tft_view == 2 ? "PAT" : tft_view == 4 ? "SMP" : "TRK";
+    FillRect(53, 55, TextWidth(kFontSmall, ej) + 2, 9);
+    Text(54, 55, kFontSmall, ej, false);
 
     if(memcmp(fb, fb_prev, sizeof(fb)))
     {
@@ -4017,6 +4045,10 @@ uint32_t BoxTftCompose(uint32_t now)
     return TftCompose(now);
 }
 
+/* What a turn of the encoder does in the view it is in */
+bool        tft_present = true;
+const char* EncJob() { return tft_view == 2 ? "patterns" : tft_view == 4 ? "samples" : "tracks"; }
+
 void BoxUiTurn(int d, uint32_t now)
 {
     g_now = now;
@@ -4035,8 +4067,14 @@ void BoxUiPush(uint32_t now)
         return;
     if(sets_open)
         SetsPush();
-    else
+    else if(tft_present)
         tft_view = (tft_view + 1) % 5;
+    else
+    {
+        /* no colour screen: only the views in which a turn does something else */
+        tft_view = tft_view == 0 ? 2 : tft_view == 2 ? 4 : 0;
+        Popup("encoder: %s", EncJob());
+    }
 }
 
 void BoxTouchRaw(int rx, int ry, bool down, uint32_t now) { TouchRaw(rx, ry, down, now); }
@@ -4055,6 +4093,17 @@ void BoxUiBack(uint32_t now)
     if(sets_open)
         SetsBack();
     else
+    {
+        tft_view = 0;
+        if(!tft_present)
+            Popup("encoder: %s", EncJob());
+    }
+}
+
+void BoxHasTft(bool present)
+{
+    tft_present = present;
+    if(!present && tft_view != 2 && tft_view != 4)
         tft_view = 0;
 }
 

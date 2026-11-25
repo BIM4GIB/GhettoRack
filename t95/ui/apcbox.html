@@ -2378,7 +2378,8 @@ if (window.visualViewport) visualViewport.addEventListener("resize", refit);
 document.addEventListener("gesturestart", e => e.preventDefault());   /* iOS: no pinch zoom over the controls */
 /* A kiosk (the TV, the small screen): the mouse pointer goes away after 5 s without a mouse moving, and comes back with it */
 if (SMALL || tv) { let idle = 0; const wake = () => { document.body.classList.remove("nocursor"); clearTimeout(idle); idle = setTimeout(() => document.body.classList.add("nocursor"), 5000); };
-  document.addEventListener("pointermove", e => { if (e.pointerType === "mouse") wake(); }); document.addEventListener("mousedown", wake); wake(); }
+  const mouse = e => { if (e.pointerType === "mouse") wake(); };   /* a touch is not a mouse: it must not bring the pointer back */
+  document.addEventListener("pointermove", mouse); document.addEventListener("pointerdown", mouse); wake(); }
 
 buildTop();
 let start = Q.get("v"); try { start = start || localStorage.getItem(VIEW_KEY); } catch (e) { }

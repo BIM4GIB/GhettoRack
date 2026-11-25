@@ -4,6 +4,34 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.30: the encoder with no colour screen, named on the OLED (on the Pi rig's Seed, 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.30. `daisy/box.cpp` (shared with the Mac
+build), `box.h`, `main.cpp`. No report line changed.
+
+- With no colour screen found (v13.29), a push of the encoder stepped through
+  five views nobody could see. Now it steps through the three jobs a turn has:
+  **tracks** (select), **patterns** (queue the next / previous), **samples**
+  (step through files into the selected track). Back, or the push held 0.7 s:
+  tracks. Each push says it on the OLED's message line ("encoder: patterns").
+- The OLED's footer always names the job in a box: TRK, PAT or SMP, between
+  the CPU figure and the card / APC40 state. Also with a colour screen.
+- Samples: a turn past either end of a folder, or in a folder without files
+  (the top one, where the box starts), goes on to the next folder that has
+  some, and says "folder: file". Before, a turn in the top folder did nothing,
+  and the folders were only reachable with the APC40's BANK buttons. This
+  holds with a colour screen too (its SYSTEM view): files no longer wrap
+  around inside one folder.
+- With a colour screen the push still steps through its five views.
+- `daisy/sets_test.cpp`: the three jobs, back, the popup texts, the footer
+  box differing per job, the five views with a screen. Not in a desktop test:
+  the walk across folders.
+- Seen on the Pi rig's Seed, driven through the bridge (`/ui?a=push` and
+  `turn`) with the OLED read back from its `D` line: tracks, patterns (A1 to
+  A2 and back), samples (into `bass`, two files on, three back into `vocals`,
+  the last folder). **Not seen: the real encoder and back button turned by
+  hand, the OLED itself.** The T95 rig's Seed is still on v13.29.
+
 ## v13.29: nothing is drawn when there is no screen (on the Pi rig's Seed, 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.29. `daisy/tft.h` and `daisy/main.cpp` only;

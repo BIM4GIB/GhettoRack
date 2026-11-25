@@ -26,7 +26,7 @@ if [ "${1:-}" = "--remove" ]; then
     rm -rf "/usr/src/st7796sr-$old"
   done
   command -v update-initramfs >/dev/null && update-initramfs -u -k all
-  rm -f /boot/firmware/overlays/ghettorack-screen.dtbo /etc/udev/rules.d/98-ghettorack-touch.rules
+  rm -f /boot/firmware/overlays/ghettorack-screen.dtbo /etc/udev/rules.d/98-ghettorack-touch.rules /etc/udev/rules.d/97-ghettorack-nopointer.rules
   # the three lines this script added, nothing else
   sed -i "\|^$MARK\$|,+2d" "$CFG"
   grep -q "^WLR_DRM_DEVICES=.*spi" /etc/default/kiosk 2>/dev/null && rm -f /etc/default/kiosk
@@ -82,6 +82,8 @@ grep -q "^dtoverlay=ghettorack-screen" "$CFG" || printf '\n%s\ndtparam=spi=on\nd
 # Touch calibration: a starting point from one screen. One made on this box
 # (sudo python3 pi4/screen/calibrate.py) is kept.
 [ -f /etc/udev/rules.d/98-ghettorack-touch.rules ] || install -m 644 "$HERE/98-ghettorack-touch.rules" /etc/udev/rules.d/98-ghettorack-touch.rules
+# No arrow on the screen while no mouse is plugged in (see the rule's own comment)
+install -m 644 "$HERE/97-ghettorack-nopointer.rules" /etc/udev/rules.d/97-ghettorack-nopointer.rules
 udevadm control --reload
 udevadm trigger --action=change --subsystem-match=input
 

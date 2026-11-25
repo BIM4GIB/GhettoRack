@@ -14,7 +14,7 @@
 namespace ab
 {
 /** The firmware's version: the start line of the log and the `VF` report line */
-constexpr char kFirmware[] = "13.29";
+constexpr char kFirmware[] = "13.30";
 
 /** One APC40 LED or knob ring: wanted value and last value confirmed sent */
 struct LedSlot
@@ -126,6 +126,10 @@ void     BoxInvalidateLeds();
 void     BoxTftInit(uint16_t* framebuffer);
 uint32_t BoxTftCompose(uint32_t now);
 /** Encoder turn (steps), push = next view, back = STEPS */
+/** false: this box has no colour screen (it sits on the companion box, or there
+ *  is none). The encoder then has three jobs instead of five views, and the
+ *  OLED says which: tracks, patterns, samples. */
+void BoxHasTft(bool present);
 void BoxUiTurn(int d, uint32_t now);
 void BoxUiPush(uint32_t now);
 void BoxUiBack(uint32_t now);

@@ -761,6 +761,55 @@ int main()
         T95Frame("\x1bU turn 1\n");
         SelectTrack(0);
 
+        /* v13.30: a box with no colour screen. A push steps through the three
+           jobs a turn has (not five views that can't be seen), back goes to
+           tracks, and the OLED's footer names the job */
+        {
+            auto tag = [&](uint32_t t) { // the footer's box, as bits
+                popup_until = 0;
+                ComposeScreen(t);
+                std::string o;
+                for(int y = 55; y < 64; y++)
+                    for(int x = 53; x < 73; x++)
+                        o += (fb[(y >> 3) * 128 + x] >> (y & 7) & 1) ? '#' : '.';
+                return o;
+            };
+            tft_view = 3;
+            BoxHasTft(false);
+            CHECK(tft_view == 0);
+            std::string trk = tag(900000);
+            CHECK(trk.find('#') != std::string::npos);
+            T95Frame("\x1bU push\n");
+            CHECK(tft_view == 2);
+            CHECK(strcmp(popup, "encoder: patterns") == 0);
+            std::string pat = tag(900100);
+            CHECK(pat != trk);
+            int q0 = e.QueuedPattern() >= 0 ? e.QueuedPattern() : e.CurrentPattern();
+            T95Frame("\x1bU turn 1\n");
+            /* stopped, a queued pattern is the current one at once */
+            CHECK((e.QueuedPattern() >= 0 ? e.QueuedPattern() : e.CurrentPattern()) == q0 + 1);
+            T95Frame("\x1bU turn -1\n");
+            T95Frame("\x1bU push\n");
+            CHECK(tft_view == 4);
+            CHECK(strcmp(popup, "encoder: samples") == 0);
+            CHECK(tag(900200) != pat && tag(900200) != trk);
+            T95Frame("\x1bU push\n");
+            CHECK(tft_view == 0);
+            CHECK(strcmp(popup, "encoder: tracks") == 0);
+            T95Frame("\x1bU push\n");
+            T95Frame("\x1bU back\n");
+            CHECK(tft_view == 0);
+            CHECK(tag(900300) == trk);
+            /* with a screen: the five views, as before */
+            BoxHasTft(true);
+            for(int v = 1; v <= 5; v++)
+            {
+                T95Frame("\x1bU push\n");
+                CHECK(tft_view == v % 5);
+            }
+            SelectTrack(0);
+        }
+
         /* Control protocol 4: the T95 pages drive everything. None of it
            goes through the APC40 code (test_bridge.py runs it with no
            controller at all) */

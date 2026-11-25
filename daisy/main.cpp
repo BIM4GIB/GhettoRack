@@ -1197,6 +1197,8 @@ int main(void)
             Log("screen: none found (no touch chip answers on D9), not drawing. "
                 "A screen without touch wires: hold the encoder push at power-up");
     }
+    /* no colour screen: the encoder has three jobs and the OLED names them */
+    BoxHasTft(tft.Screen());
     
 
     uint32_t blink_time = 0;
