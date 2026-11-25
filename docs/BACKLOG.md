@@ -4,6 +4,43 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.22: the audio code in fast memory (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.22, the binary on the Seed. No change to the
+sound, the protocol (control 10, report 18) or SDRAM.
+
+- All code ran from the QSPI flash. What the audio callback runs (27 KB: the
+  engine's per-sample code, the 303, reverb, filters, performance FX, the USB
+  audio push, libDaisy's audio and DMA handlers, the maths it calls) is now
+  linked into the ITCM, 64 KB of zero-wait code memory at address 0, and
+  copied there at start-up (`daisy/ApcBox_qspi.lds`, `ItcmLoad` in
+  `daisy/main.cpp`). Functions are picked in the linker script by name;
+  nothing in the sources says where they go.
+- Seen on the rig, same pattern as before (8 sample tracks on every step, then
+  one 303 with 4 notes): stopped 28 % (was 38 to 44), 8 tracks 53 % (was 67
+  to 71), with the 303 60 % average and 80 % peak (was 71 to 76 and up to
+  124). The main loop's slowest pass 16 ms (was 40 to 55). USB audio whole.
+  A 20 s take of it: no gaps. Rene has not listened to this build.
+- `python3 daisy/check_itcm.py` after a build: checks on the desk that the
+  copy puts the right bytes at the right addresses and that nothing the reset
+  code needs sits in the ITCM. A build that fails it does not boot. Three
+  builds died on the Seed before this check existed: `memset` had moved (the
+  reset code calls it before the copy), then the copy read the flash 32 bytes
+  off.
+- Seen on the way: the ITCM is on after reset here (ITCMCR 0x3b), a
+  `.preinit_array` hook runs before the constructors, and nothing in the
+  firmware wrote to addresses 0 to 64 KB during start-up and 45 s of use (a
+  null pointer write would land there).
+- A trial build can carry a watchdog (`make -C daisy ITCM_TRIAL=1`): a build
+  that hangs then resets into the bootloader every 20 s, and a loop on the
+  T95 that flashes the release binary when the bootloader shows up puts the
+  good firmware back with nobody at the rig. The good firmware then shows its
+  stop report and still wants one press of reset.
+- Open: 28 % with nothing playing is still a lot (reverb and the data side are
+  the suspects; the 128 KB of DTCM is unused for data). The overload guard
+  (drop voices when the main loop gets no time) is not built. Whether 8 303s
+  still lock the Seed up is not tried on this build.
+
 ## USB audio under load (v13.21 rebuilt 2026-11-24, on the rig)
 
 `daisy/release/ApcBox.bin` is v13.21 with this in it (the version number did
@@ -21,17 +58,8 @@ not move: the Seed runs exactly this binary). Found with a 33 minute jam take.
   known whether any build does that. Nothing resets it by itself.
 - Open: one 303 with 8 busy sample tracks takes single blocks to 124 % CPU.
 - The half-hour seam of a take is sample-continuous (seen in that take).
-- CPU, measured on this build: 44 % stopped, 71 to 74 % with 8 sample tracks on
-  every step plus one 303. All code runs from the QSPI flash; the 64 KB of
-  ITCM is unused. Tried 2026-11-24: the audio path (27 KB) linked into ITCM
-  and copied at start-up. Two builds, neither booted. The first because
-  `memset` had moved and the reset code calls it; the second hung inside
-  `hw.Init` (stop report: stage 1), cause not found. The work is in a git
-  stash on Rene's Mac ("ITCM attempt 2026-11-24"), do not flash it as it is.
-  Next (agreed): a build that boots as now and tests ITCM by itself once
-  running (write, read back, run one small function there, log the result),
-  then move functions over a few at a time. After that, step 2: an overload
-  guard that drops voices when the main loop gets no time.
+- CPU, measured on this build: 38 to 44 % stopped, 71 to 76 % with 8 sample
+  tracks on every step plus one 303 (peaks to 124 %). Cause and cure: v13.22.
 
 ## v13.21: long plain samples in spare memory (built 2026-11-24, on the rig with the USB audio change, long samples not tried there)
 

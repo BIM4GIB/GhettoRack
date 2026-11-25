@@ -45,6 +45,7 @@ lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
 git submodule update --init --recursive
 make -C lib/libDaisy && make -C lib/DaisySP && make -C lib/DaisySP/DaisySP-LGPL
 make -C daisy                      # firmware -> daisy/build/ApcBox.bin
+python3 daisy/check_itcm.py        # the fast-memory copy, checked on the desk; a build that fails it does not boot
 daisy/mac/build.sh                 # macOS build of the same engine
 tools/flash-seed.sh                # flash (pick the port)
 ```

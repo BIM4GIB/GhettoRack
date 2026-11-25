@@ -840,8 +840,44 @@ void ReportMode(const diag::Record& p)
     }
 }
 
+/* The audio callback's code runs from the ITCM (ApcBox_qspi.lds): copy it down
+   from the flash. It has to be there before anything can call it, and the
+   constructors of the globals may: so this goes into .preinit_array, which
+   the start-up code runs ahead of every constructor. It calls nothing, and
+   nothing kept in the ITCM may be needed earlier than this (the reset code
+   calls memset and memcpy). Word by word, the image is aligned to 4. */
+extern "C" uint32_t _sitcm, _eitcm, _siitcm;
+extern "C" void ItcmLoad()
+{
+    volatile uint32_t* d = &_sitcm;
+    const uint32_t*    s = &_siitcm;
+    while(d < &_eitcm)
+        *d++ = *s++;
+    __DSB();
+    __ISB();
+}
+__attribute__((section(".preinit_array"), used)) static void (*const itcm_load_first)() = ItcmLoad;
+
+#ifdef ITCM_TRIAL
+/* Trial builds only: a watchdog, so a build that hangs resets into the
+   bootloader again and again and the T95 can put the good firmware back. */
+inline void TrialDogStart()
+{
+    IWDG1->KR  = 0xCCCC;
+    IWDG1->KR  = 0x5555;
+    IWDG1->PR  = 6;    // /256
+    IWDG1->RLR = 2500; // about 20 s
+    IWDG1->KR  = 0xAAAA;
+}
+inline void TrialDogFeed() { IWDG1->KR = 0xAAAA; }
+#else
+inline void TrialDogStart() {}
+inline void TrialDogFeed() {}
+#endif
+
 int main(void)
 {
+    TrialDogStart();
     /* Look at what the previous run left behind */
     diag::EnableBackupSram();
     diag::Record prev;
@@ -1077,6 +1113,7 @@ int main(void)
         SdPoll(now);
         LoopPart(7);
         LoopReport(now, loop_start);
+        TrialDogFeed();
         {
             /* USB audio: say when a host starts / stops listening */
             static bool     was = false;
