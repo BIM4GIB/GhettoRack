@@ -50,7 +50,7 @@ int main()
     const uint32_t slot_cap = 3 * 1024 * 1024;
     static std::vector<int16_t> slots(slot_cap * kTracks);
     static std::vector<float>   dl(96000), dr(96000), cl(192000), cr(192000);
-    static daisysp::ReverbSc    reverb;
+    static ab::Reverb    reverb;
 
     Memory mem;
     for(int t = 0; t < kTracks; t++)

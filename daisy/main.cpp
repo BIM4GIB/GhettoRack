@@ -74,7 +74,12 @@ DSY_SDRAM_BSS float   dly_mem_l[kDelayLen];
 DSY_SDRAM_BSS float   dly_mem_r[kDelayLen];
 DSY_SDRAM_BSS float   cap_mem_l[kCaptureLen];
 DSY_SDRAM_BSS float   cap_mem_r[kCaptureLen];
-DSY_SDRAM_BSS alignas(8) uint8_t reverb_mem[sizeof(daisysp::ReverbSc)];
+/* The reverb's delay lines (reverb.h, 99 KB) in internal RAM, not the SDRAM:
+   it is the dearest part of the mix and reads and writes sixteen places in
+   them for every sample. In the D2 RAM (.d2_bss in ApcBox_qspi.lds), which
+   was empty, so the main RAM keeps its room. Not zeroed at start-up: the
+   constructor and Init set every field and clear the lines. */
+__attribute__((section(".d2_bss"))) alignas(8) uint8_t reverb_mem[sizeof(ab::Reverb)];
 
 /** USB transmit buffers: must be DMA reachable, so D2 SRAM */
 DMA_BUFFER_MEM_SECTION uint8_t usb_tx[2][64];
@@ -1018,7 +1023,7 @@ int main(void)
     mem.capture_l     = cap_mem_l;
     mem.capture_r     = cap_mem_r;
     mem.capture_len   = kCaptureLen;
-    mem.reverb        = new(reverb_mem) daisysp::ReverbSc();
+    mem.reverb        = new(reverb_mem) ab::Reverb();
     diag::Stage(4);
     engine.Init(kSampleRate, mem);
     diag::Stage(5);

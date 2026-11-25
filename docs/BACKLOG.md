@@ -4,6 +4,33 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.26: the reverb's memory out of SDRAM (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.26, the binary on the Seed. No change to the
+protocol. SDRAM 95.3 % (was 95.9), the main internal RAM 70 % as before, the
+D2 RAM 38 % (was empty).
+
+- DaisySP's ReverbSc keeps its eight delay lines four times further apart
+  than they are long (it adds a byte count to a float pointer), so the object
+  is 396 KB and only fits the SDRAM. `daisy/reverb.h` is a copy with the
+  lines packed: 99 KB, in the D2 RAM (a new `.d2_bss` section in
+  `daisy/ApcBox_qspi.lds`; that RAM was empty). LGPL like its source, generated
+  from the library files, header kept. `daisy/reverb_test.cpp` renders both:
+  20 s of noise bursts and tails, 0 samples differ.
+- Seen on the rig, 8 sample tracks on every step, the clap's send on and off,
+  four readings each, twice: 50 % and 40 %, so the reverb costs about 10
+  points where it cost about 13 (v13.25: 52 and 39). A small gain, not the
+  cure. Stopped 14 %. Measured first in the main RAM (which it took to 89 %),
+  then in the D2 RAM: the same, 48 % and 37 %.
+- The Seed's internal RAM, v13.26: main (AXI) 512 KB, 366 KB used: sets and
+  their names about 105, file browser names 48, engine 43, MIDI buffers 37,
+  serial link 29, kits 22, SD scratch 16, the rest small. D2 256 KB: the
+  reverb, 99. D2's DMA part 32 KB: 26. DTCM 128 KB: only the stack. D3 64 KB:
+  empty. ITCM 64 KB: 27 of audio code.
+- Not tried: the DTCM (128 KB, no cache in the way). The stack lives there
+  and 28 KB would be left for it; how deep the
+  stack goes is not measured, so not without that.
+
 ## v13.25: the reverb sleeps when nothing feeds it (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.25, the binary on the Seed. No change to the
@@ -22,8 +49,7 @@ protocol (control 10, report 19) or SDRAM.
   silence, output exactly 0, awake on a hit).
 - Not listened to: whether waking is clean on the first hit after a long
   silence. The reverb's state stays as it was while it sleeps.
-- Open, from the same measurement: the reverb's memory is in SDRAM (slow);
-  in the Seed's internal RAM it should cost less when it is in use. A playing
+- Open, from the same measurement (the reverb's memory: v13.26). A playing
   sample track costs about 28 us, more than its arithmetic (samples are in
   SDRAM too). 16 idle tracks cost 49 us for their gain ramps.
 

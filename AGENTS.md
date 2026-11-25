@@ -37,6 +37,7 @@ tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-publ
             flash-seed.sh (flash one chosen Seed; macOS and Linux)
 docs/       wiring-guide.html (every connection, diagrams), images/
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
+            (`daisy/reverb.h` is a repacked copy of DaisySP-LGPL's ReverbSc, LGPL too)
 ```
 
 ## Build
@@ -51,7 +52,7 @@ tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
 touch, T95 controller routing, looper/quantise/keyboard controls), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
-`acid_engine_test.cpp`, `host_test.cpp`, `t95/bridge/test_bridge.py` (its end-to-end part
+`acid_engine_test.cpp`, `host_test.cpp`, `reverb_test.cpp` (`daisy/reverb.h` against the library's reverb, sample for sample), `t95/bridge/test_bridge.py` (its end-to-end part
 runs the firmware control code via `daisy/hostbuild/t95sim`, built by `build_host.sh`); build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
 

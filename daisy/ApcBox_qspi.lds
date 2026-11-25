@@ -58,7 +58,7 @@ SECTIONS
 		*libdaisy.a:system.o(.text.*6System7GetTickEv .text.*6System5GetUsEv)
 		*libdaisy.a:tim.o(.text.*11TimerHandle7GetTickEv .text.*11TimerHandle5GetUsEv .text.*11TimerHandle4Impl7GetTickEv .text.*11TimerHandle4Impl5GetUsEv)
 		*libdaisysp.a:svf.o(.text.*3Svf7Process* .text.*SetFreq* .text.*SetRes*)
-		*libdaisysp-lgpl.a:reverbsc.o(.text.*8ReverbSc7Process* .text.*NextRandomLineseg*)
+		*engine.o(.text.*2ab6Reverb7Process* .text.*2ab6Reverb17NextRandomLineseg*)
 		*(.text.expf .text.powf .text.sinf .text.cosf .text.lrintf .text.exp2f .text.sqrtf .text.__ieee754_sqrtf)
 		*libm_a-k_cos.o(.text*)
 		*libm_a-k_sin.o(.text*)
@@ -287,6 +287,17 @@ SECTIONS
 	} > SRAM
 
 	PROVIDE(end = .);
+
+	/* ApcBox: big things that want internal RAM but not the main one. D2 RAM,
+	   256 KB, on at start-up (system_stm32h7xx.c). Not zeroed: whoever puts
+	   something here sets it up itself. */
+	.d2_bss (NOLOAD) :
+	{
+		. = ALIGN(8);
+		*(.d2_bss)
+		*(.d2_bss.*)
+		. = ALIGN(8);
+	} > RAM_D2
 
 	.reserved_for_stack (NOLOAD) :
 	{

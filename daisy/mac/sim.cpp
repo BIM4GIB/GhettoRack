@@ -712,7 +712,7 @@ int main(int argc, char** argv)
     mem.capture_r     = cr.data();
     mem.capture_len   = (uint32_t)cl.size();
 #ifdef USE_DAISYSP_LGPL
-    static daisysp::ReverbSc reverb;
+    static ab::Reverb reverb;
     mem.reverb = &reverb;
 #endif
     engine.Init(48000.f, mem);

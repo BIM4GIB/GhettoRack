@@ -283,7 +283,7 @@ int main()
 
     static std::vector<int16_t> slots(768 * 1024 * (size_t)kTracks);
     static std::vector<float>   dl(96000), dr(96000), cl(192000), cr(192000);
-    static daisysp::ReverbSc    rv;
+    static ab::Reverb    rv;
     Memory                      mem;
     for(int t = 0; t < kTracks; t++)
         mem.slot_mem[t] = slots.data() + (size_t)t * 768 * 1024;

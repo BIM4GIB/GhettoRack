@@ -13,7 +13,7 @@ int main()
     const uint32_t cap = 768 * 1024;
     static std::vector<int16_t> slots(cap * kTracks);
     static std::vector<float> dl(96000), dr(96000), cl(192000), cr(192000);
-    static daisysp::ReverbSc rv;
+    static ab::Reverb rv;
     Memory m;
     for(int t = 0; t < kTracks; t++) m.slot_mem[t] = slots.data() + t * cap;
     m.slot_capacity = cap; m.delay_l = dl.data(); m.delay_r = dr.data(); m.delay_len = dl.size();

@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include "daisysp.h"
 #include "acid.h"
+#include "reverb.h"
 #ifdef USE_DAISYSP_LGPL
 #include "daisysp-lgpl.h"
 #endif
@@ -146,7 +147,7 @@ struct Memory
     float*   capture_r;
     uint32_t capture_len;        // samples per channel
 #ifdef USE_DAISYSP_LGPL
-    daisysp::ReverbSc* reverb;   // large object, lives in SDRAM
+    Reverb* reverb;              // reverb.h: 99 KB, in the Seed's internal RAM
 #endif
 };
 
@@ -640,7 +641,7 @@ class Engine
     float    dly_target_ = 0.f, dly_fb_ = 0.f;
     uint32_t dly_kill_ = 0; // samples left of muting after a panic
 #ifdef USE_DAISYSP_LGPL
-    daisysp::ReverbSc* reverb_ = nullptr;
+    Reverb* reverb_ = nullptr;
 #endif
     daisysp::Svf dj_l_, dj_r_;
     int          dj_mode_ = 0; // 0 off, 1 low-pass, 2 high-pass
