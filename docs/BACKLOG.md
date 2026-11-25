@@ -4,6 +4,29 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.28: two faults in the overload guard (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.28, the binary on the Seed. `daisy/main.cpp`
+only. No desktop test reaches this code; seen on the rig.
+
+- 303 tracks that were left out could stop being 303s (a type change, a kit,
+  a set) while the guard still counted them: the count ran over onto the
+  reverb, which went out for some seconds at 14 % CPU ("all 0 303 voices and
+  the reverb left out"). The count now goes down with the tracks at once,
+  and the reverb only goes when the guard itself took that last step.
+- The guard took "the main loop has not come round for 0.2 s" as an overload
+  whatever the CPU. The main loop stays away that long doing its own work (a
+  sound rendered for a track whose type changes, a kit loading), so it
+  dropped voices at idle. That now counts only above 80 % CPU.
+- Seen on the rig after both: eight type changes and two kit loads at idle,
+  nothing dropped; overload with eight 303s, then all of them turned back
+  into sample tracks: the line follows down to `OV 0 0`, the reverb flag
+  never set.
+- Still so: a type change during an overload (90 %) drops one more voice.
+- Found because Rene pressed play on a stress pattern left in the Seed's
+  memory after a test. After a test the Seed is left empty, or it is said
+  plainly what is in it.
+
 ## v13.27: a stack depth meter (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.27, the binary on the Seed. No change to the

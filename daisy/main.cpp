@@ -764,8 +764,8 @@ void SdPoll(uint32_t now)
    all: no screen, no controls, no reports, and nothing to stop it with (seen
    on the rig with eight 303s on every step: the Seed had to be reset). So
    the callback watches itself and leaves 303 voices out, one more every
-   0.1 s, while a block takes over 93 % of its time or the main loop has not
-   come round for 0.2 s; they come back one every 2 s once it is under 65 %.
+   0.1 s, while a block takes over 93 % of its time, or over 80 % with the
+   main loop not having come round for 0.2 s; they come back one every 2 s once it is under 65 %.
    The voices are dropped in the engine (Engine::shed), the sequencer runs on. */
 struct Guard
 {
@@ -773,6 +773,7 @@ struct Guard
     volatile uint32_t ups  = 0; // times a voice was left out since power-up
     volatile float    load = 0.f;
     uint32_t          last_beat_ = 0, starve_ = 0, hold_ = 0;
+    bool              rev_out_   = false; // the guard itself took the reverb out
     float             per_tick_  = 0.f;
 
     void Init(float sr, size_t block) { per_tick_ = sr / ((float)System::GetTickFreq() * (float)block); }
@@ -787,24 +788,39 @@ struct Guard
         }
         else
             starve_++;
+        /* 303 tracks that were left out can stop being 303s (the type changed,
+           a kit or a set came in). The count goes down with them at once, or
+           it would run over onto the reverb, which nobody asked to drop. */
+        int       s   = engine.shed;
+        const int max = engine.ShedMax(); // the 303 tracks, plus one for the reverb
+        if(s > max - 1 && !(rev_out_ && s == max))
+        {
+            s           = rev_out_ ? max : max - 1;
+            engine.shed = (uint8_t)s;
+        }
         if(hold_)
         {
             hold_--;
             return;
         }
-        int  s    = engine.shed;
-        bool over = l > 0.93f || starve_ > 200;
+        /* (a main loop that has not come round counts only when the audio is
+           what keeps it away: it also stays away for 0.2 s and more doing its
+           own work, a sound rendered for a track, a kit or a set loading) */
+        bool over = l > 0.93f || (starve_ > 200 && l > 0.80f);
         if(over)
         {
-            if(s < engine.ShedMax())
+            if(s < max)
             {
-                engine.shed = (uint8_t)(s + 1);
+                s++;
+                rev_out_    = s == max; // the last step is the reverb, and this one is meant
+                engine.shed = (uint8_t)s;
                 hold_       = 100;
                 ups         = ups + 1;
             }
         }
         else if(s > 0 && l < 0.65f && starve_ < 50)
         {
+            rev_out_    = false;
             engine.shed = (uint8_t)(s - 1);
             hold_       = 2000;
         }
