@@ -956,8 +956,45 @@ inline void TrialDogStart() {}
 inline void TrialDogFeed() {}
 #endif
 
+/* ---- how deep the stack goes ---------------------------------------------
+   The stack has the whole DTCM (128 KB at 0x20000000, top at 0x20020000) and
+   nothing else lives there. main() paints everything under itself with a
+   pattern; the main loop looks every 10 s for the lowest word that changed
+   and logs it when the stack has gone deeper than before. Interrupts use the
+   same stack, so the audio callback and what cuts into it are in the figure. */
+constexpr uint32_t kStackBase = 0x20000000, kStackTop = 0x20020000, kStackPaint = 0x57AC57AC;
+__attribute__((noinline)) void StackPaint()
+{
+    /* up to a little under the stack pointer itself: whatever is in use sits above it */
+    volatile uint32_t* p   = (volatile uint32_t*)kStackBase;
+    volatile uint32_t* end = (volatile uint32_t*)((__get_MSP() - 64) & ~3u);
+    while(p < end)
+        *p++ = kStackPaint;
+}
+uint32_t StackDeepest()
+{
+    const volatile uint32_t* p = (const volatile uint32_t*)kStackBase;
+    while((uint32_t)p < kStackTop && *p == kStackPaint)
+        p++;
+    return kStackTop - (uint32_t)p;
+}
+void StackPoll(uint32_t now)
+{
+    static uint32_t t = 0, told = 0;
+    if(now - t < 10000)
+        return;
+    t          = now;
+    uint32_t d = StackDeepest();
+    if(d > told + 64)
+    {
+        told = d;
+        Log("stack: deepest so far %lu bytes of %lu", (unsigned long)d, (unsigned long)(kStackTop - kStackBase));
+    }
+}
+
 int main(void)
 {
+    StackPaint();
     TrialDogStart();
     /* Look at what the previous run left behind */
     diag::EnableBackupSram();
@@ -1201,6 +1238,7 @@ int main(void)
         LoopPart(7);
         LoopReport(now, loop_start);
         GuardPoll(now);
+        StackPoll(now);
         TrialDogFeed();
         {
             /* USB audio: say when a host starts / stops listening */

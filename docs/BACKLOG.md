@@ -4,6 +4,29 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.27: a stack depth meter (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.27, the binary on the Seed. No change to the
+protocol.
+
+- The stack has the whole DTCM (128 KB) and nothing else is in it. `main()`
+  paints it with a pattern, the main loop looks every 10 s for the lowest
+  word that changed and logs "stack: deepest so far N bytes of 131072" when
+  it has gone deeper (`StackPaint`, `StackPoll` in `daisy/main.cpp`).
+  Interrupts use the same stack, so the audio callback is in the figure.
+- Seen on the rig: 4552 bytes after start-up, 4732 playing 8 sample tracks
+  and four 303s, 5296 after a kit load from the card, and no deeper through
+  performance FX, a roll, pattern copy/clear/undo, takes armed and
+  cancelled, the encoder through the screen views, a set saved, loaded and
+  saved again, a kit saved, and the overload guard cutting in. 4 % of the
+  DTCM.
+- Not exercised: a sample sent from the T95, the touch screen, a take kept
+  (only armed and cancelled), a set switch between two sets with long loops,
+  the SD card pulled, hours of use. The line stays in the firmware, so the
+  log will say if real use goes deeper.
+- So about 120 KB of the fastest RAM is free. The reverb's delay lines (99
+  KB) would fit with over 20 KB left for a stack that has shown 5.3.
+
 ## v13.26: the reverb's memory out of SDRAM (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.26, the binary on the Seed. No change to the
