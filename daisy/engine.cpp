@@ -913,6 +913,19 @@ void Engine::HandleRequests()
 
 void Engine::UpdateBlockParams(size_t size)
 {
+    /* overload: which 303s sit this block out */
+    {
+        int      n    = shed;
+        uint32_t mask = 0;
+        for(int t = kTracks - 1; t >= 0 && n > 0; t--)
+            if(synth_prev_[t])
+            {
+                mask |= 1u << t;
+                n--;
+            }
+        shed_mask_   = mask;
+        shed_reverb_ = n > 0;
+    }
     bool any_solo = false;
     for(int t = 0; t < kTracks; t++)
     {
@@ -1917,7 +1930,7 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
                 AcidVoice& a = acid_[t];
                 if(acid_gate_[t] > 0 && --acid_gate_[t] == 0)
                     a.SetGate(false);
-                if(a.Idle())
+                if(a.Idle() || (shed_mask_ & (1u << t)))
                 {
                     a.Sleep();
                     gain_l_[t].Next(); // keep the ramps in step
@@ -2041,7 +2054,7 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
         /* ---- reverb ---- */
         float rl = 0.f, rr = 0.f;
 #ifdef USE_DAISYSP_LGPL
-        if(reverb_)
+        if(reverb_ && !shed_reverb_)
             reverb_->Process(rev_l, rev_r, &rl, &rr);
 #endif
         float fxr = fx_return_.Next();

@@ -4,6 +4,32 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.23: overload guard (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.23, the binary on the Seed. Control 10,
+report 18, SDRAM as before. No report line for it: it says so in the log.
+
+- When the audio needs more than its block the main loop gets no time: no
+  screen, controls or reports, and nothing to stop it with (v13.21, eight 303s
+  on every step: reset by hand). Now the audio callback watches its own time
+  (`Guard` in `daisy/main.cpp`) and leaves 303 voices out in the engine
+  (`Engine::shed`), highest track first: one more every 0.1 s while a block
+  takes over 93 % or the main loop has not come round for 0.2 s, and after
+  the last 303 the reverb. They come back one every 2 s under 65 %. The
+  sequencer runs on, so a voice comes back in time.
+- Seen on the rig: 8 sample tracks plus eight 303s on every step at 140 BPM:
+  4 of the 8 left out, 86 % average, the Seed went on reporting and took
+  stop; all back within 10 s of stopping. One main loop pass of 248 ms as it
+  set in. 8 sample tracks plus one 303 (57 %): the guard did nothing.
+  Desktop: `acid_engine_test` checks that shed 303s are silent, their notes
+  still fire and they come back. Rene has not heard it cut in.
+- Open: nothing on the APC40, the screen or the pages says voices are out,
+  only the log line ("OVERLOAD: 4 of 8 303 voices left out"). A voice is cut
+  without a fade. Between 65 % and 93 % nothing comes back by itself, so a
+  heavy pattern keeps its dropped voices until it gets lighter. Sample
+  tracks are never dropped. Single blocks still peak over 100 % in that
+  state (107 to 120 %).
+
 ## v13.22: the audio code in fast memory (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.22, the binary on the Seed. No change to the
@@ -37,9 +63,7 @@ sound, the protocol (control 10, report 18) or SDRAM.
   good firmware back with nobody at the rig. The good firmware then shows its
   stop report and still wants one press of reset.
 - Open: 28 % with nothing playing is still a lot (reverb and the data side are
-  the suspects; the 128 KB of DTCM is unused for data). The overload guard
-  (drop voices when the main loop gets no time) is not built. Whether 8 303s
-  still lock the Seed up is not tried on this build.
+  the suspects; the 128 KB of DTCM is unused for data).
 
 ## USB audio under load (v13.21 rebuilt 2026-11-24, on the rig)
 

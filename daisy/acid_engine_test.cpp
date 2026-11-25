@@ -125,7 +125,38 @@ int main()
     printf("track 6 notes fired %u (expect %d), peak %.3f, limiter %u, nan %u\n", fired,
            14 * 8, peak, e.limit_count, e.nan_count);
     WriteWav("acid_demo.wav", L, R, (int)sr);
-    bool ok = fired == 14 * 8 && peak > 0.2 && e.nan_count == 0 && rec_steps >= 2;
+
+    /* overload shedding: with both 303s left out their notes still fire (the
+       sequencer runs on) but the mix is quieter; taken down again they are back */
+    auto run = [&](int blocks) {
+        double sq = 0;
+        std::vector<float> l(block), r(block);
+        for(int i = 0; i < blocks; i++)
+        {
+            e.Process(l.data(), r.data(), block);
+            for(size_t k = 0; k < block; k++)
+                sq += l[k] * l[k] + r[k] * r[k];
+        }
+        return sqrt(sq / (blocks * block * 2));
+    };
+    for(int t = 0; t < 5; t++)
+        for(int st = 0; st < 16; st++)
+            e.SetStep(0, t, st, kStepOff); // 303s alone
+    run(2000);
+    uint32_t f0 = e.TriggerCount(5);
+    double with = run(4000);
+    e.shed = 2;
+    uint32_t f1 = e.TriggerCount(5);
+    double without = run(4000);
+    uint32_t f2 = e.TriggerCount(5);
+    e.shed = 0;
+    run(200);
+    double back = run(4000);
+    bool shed_ok = e.ShedMax() == 3 && with > 0.01 && without < with * 0.02 && back > with * 0.5
+                   && f2 - f1 > 0 && (f2 - f1) * 10 >= (f1 - f0) * 8; // the windows don't fall on bar lines
+    printf("shed: 303s alone rms %.4f, shed %.6f, back %.4f; notes fired %u then %u, ShedMax %d: %s\n", with, without,
+           back, f1 - f0, f2 - f1, e.ShedMax(), shed_ok ? "ok" : "WRONG");
+    bool ok = fired == 14 * 8 && peak > 0.2 && e.nan_count == 0 && rec_steps >= 2 && shed_ok;
     printf(ok ? "OK\n" : "FAIL\n");
     (void)sum6;
     return ok ? 0 : 1;

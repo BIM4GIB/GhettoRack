@@ -430,6 +430,19 @@ class Engine
     volatile uint32_t limit_count = 0;
     /** Times the output went non-finite and the engine reset its state */
     volatile uint32_t nan_count = 0;
+    /** Overload: set by whoever watches the CPU (main.cpp on the Daisy). This
+     *  many 303 voices are left out of the mix, highest track first; one more
+     *  than there are 303 tracks and the reverb goes too. The sequencer runs
+     *  on, so they come back in time when it is taken down again. */
+    volatile uint8_t shed = 0;
+    /** How far `shed` can go right now: the 303 tracks, plus one for the reverb */
+    int ShedMax() const
+    {
+        int n = 1;
+        for(int t = 0; t < kTracks; t++)
+            n += synth_prev_[t] ? 1 : 0;
+        return n;
+    }
 
     /** Seconds of audio a slot can hold */
     float SlotSeconds() const { return slot_capacity_ / sr_; }
@@ -565,6 +578,8 @@ class Engine
     AcidVoice     acid_[kTracks];
     volatile bool synth_[kTracks]      = {};
     bool          synth_prev_[kTracks] = {};
+    uint32_t      shed_mask_           = 0;     // 303 tracks left out this block (overload)
+    bool          shed_reverb_         = false;
     bool          acid_tie_[kTracks]   = {}; // last step slides into the next
     int32_t       acid_gate_[kTracks]  = {}; // samples until gate off, -1 = held
     int           acid_last_[kTracks]  = {}; // last note played (rolls)

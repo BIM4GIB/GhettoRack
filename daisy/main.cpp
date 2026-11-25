@@ -754,15 +754,91 @@ void SdPoll(uint32_t now)
     BoxStorageGone();
 }
 
+/* ---- overload guard ----------------------------------------------------
+   When the audio takes more than its block, the main loop gets no time at
+   all: no screen, no controls, no reports, and nothing to stop it with (seen
+   on the rig with eight 303s on every step: the Seed had to be reset). So
+   the callback watches itself and leaves 303 voices out, one more every
+   0.1 s, while a block takes over 93 % of its time or the main loop has not
+   come round for 0.2 s; they come back one every 2 s once it is under 65 %.
+   The voices are dropped in the engine (Engine::shed), the sequencer runs on. */
+struct Guard
+{
+    volatile uint32_t beat = 0; // the main loop counts its passes here
+    volatile uint32_t ups  = 0; // times a voice was left out since power-up
+    volatile float    load = 0.f;
+    uint32_t          last_beat_ = 0, starve_ = 0, hold_ = 0;
+    float             per_tick_  = 0.f;
+
+    void Init(float sr, size_t block) { per_tick_ = sr / ((float)System::GetTickFreq() * (float)block); }
+    inline void Block(uint32_t ticks)
+    {
+        float l = load + ((float)ticks * per_tick_ - load) * 0.05f; // about 20 ms
+        load    = l;
+        if(beat != last_beat_)
+        {
+            last_beat_ = beat;
+            starve_    = 0;
+        }
+        else
+            starve_++;
+        if(hold_)
+        {
+            hold_--;
+            return;
+        }
+        int  s    = engine.shed;
+        bool over = l > 0.93f || starve_ > 200;
+        if(over)
+        {
+            if(s < engine.ShedMax())
+            {
+                engine.shed = (uint8_t)(s + 1);
+                hold_       = 100;
+                ups         = ups + 1;
+            }
+        }
+        else if(s > 0 && l < 0.65f && starve_ < 50)
+        {
+            engine.shed = (uint8_t)(s - 1);
+            hold_       = 2000;
+        }
+    }
+};
+Guard guard;
+
 void AudioCallback(AudioHandle::InputBuffer  in,
                    AudioHandle::OutputBuffer out,
                    size_t                    size)
 {
+    uint32_t t0 = System::GetTick();
     cpu.OnBlockStart();
     engine.SetInput(in[0], in[1]); // mic / line into AUDIO IN L (pin 16)
     engine.Process(out[0], out[1], size);
     usbdev::AudioPush(out[0], out[1], size); // the same audio, over USB
     cpu.OnBlockEnd();
+    guard.Block(System::GetTick() - t0);
+}
+
+/** Main loop: count the pass, and say when voices go and come back */
+void GuardPoll(uint32_t now)
+{
+    static int      told = 0;
+    static uint32_t told_time = 0;
+    guard.beat = guard.beat + 1;
+    int s = engine.shed;
+    if(s != told && now - told_time > 500)
+    {
+        int n303 = engine.ShedMax() - 1;
+        if(s == 0)
+            Log("overload over: every voice is back (CPU %d %%)", (int)(guard.load * 100.f));
+        else if(s > n303)
+            Log("OVERLOAD: all %d 303 voices and the reverb left out (CPU %d %%)", n303, (int)(guard.load * 100.f));
+        else
+            Log("OVERLOAD: %d of %d 303 voices left out (CPU %d %%)", s, n303, (int)(guard.load * 100.f));
+        told      = s;
+        told_time = now;
+    }
 }
 
 
@@ -900,7 +976,12 @@ int main(void)
     RCC->RSR |= RCC_RSR_RMVF;
     if(prev.magic == diag::kMagicFault
        || (prev.magic == diag::kMagicBoot && (prev.stage < 100 || wdg)))
-        ReportMode(prev);
+    {
+#ifdef ITCM_TRIAL
+        if(!(prev.magic == diag::kMagicBoot && prev.stage >= 100)) // a trial's watchdog reset: just start again
+#endif
+            ReportMode(prev);
+    }
 
     DIAG_REC.magic = diag::kMagicBoot;
     diag::Stage(1);
@@ -969,6 +1050,7 @@ int main(void)
     diag::Stage(8);
 
     cpu.Init(hw.AudioSampleRate(), hw.AudioBlockSize());
+    guard.Init(hw.AudioSampleRate(), hw.AudioBlockSize());
     diag::Stage(18);
     hw.StartAudio(AudioCallback);
     platform.audio_running = true;
@@ -1113,6 +1195,7 @@ int main(void)
         SdPoll(now);
         LoopPart(7);
         LoopReport(now, loop_start);
+        GuardPoll(now);
         TrialDogFeed();
         {
             /* USB audio: say when a host starts / stops listening */
