@@ -29,13 +29,18 @@ daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: 
             release/ApcBox.bin (latest built firmware)
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
             remote, router, network MIDI), ui/ (selector, MIDI hub, clock, the
-            ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen),
+            ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen;
+            small.css/.js: the frame every page shares at 480x320),
             kiosk/ (Chromium on HDMI), helper/ (the root helper behind the Settings
             page: Wi-Fi, name, Bluetooth, reboot; its README says what it may do)
+pi4/        the same companion on a Raspberry Pi 4 with the 3.5" touch screen on its
+            header: findings, screen/ (the screen's driver, calibrate.py, framerate.py,
+            touchlag.py, shot.py: a screenshot of the kiosk's page)
 protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
             flash-seed.sh (flash one chosen Seed; macOS and Linux)
-docs/       wiring-guide.html (every connection, diagrams), images/
+docs/       CANON.md (how a module and its screens are made: read it before touching a
+            page), wiring-guide.html (every connection, diagrams), images/
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
             (`daisy/reverb.h` is a repacked copy of DaisySP-LGPL's ReverbSc, LGPL too)
 ```
@@ -58,6 +63,12 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 ## Rules that matter
 
+- **A module, a page or a view follows `docs/CANON.md`.** What a module consists
+  of, the four layouts (TV, phone upright, phone sideways, 480x320), the shared
+  frame and parts for the small one (`t95/ui/small.css`, `small.js`), how a
+  touch, a confirmation, a PIN and a message behave, what each colour means,
+  what the 3.5" screen can draw, and when a page change counts as done. Change
+  the canon first if a rule is wrong; do not work around it in one page.
 - **Timing lives on the Daisy.** Sequencer, voices, FX and mixer run on the
   Daisy's audio clock. The T95 handles controls and networking; browser or Linux
   scheduling must not become the per-step timing source. Planned external MIDI /
