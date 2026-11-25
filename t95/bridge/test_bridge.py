@@ -1943,6 +1943,69 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
 
+    def test_p57_small_jam_recorder_and_clock(self):
+        """?small on the jam recorder and the clock: every tab inside 480x320, HOME back to the small start screen, the clock's buttons work"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        base = "http://127.0.0.1:%d" % self.http
+        inside = """() => { const bad = [];
+            for (const e of document.querySelectorAll('.g-top, .g-tab, .g-b, .g-li, .g-time, .g-meter, .g-msg, .g-kv, .g-hint')) { const r = e.getBoundingClientRect();
+                if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+            return [bad, [document.documentElement.scrollWidth, document.documentElement.scrollHeight], document.querySelectorAll('style').length]; }"""
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            # the jam recorder
+            pg.goto(base + "/jam?small=1")
+            pg.wait_for_selector(".g-recbtn")
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["REC", "TAKES", "HOME"])
+            pg.wait_for_function("document.querySelector('.g-led') !== null")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "jam, REC")
+            self.assertTrue(pg.locator(".g-recbtn").is_disabled(), "REC with no Daisy audio on the box")
+            pg.locator(".g-tab", has_text="TAKES").click()
+            pg.wait_for_selector(".g-rows")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "jam, TAKES")
+            self.assertEqual(pg.locator(".g-side .g-b:disabled").count(), 5, "no take picked: nothing to act on, one page")
+            pg.locator(".g-tab", has_text="HOME").click()
+            pg.wait_for_url("**/?small=1")
+            pg.wait_for_selector("button.g-tile")
+            # the clock
+            pg.goto(base + "/clock")                     # small sticks: no ?small needed
+            pg.wait_for_selector(".g-clock")
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["CLOCK", "FROM", "OUT", "STATS", "HOME"])
+            pg.wait_for_function("document.querySelector('.g-time').textContent !== '---'")
+            self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "clock, CLOCK")
+            self.assertEqual(self.post("/clock", {"source": "internal", "on": True, "bpm": 120})[0], 200)
+            pg.wait_for_function("document.querySelector('.g-time').textContent === '120.0'")
+            pg.locator(".g-row5 .g-b", has_text="+1").click()
+            pg.wait_for_function("document.querySelector('.g-time').textContent === '121.0'")
+            pg.locator(".g-row2 .g-b").first.click()
+            pg.wait_for_function("document.querySelector('.g-row2 .g-b').textContent === 'STOP'")
+            self.assertTrue(json.loads(BridgeTest.get("/clock?json=1")[2])["playing"])
+            pg.locator(".g-row2 .g-b").first.click()
+            pg.wait_for_function("document.querySelector('.g-row2 .g-b').textContent === 'START'")
+            for tab, sel in (("FROM", ".g-rows .g-li.on"), ("OUT", ".g-rows"), ("STATS", ".g-kv span")):
+                pg.locator(".g-tab", has_text=tab).click()
+                pg.wait_for_selector(sel)
+                self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "clock, " + tab)
+            pg.locator(".g-tab", has_text="FROM").click()
+            self.assertEqual(pg.locator(".g-rows .g-li.on .g-nm").text_content(), "this box")
+            # without small: the TV pages, untouched
+            pg.goto(base + "/clock?small=0")
+            pg.wait_for_selector("#bpm")
+            pg.goto(base + "/jam")
+            pg.wait_for_selector("#rec")
+            self.assertEqual(pg.locator(".g-app").count(), 0)
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.post("/clock", {"on": False})
+
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))
         pk = json.loads(body)

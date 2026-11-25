@@ -86,10 +86,92 @@ audio.on{display:block}
   <audio id="player" controls preload="none"></audio>
   <div id="takes"></div>
 </main>
+<script src="/small.js"></script>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
 const tv = new URLSearchParams(location.search).has("tv");
+
+/* The 480x320 touch screen (?small): REC with time, levels and room on one tab, the takes in
+   pages on the other. No playing (the box has no speaker) and no renaming yet (no keyboard on
+   the screen). Frame and parts: small.js. */
+function small() {
+  const el = Small.el;
+  const clock = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0"); return h ? h + ":" + String(m).padStart(2, "0") + ":" + x : m + ":" + x; };
+  const size = b => b >= 1 << 30 ? (b / (1 << 30)).toFixed(2) + " GB" : Math.max(1, Math.round(b / (1 << 20))) + " MB";
+  const level = p => p > 0 ? Math.max(0, Math.min(100, (20 * Math.log10(p) + 48) / 48 * 100)) : 0;
+  let J = null, takes = [], at = 0, tab = "rec", pick = "", sure = "", note = "", noteBad = false, U = null;
+  const F = Small.frame({ title: "JAM RECORDER", tabs: [["rec", "REC"], ["takes", "TAKES"]], onTab: id => { tab = id; sure = ""; build(); } });
+  const post = async (path, body) => { try { const j = await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) })).json();
+      say(j.error || "", !!j.error); return j; } catch (e) { say("the box isn't answering", true); return { error: "x" }; } };
+  function say(t, bad) { note = t; noteBad = !!bad; if (U && U.msg) { U.msg.textContent = t; U.msg.classList.toggle("bad", noteBad); } }
+  const cardOk = () => !!(J && J.card && J.card.ok), copying = () => !!(J && J.copy && J.copy.state === "copying");
+  function build() {
+    F.view.textContent = ""; U = {};
+    const msg = U.msg = el("div", "g-msg" + (noteBad ? " bad" : ""), note);
+    if (tab === "rec") {
+      const root = el("div", "g-jam");
+      U.rec = Small.btn("REC", toggle, "rec"); U.rec.classList.add("g-recbtn");
+      const info = el("div", "g-jinfo"); U.time = el("div", "g-time", "0:00"); U.sub = el("div", "g-dim"); U.room = el("div", "g-dim");
+      const mt = el("div", "g-meters"); U.m = [];
+      for (const c of ["L", "R"]) { const bar = el("div", "g-meter"), fill = el("i"); bar.appendChild(fill); mt.append(el("span", "g-dim", c), bar); U.m.push(fill); }
+      info.append(U.time, U.sub, mt, U.room);
+      const foot = el("div", "g-jfoot"); U.card = el("div", "g-dim g-jcard");
+      U.eject = Small.btn("EJECT CARD", async () => { const r = await post("/jam/eject"); if (!r.error) say("the card can be taken out"); load(); });
+      foot.append(U.card, U.eject);
+      root.append(U.rec, info, foot, msg); F.view.appendChild(root);
+    } else {
+      const root = el("div", "g-takes");
+      U.pg = Small.pager(5, t => { const r = el("button", "g-li" + (t.take === pick ? " on" : ""));
+        r.append(el("span", "g-nm", t.take), el("span", "g-d", t.recording ? "recording" : clock(t.seconds) + "  " + size(t.bytes)));
+        r.onclick = () => { pick = t.take; sure = ""; show(); }; return r; });
+      U.pg.el.className = "g-rows";
+      const side = el("div", "g-side");
+      U.lib = Small.btn("TO LIBRARY", async () => { const r = await post("/jam/library", { take: pick }); if (!r.error) say(r.files.length ? "in the sample library, folder jams" : "already in the sample library"); });
+      U.tocard = Small.btn("TO CARD", async () => { const r = await post("/jam/card", { take: pick }); if (!r.error) load(); });
+      U.del = Small.btn("DELETE", async () => { if (sure !== pick) { sure = pick; return show(); } sure = ""; await post("/jam/delete", { take: pick }); pick = ""; load(); });
+      side.append(U.lib, U.tocard, U.del, U.pg.nav);
+      root.append(U.pg.el, side, msg); F.view.appendChild(root);
+    }
+    show();
+  }
+  function show() {
+    if (!J || !U) return;
+    F.status(J.recording ? "recording " + clock(J.seconds + (performance.now() - at) / 1000) : J.daisy_audio ? "Daisy audio ok" : "no Daisy audio", J.recording ? "bad" : J.daisy_audio ? "ok" : "bad");
+    const c = J.card, k = J.copy;
+    const cardText = J.helper === false ? "card: the settings helper isn't running" : !c || !c.mounted ? "no SD card in the box" : !c.ok ? "SD card not usable (" + c.fs + ")" : "SD card: " + size(c.free || 0) + " free";
+    if (copying()) say("copying " + k.take + " to the card: " + size(k.bytes) + " of " + size(k.total) + ". Leave the card in.");
+    if (tab === "rec") {
+      U.rec.textContent = J.recording ? "STOP" : "REC"; U.rec.classList.toggle("on", !!J.recording); U.rec.disabled = !J.recording && !J.daisy_audio;
+      U.sub.textContent = J.recording ? J.take + "  " + size(J.bytes) + (J.overruns ? "  " + J.overruns + " dropouts" : "") : (J.note || "records what the Daisy plays");
+      if (J.free != null) { const left = Math.max(0, J.free - (J.min_free || 0)) / 192000; U.room.textContent = "room for " + (left >= 3600 ? (left / 3600).toFixed(1) + " h" : Math.floor(left / 60) + " min"); }
+      U.m.forEach((f, i) => { f.style.width = Math.round(level(J.recording ? J.peak[i] : 0) / 5) * 5 + "%"; });
+      U.card.textContent = cardText; U.eject.disabled = !(c && c.mounted) || copying();
+      if (J.error && !J.recording) say(J.error, true);
+      tick();
+    } else {
+      if (pick && !takes.some(t => t.take === pick)) pick = "";
+      U.pg.set(takes);
+      const t = takes.find(x => x.take === pick), busy = !t || t.recording;
+      U.lib.disabled = busy; U.tocard.disabled = busy || !cardOk() || copying(); U.del.disabled = busy;
+      U.del.textContent = sure && sure === pick ? "SURE?" : "DELETE"; U.del.classList.toggle("warn", !!sure && sure === pick);
+      if (!takes.length && !note) say("no takes yet");
+    }
+  }
+  function tick() { if (J && U && U.time) U.time.textContent = clock(J.recording ? J.seconds + (performance.now() - at) / 1000 : 0); }
+  setInterval(tick, 500);
+  async function load() { try { const j = await (await fetch("/jam?json=1")).json(); takes = j.takes; J = j; at = performance.now(); show(); } catch (e) { F.status("the box isn't answering", "bad"); } }
+  async function toggle() { if (!J) return; U.rec.disabled = true; await post(J.recording ? "/jam/stop" : "/jam/start"); await load(); }
+  let was = false;
+  const es = new EventSource("/events?view=jam");
+  es.addEventListener("jam", e => { try { const d = JSON.parse(e.data); J = Object.assign(J || {}, d); at = performance.now(); show(); if (d.recording !== was) { was = d.recording; load(); } } catch (err) {} });
+  F.tab("rec");
+  load();
+  setInterval(() => { if (!J || !J.recording) load(); }, 5000);
+  setInterval(() => { if (copying()) load(); }, 1000);
+}
+
+function big() {
 if (tv) document.body.classList.add("tv");
 let J = null, takes = [], at = 0, playing = null, cardOk = false, copying = false, lastCopy = "";
 
@@ -255,6 +337,8 @@ load();
 setInterval(() => { if (!J || !J.recording) load(); }, 5000);
 setInterval(() => { if (copying) load(); }, 1000);
 if (tv) $("rec").focus();
+}
+if (Small.on) small(); else big();
 </script>
 </body>
 </html>
