@@ -1,9 +1,9 @@
-# Handover, 2026-11-24
+# Handover, 2026-11-25
 
-Written at the end of a long cloud session that could not reach the rig, for
-the next session (Claude Code on Rene's Mac, which can). Read `AGENTS.md`
-first, then this, then `docs/BACKLOG.md`. Delete or rewrite this file once it
-is stale; it is a snapshot, not a rule book.
+A snapshot for the next session, not a rule book: first written 24 Nov by a
+cloud session that could not reach the rig, the part on what runs there
+brought up to date 25 Nov from the Mac. Read `AGENTS.md` first, then this,
+then `docs/BACKLOG.md`. Delete or rewrite this file once it is stale.
 
 ## Reaching the rig
 
@@ -24,22 +24,30 @@ is stale; it is a snapshot, not a rule book.
 
 ## What runs on the rig
 
-- Daisy firmware v13.20 since 24 Nov, late evening (spare memory as claims by
-  size, report version 18 with the `SM` line; `docs/BACKLOG.md` has what to try).
-  Before it v13.19 (v13.18: the undo message after an
-  overdub on a long loop; v13.19: looper and quantise settings kept on the card).
-  Before it v13.17 (flashed 24 Nov, late): 16 s slots, 8 spare blocks
-  for long loops (that part is v13.16), and it says its version
-  (`curl -s localhost:8040/health | grep firmware`). Control protocol 10,
-  report version 18. It boots and the bridge talks to it; no long take has
-  been recorded on the rig yet (`docs/BACKLOG.md` has what to try). v13.15
-  was the last one Rene played.
-- Bridge, kiosk, settings helper, Bluetooth unit installed from `main` as of
-  24 Nov, evening (`git -C ~/GhettoRack log -1` on the box says which). The
-  bridge now runs as the fixed user `apcbox-bridge` with `--ble`. Before that:
+- Daisy firmware v13.28 since 25 Nov, morning (read back that day: `/health`
+  says 13.28, control protocol 10, 0 bad lines, APC40 and LPK25 found; the
+  event stream has report version 19 lines, `SM` with all 262 s of loop memory
+  free and `OV 0 0`). `curl -s localhost:8040/health | grep firmware` says
+  which it is now. `docs/BACKLOG.md` has a section per version with what was
+  seen on the rig. In short, since v13.19 (looper settings kept on the card):
+  - v13.20, v13.21 (24 Nov): spare memory as claims by size, the `SM` line
+    (report 18), long plain samples whole. Desktop tests only: no long take,
+    no "no room", no set switch with long loops, no long sample tried on the rig.
+  - v13.21 rebuilt, v13.22 (24, 25 Nov): USB audio whole under load; the audio
+    code in fast memory (ITCM). Run `python3 daisy/check_itcm.py` after every
+    firmware build: a build that fails it does not boot.
+  - v13.23 to v13.28 (25 Nov): overload guard (303 voices left out before the
+    Seed locks up), `OV` (report 19) on the pages and the Daisy's screen, the
+    reverb asleep when nothing feeds it and out of SDRAM (95.3 % used now), a
+    stack depth line in the log, two faults in the guard fixed.
+  Rene has listened to v13.22 and v13.23.
+- Bridge and pages on the box: its clone is at `056a963` (v13.28) and the
+  page it serves is at report 19 (25 Nov; `git -C ~/GhettoRack log -1` on the
+  box says which). The jam recorder (`/jam`, 24 Nov) is on it. The
+  bridge runs as the fixed user `apcbox-bridge` with `--ble`. Before that:
   `6f5377d` (Settings banners: one short line, 3 or 6 s; the bridge stops in
   half a second instead of 90 s and a kill).
-- `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 100 tests, 2 skipped
+- `t95/bridge/test_bridge.py` runs on the Mac too (24 Nov: 109 tests, 2 skipped
   for want of `aalink` and `ffmpeg`). The fake Daisy's reader gave up at once
   there (macOS reads end of file from a pseudo-terminal nobody has opened yet,
   Linux an error), and the Mac wakes a timed wait up to 10 ms late, so the two
@@ -48,8 +56,12 @@ is stale; it is a snapshot, not a rule book.
 - On the Mac: Playwright is installed, so the page tests in
   `t95/bridge/test_bridge.py` run. A plain `git push` gets a 403 (the active
   `gh` login is another account); the `BIM4GIB` login in `gh` works.
-- The box has no compiler: `daisy/t95sim.cpp` for `EndToEndTest` was built on
-  the Mac with a `pty.h` shim (`#include <util.h>`) outside the repo.
+- The box has no compiler. The desktop tests and `daisy/t95sim.cpp` (for
+  `EndToEndTest` and `PageControlTest`) do build on the Mac, but not with
+  `daisy/build_host.sh` as it is: clang there wants the C headers forced
+  (`-include stddef.h -include stdint.h -include stdlib.h -include string.h
+  -include math.h -include unistd.h`), and `t95sim` a `pty.h` shim
+  (`#include <util.h>`) on the include path. Neither is in the repo.
 
 ## Seen working on the rig (23 and 24 Nov)
 
