@@ -154,6 +154,23 @@ int main()
     double back = run(4000);
     bool shed_ok = e.ShedMax() == 3 && with > 0.01 && without < with * 0.02 && back > with * 0.5
                    && f2 - f1 > 0 && (f2 - f1) * 10 >= (f1 - f0) * 8; // the windows don't fall on bar lines
+    /* the reverb sleeps when nothing feeds it and its tail is gone, and wakes on a hit */
+    for(int t = 0; t < kTracks; t++)
+        for(int st = 0; st < 16; st++)
+            e.SetStep(0, t, st, kStepOff);
+    run(40000); // 40 s: the longest tail
+    bool slept = e.ReverbAsleep();
+    double silent = run(100);
+    e.track[0].rev = 1.f;
+    e.TriggerLive(0);
+    run(20);
+    bool woke = !e.ReverbAsleep();
+    double hit = run(2000);
+    e.track[0].rev = 0.f;
+    bool rev_ok = slept && silent == 0.0 && woke && hit > 0.001;
+    printf("reverb sleep: asleep after silence %d (rms %.9f), awake on a hit %d (rms %.4f): %s\n",
+           slept, silent, woke, hit, rev_ok ? "ok" : "WRONG");
+    shed_ok = shed_ok && rev_ok;
     printf("shed: 303s alone rms %.4f, shed %.6f, back %.4f; notes fired %u then %u, ShedMax %d: %s\n", with, without,
            back, f1 - f0, f2 - f1, e.ShedMax(), shed_ok ? "ok" : "WRONG");
     bool ok = fired == 14 * 8 && peak > 0.2 && e.nan_count == 0 && rec_steps >= 2 && shed_ok;

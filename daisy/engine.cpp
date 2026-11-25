@@ -2055,7 +2055,23 @@ void Engine::Process(float* out_l, float* out_r, size_t size)
         float rl = 0.f, rr = 0.f;
 #ifdef USE_DAISYSP_LGPL
         if(reverb_ && !shed_reverb_)
-            reverb_->Process(rev_l, rev_r, &rl, &rr);
+        {
+            /* The reverb is the dearest thing here (measured on the Seed: 138 of
+               the 300 us an idle block takes), so it sleeps while nothing is
+               sent to it and its tail is below -100 dB, and wakes on the first
+               sample that is. Its state stays as it was. */
+            const bool in_quiet = fabsf(rev_l) + fabsf(rev_r) < 1e-6f;
+            if(!in_quiet)
+                rev_quiet_ = 0;
+            if(rev_quiet_ < kRevSleepAfter)
+            {
+                reverb_->Process(rev_l, rev_r, &rl, &rr);
+                if(in_quiet && fabsf(rl) + fabsf(rr) < 1e-5f)
+                    rev_quiet_++;
+                else
+                    rev_quiet_ = 0;
+            }
+        }
 #endif
         float fxr = fx_return_.Next();
         L += (rl + dl) * fxr;

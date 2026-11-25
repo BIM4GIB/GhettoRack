@@ -4,6 +4,29 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.25: the reverb sleeps when nothing feeds it (on the rig, flashed 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.25, the binary on the Seed. No change to the
+protocol (control 10, report 19) or SDRAM.
+
+- Where the idle CPU went, timed on the Seed part by part (v13.24, stopped,
+  nothing loaded; a block has 1000 us): reverb 138, the 16 tracks 49, delay
+  25, master and limiter 25, per-block settings 21, performance FX 14, USB
+  audio push 11; 300 in all. With 8 sample tracks on every step: tracks 277,
+  reverb 146, 546 in all. The reverb ran at full cost on silence.
+- Now it is not run while nothing is sent to it and its output has been under
+  -100 dB for half a second, and it wakes on the first sample that is sent.
+- Seen on the rig: stopped 14 % (was 30). 8 sample tracks with the clap's
+  default send: 51 to 52 % as before; with that send at 0, 39 % after the
+  tail; send back up, 52 % again. Desktop: `acid_engine_test` (asleep after
+  silence, output exactly 0, awake on a hit).
+- Not listened to: whether waking is clean on the first hit after a long
+  silence. The reverb's state stays as it was while it sleeps.
+- Open, from the same measurement: the reverb's memory is in SDRAM (slow);
+  in the Seed's internal RAM it should cost less when it is in use. A playing
+  sample track costs about 28 us, more than its arithmetic (samples are in
+  SDRAM too). 16 idle tracks cost 49 us for their gain ramps.
+
 ## v13.24: the overload shows (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.24, the binary on the Seed. Report 19 (`OV`),
@@ -80,8 +103,7 @@ sound, the protocol (control 10, report 18) or SDRAM.
   T95 that flashes the release binary when the bootloader shows up puts the
   good firmware back with nobody at the rig. The good firmware then shows its
   stop report and still wants one press of reset.
-- Open: 28 % with nothing playing is still a lot (reverb and the data side are
-  the suspects; the 128 KB of DTCM is unused for data).
+- 28 % with nothing playing: measured and mostly cured in v13.25.
 
 ## USB audio under load (v13.21 rebuilt 2026-11-24, on the rig)
 

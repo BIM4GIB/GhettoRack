@@ -439,6 +439,9 @@ class Engine
     /** The 303 tracks left out right now (bit per track), and whether the reverb is */
     uint32_t ShedMask() const { return shed_mask_; }
     bool     ShedReverb() const { return shed_reverb_; }
+    /** The reverb is not being run: nothing is sent to it and its tail has died away */
+    bool ReverbAsleep() const { return rev_quiet_ >= kRevSleepAfter; }
+    static constexpr uint32_t kRevSleepAfter = 24000; // half a second of silence in and out
     int ShedMax() const
     {
         int n = 1;
@@ -583,6 +586,7 @@ class Engine
     bool          synth_prev_[kTracks] = {};
     uint32_t      shed_mask_           = 0;     // 303 tracks left out this block (overload)
     bool          shed_reverb_         = false;
+    uint32_t      rev_quiet_           = 0;     // samples with nothing going into the reverb and nothing coming out
     bool          acid_tie_[kTracks]   = {}; // last step slides into the next
     int32_t       acid_gate_[kTracks]  = {}; // samples until gate off, -1 = held
     int           acid_last_[kTracks]  = {}; // last note played (rolls)
