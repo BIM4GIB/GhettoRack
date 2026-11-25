@@ -1101,6 +1101,12 @@ int main(void)
         Log("screen: SPI %s, %lu.%lu MHz (the panel can't answer: black = check CS, DC, RST)",
             tft.Ok() ? "up" : "failed", tenths / 10, tenths % 10);
     }
+    /* A screen that is elsewhere (on the companion box) costs main loop time
+       for nothing, so nothing is drawn when its touch chip doesn't answer.
+       A screen wired without its touch lines can't be found that way: the
+       encoder push held at power-up says "there is one" (kept on the card). */
+    const bool screen_missing = tft.Ok() && !tft.Screen();
+    const bool screen_claimed = screen_missing && tft.BootHeld();
     diag::Stage(16);
     usbHost.Init(usbh);
     diag::Stage(17);
@@ -1145,18 +1151,33 @@ int main(void)
         
         /* screen bus mode: saved on the card; encoder held at power-up flips it */
         {
-            uint8_t m = 1;
-            platform.ReadFile("apcbox/screen.bin", &m, 1);
-            bool bus16 = (m != 0) != tft.BootHeld();
-            if(tft.BootHeld())
+            /* screen.bin: [0] the bus mode, [1] 1 = draw though no touch chip
+               answers (older files are one byte long) */
+            uint8_t m[2] = {1, 0};
+            platform.ReadFile("apcbox/screen.bin", m, 2);
+            /* the held push says one thing at a time: "there is a screen"
+               when none was found, "the other bus mode" otherwise */
+            const bool flip  = tft.BootHeld() && !screen_claimed;
+            const bool bus16 = (m[0] != 0) != flip;
+            if(flip || screen_claimed)
             {
-                uint8_t v = bus16 ? 1 : 0;
-                platform.WriteFile("apcbox", "apcbox/screen.bin", &v, 1);
+                m[0] = bus16 ? 1 : 0;
+                if(screen_claimed)
+                    m[1] = 1;
+                platform.WriteFile("apcbox", "apcbox/screen.bin", m, 2);
             }
             if(bus16 != tft.Bus16())
                 tft.SetBus16(bus16);
-            Log("screen: %s bus%s (hold the encoder push at power-up to switch)",
-                bus16 ? "16-bit" : "8-bit", tft.BootHeld() ? ", switched and saved" : "");
+            if(screen_missing && m[1])
+                tft.ForceScreen();
+            if(screen_missing)
+                Log(m[1] ? "screen: its touch chip doesn't answer, drawing anyway (%s)"
+                         : "screen: none found (no touch chip answers on D9), not drawing%s",
+                    m[1] ? (screen_claimed ? "encoder held, saved" : "saved on the card")
+                         : ". A screen without touch wires: hold the encoder push at power-up");
+            if(tft.Screen())
+                Log("screen: %s bus%s (hold the encoder push at power-up to switch)",
+                    bus16 ? "16-bit" : "8-bit", flip ? ", switched and saved" : "");
         }
         BoxStorageReady();
         diag::Stage(12);
@@ -1164,9 +1185,17 @@ int main(void)
     else
     {
         Log("no SD card, using the built-in kit");
-        if(tft.BootHeld()) // no card to save it on: this session only
+        /* no card to save it on: this session only */
+        if(screen_claimed)
+            tft.ForceScreen();
+        else if(tft.BootHeld())
             tft.SetBus16(!tft.Bus16());
-        Log("screen: %s bus", tft.Bus16() ? "16-bit" : "8-bit");
+        if(tft.Screen())
+            Log("screen: %s bus%s", tft.Bus16() ? "16-bit" : "8-bit",
+                screen_claimed ? ", its touch chip doesn't answer, drawing anyway (encoder held)" : "");
+        else
+            Log("screen: none found (no touch chip answers on D9), not drawing. "
+                "A screen without touch wires: hold the encoder push at power-up");
     }
     
 
@@ -1250,6 +1279,16 @@ int main(void)
         LoopPart(5);
         tft.Poll(now);
         LoopPart(6);
+        /* said again once the USB port is likely open: the lines from
+           power-up are gone before a companion box or a monitor listens */
+        static bool screen_said = false;
+        if(!screen_said && now > 8000)
+        {
+            screen_said = true;
+            Log("screen: %s (touch data line: %d pulled up, %d pulled down)",
+                tft.Screen() ? "drawing" : "none found, not drawing", (int)tft.ProbeUp(),
+                (int)tft.ProbeDown());
+        }
         SdPoll(now);
         LoopPart(7);
         LoopReport(now, loop_start);

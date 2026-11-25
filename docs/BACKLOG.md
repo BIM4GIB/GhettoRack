@@ -4,6 +4,34 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.29: nothing is drawn when there is no screen (on the Pi rig's Seed, 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.29. `daisy/tft.h` and `daisy/main.cpp` only;
+no report line changed. No desktop test reaches this code.
+
+- At power-up the firmware selects the screen's touch chip and reads its data
+  line (D9) with a pull-up, then a pull-down. A chip drives the line; a pin
+  with nothing on it follows the pull (high, then low). Only that pair means
+  "no screen": then nothing is composed or sent, touch is not read, and the
+  3 s encoder hold does not open touch calibration. Encoder and back button
+  still work.
+- The state is logged again 8 s after power-up (`screen: drawing` or
+  `screen: none found, not drawing`, with the two readings): lines from
+  power-up are gone before a bridge or a monitor listens.
+- A screen wired without its touch lines can't be found: the encoder push
+  held at power-up then means "there is a screen" (second byte of
+  `apcbox/screen.bin`), and does not switch the bus mode on that hold.
+- Seen on the Pi rig's Seed (no screen): `none found, not drawing (touch data
+  line: 1 pulled up, 0 pulled down)`; the line `slowest pass 119.5 ms ... tft
+  114.9` that came after every start is gone. Idle ping the same as before
+  (avg 0.51 against 0.56 ms): the 115 ms was once at power-up, not every pass.
+- **Not seen: a Seed with the screen on it.** The only screen is on the Pi.
+  That a selected XPT2046 drives its data line is from its data sheet, not
+  from this rig. If the screen ever goes back on a Daisy and stays dark: hold
+  the encoder push at power-up. That override is not tried either.
+- A first try read the chip over SPI at start-up; the transfer came back
+  failed there (first byte 0x80, the rest 0), so that was dropped.
+
 ## v13.28: two faults in the overload guard (on the rig, flashed 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.28, the binary on the Seed. `daisy/main.cpp`

@@ -49,6 +49,8 @@ class Tft
         __HAL_RCC_PLLCLKOUT_ENABLE(RCC_PLL1_DIVQ);
         __HAL_RCC_SPI123_CONFIG(RCC_SPI123CLKSOURCE_PLL);
 
+        ProbeTouchChip(); // before SPI1 takes D9
+
         SpiHandle::Config c;
         c.periph         = SpiHandle::Config::Peripheral::SPI_1;
         c.mode           = SpiHandle::Config::Mode::MASTER;
@@ -80,7 +82,24 @@ class Tft
 
         InitPanel();
         ab::BoxTftInit(fb_);
-        dirty_ = 0xFFFFFFFFu;
+        dirty_  = 0xFFFFFFFFu;
+        screen_ = ok_ && chip_;
+        if(!chip_) // nothing on the touch data line: keep it from floating
+            GPIOB->PUPDR = (GPIOB->PUPDR & ~(3u << (4 * 2))) | (2u << (4 * 2)); // D9 = PB4, down
+    }
+
+    /** false: no screen was found at power-up (its touch chip didn't answer),
+     *  e.g. the screen sits on the companion box. Nothing is composed or sent
+     *  then; the encoder and the back button still work. */
+    bool Screen() const { return screen_; }
+    /** What the power-up check saw on the touch data line: pulled up, pulled down */
+    bool ProbeUp() const { return probe_up_; }
+    bool ProbeDown() const { return probe_down_; }
+    /** A screen wired without its touch lines can't be found: draw anyway */
+    void ForceScreen()
+    {
+        screen_ = ok_;
+        dirty_  = 0xFFFFFFFFu;
     }
 
     /** true: every command and setting goes out as a 16-bit word, for boards
@@ -148,7 +167,7 @@ class Tft
                 ab::BoxUiBack(now); // hold the push: back to STEPS
                 long_done_ = true;
             }
-            if(enc_.Pressed() && !cal_done_ && enc_.TimeHeldMs() > 3000)
+            if(screen_ && enc_.Pressed() && !cal_done_ && enc_.TimeHeldMs() > 3000)
             {
                 ab::BoxTouchCalibrate(now); // keep holding: touch calibration
                 cal_done_ = true;
@@ -158,7 +177,7 @@ class Tft
             if(back_.RisingEdge())
                 ab::BoxUiBack(now);
         }
-        if(!ok_ || busy_)
+        if(!ok_ || !screen_ || busy_)
             return;
         /* touch: between frames, about 60 times a second while pressed */
         if(sending_ == 0 && now - touch_time_ >= 16)
@@ -194,6 +213,29 @@ class Tft
     }
 
   private:
+    /** Is there a touch chip, and so a screen? The picture lines can't be
+     *  read back, but the touch chip drives its data-out line (T_DO, D9)
+     *  for as long as it is selected. With nothing connected the pin just
+     *  follows a pull resistor: high with a pull-up, low with a pull-down.
+     *  Only that pair counts as "no screen". */
+    void ProbeTouchChip()
+    {
+        using namespace daisy;
+        GPIO cs, tcs, miso;
+        cs.Init(seed::D7, GPIO::Mode::OUTPUT);
+        cs.Write(true); // the panel off the bus
+        tcs.Init(seed::D16, GPIO::Mode::OUTPUT);
+        tcs.Write(false); // the touch chip selected
+        miso.Init(seed::D9, GPIO::Mode::INPUT, GPIO::Pull::PULLUP);
+        System::Delay(3);
+        probe_up_ = miso.Read();
+        miso.Init(seed::D9, GPIO::Mode::INPUT, GPIO::Pull::PULLDOWN);
+        System::Delay(3);
+        probe_down_ = miso.Read();
+        tcs.Write(true);
+        chip_ = !(probe_up_ && !probe_down_);
+    }
+
     /** One XPT2046 reading at ~1.25 MHz (it can't take the screen's 40 MHz).
      *  Commands overlap with the previous answer, as the chip allows. */
     bool ReadTouch(int* rx, int* ry)
@@ -313,6 +355,8 @@ class Tft
     uint32_t          frame_time_ = 0, last_ms_ = 0;
     bool              long_done_  = false, cal_done_ = false;
     bool              bus16_      = true, boot_held_ = false;
+    bool              screen_     = true, chip_ = true;
+    bool              probe_up_   = false, probe_down_ = false;
     bool              touching_   = false;
     uint32_t          touch_time_ = 0;
     int               half_       = 0;

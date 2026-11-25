@@ -167,6 +167,7 @@ ul.tight { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
       <p style="font-size:14px;color:var(--muted)">Pin positions from SunFounder's own hardware page for this screen. Touch: on the first touch with no saved calibration, a calibration screen comes up. Tap the three crosses (a fingernail works best). It's saved to the card as <code>apcbox/touch.bin</code>. To redo it later: CALIBRATE TOUCH in the SYSTEM view, or hold the encoder down for 3 seconds.</p>
     </div>
   </div>
+  <div class="note">No screen: from v13.29 the box finds out at power-up (the touch chip does not answer on T_DO) and draws nothing. A screen wired without the three touch wires can't be found that way: hold the encoder down at power-up once and it draws from then on.</div>
   <div class="note">Backlight on but the picture black: the panel isn't getting its start-up commands. This board has shift registers behind the header, so the firmware sends 16-bit words by default (log: "screen: 16-bit bus"). For a plain SPI screen, hold the encoder push while tapping RESET to switch to 8-bit (saved on the card). Otherwise check CS, DC and RST. Picture mirrored, upside down, or red and blue swapped: change <code>kMadctl</code> in <code>tft.h</code>. Colours look like a negative: set <code>kInvert</code> to false.</div>
 </section>
 
