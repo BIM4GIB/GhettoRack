@@ -125,11 +125,39 @@ live, with markers and bar lines), pad, list row with waveform.
 
 ## Layouts
 
-Three, picked from the window and scaled to fit it (`fit()` in `apcbox.js`):
+Three, picked from the window and scaled to fit it (`fit()` in `apcbox.js`),
+and the small one above, asked for with `?small`:
 wide (TV, Mac, iPad on its side; drawn 1920 wide), upright (phone, iPad
 upright; drawn 390 wide), and a phone on its side (drawn 844 wide: the view
 buttons move to a rail on the left, the top bar is one row, strips lose
 their pots in Perform and the Mixer keeps three small ones).
+
+## Small: 480x320 (`?small`)
+
+The 3.5" touch screen on a Pi's header (`pi4/README.md`); the kiosk opens
+`/apcbox?small=1`. Its own six views on a rail on the left, a 24 px top bar
+(play, record, BPM, pattern, one status, the track page, ZOOM), drawn 1:1.
+The APC40 does the playing; this screen shows names and values and picks
+things by name.
+
+| Rail | Dense (stylus, fingernail) | ZOOM (finger) |
+|---|---|---|
+| STEP | 16 tracks x 16 steps, every step tappable, mute and solo per row, the selected track's values in a line | the 8 tracks of the selected track's page |
+| TRK | the selected track: 16 big steps (303: with notes), waveform, 4 pots at a time (SOUND 1, SOUND 2, MIX), HEAR, mute, solo | the same |
+| MIX | 16 strips: pan and two sends as bars, fader with a meter, mute, solo, crossfader side; master | 8 strips with pan and reverb pots; master |
+| PAT | all 64 patterns, the 8 FX as hold pads, copy / clear / undo | one bank of 8 with a bank row, big FX pads |
+| LIB | LIBRARY and CARD (the box's files, a waveform each, TO TRACK), KITS (load on 1-8 / 9-16, undo), SETS (load, save here) | the same |
+| SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, RELOAD | the same |
+
+The 1-8 / 9-16 button selects the same track on the other page. ZOOM is kept
+in the browser. No shadows or glows, and plain elements instead of a canvas:
+the panel is on a slow SPI link and only what changed is sent. Class names
+start with `s-` so the other layouts' styles cannot reach them.
+
+Not there: editing 303 notes, the looper, recording from a microphone, the
+APC40 map, sets rename and delete, hearing a file before it is sent (the box
+has no speaker: HEAR plays what is on the track, through the Daisy). The
+start screen and Settings have no small layout yet.
 
 ## Phone
 

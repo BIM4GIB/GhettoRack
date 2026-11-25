@@ -380,6 +380,98 @@ body.short .apcrow{min-height:24px;gap:5px}body.short .apcrow b,body.short .apcr
 
 /* overload: the Daisy is leaving this 303 out */
 .shed{opacity:.45;outline:1px solid var(--red)}
+
+/* ---------- the small layout: 480x320 (?small), the touch screen on the companion box ----------
+   No glows or shadows: they cost paint area on a slow SPI screen. Content is 439 x 296. */
+body.small{font:11px/1.2 var(--mono)}
+body.small .app{grid-template-columns:40px 439px;grid-template-rows:24px 296px;height:320px}
+body.small .top{grid-column:1 / -1;grid-row:1;padding:0 3px;gap:5px;height:24px}
+body.small .tabs{grid-column:1;grid-row:2;flex-direction:column;align-items:stretch;padding:0;gap:0;border-top:none;border-right:1px solid var(--line)}
+body.small #view{grid-column:2;grid-row:2;overflow:hidden}
+body.small button.tab{flex:1;height:auto;padding:0;justify-content:center;border-radius:0;border:none;border-left:3px solid transparent;background:none;font-size:11px;font-weight:400;color:var(--dim);box-shadow:none}
+body.small button.tab.on{background:#1d2024;color:var(--text);border-left-color:var(--yellow);box-shadow:none}
+body.small .tb{height:20px;min-width:28px;font-size:11px;border-radius:3px;box-shadow:none;padding:0 4px}
+body.small .tb.play{box-shadow:none}body.small .tb.rec.on{color:var(--red);border-color:var(--red)}
+body.small .tb.zm.on{color:var(--yellow);border-color:var(--yellow)}
+body.small .top .big{font-size:14px;font-weight:600}body.small .top .pat{color:var(--yellow)}body.small .top .pos{color:var(--dim)}
+body.small .led{font-size:11px;gap:4px}body.small .led::before{width:7px;height:7px;box-shadow:none}body.small .led.bad{color:var(--red)}body.small .led.bad::before{background:var(--red)}
+body.small .b{height:auto;font-size:11px;font-weight:400;border-radius:3px;box-shadow:none;padding:0;color:var(--dim)}
+body.small .b.on{box-shadow:none}body.small .b:disabled{opacity:.35}
+body.small .b.go{color:#0b0c0d;background:var(--green);border-color:var(--green)}body.small .b.warn{color:#0b0c0d;background:var(--yellow);border-color:var(--yellow)}body.small .b.gap{visibility:hidden}
+.sm{font-family:var(--mono);font-size:11px}
+.sm .shed{opacity:.45;outline:none}
+/* steps */
+.sm-steps{display:grid;grid-template-rows:272px 24px}
+.sm-steps .s-grid{position:relative;display:grid;grid-auto-rows:17px}
+.sm-steps .s-r{display:grid;grid-template-columns:62px 14px 14px repeat(16,1fr);gap:1px;padding:1px 2px 0 1px}
+.sm-steps .s-nm{appearance:none;border:1px solid transparent;background:none;color:var(--dim);font:inherit;text-align:left;padding:0 2px;white-space:nowrap;overflow:hidden;border-radius:2px}
+.sm-steps .s-r.sel .s-nm{color:var(--text);border-color:var(--yellow)}
+.sm-steps .s-ms{appearance:none;border:none;background:var(--off);color:#5d646b;font:inherit;font-size:9px;padding:0;border-radius:2px}
+.sm-steps .s-ms.m.on{background:var(--amber);color:#000}.sm-steps .s-ms.s.on{background:var(--blue);color:#000}
+.sm-steps .s-c{background:var(--off);border-radius:2px}.sm-steps .s-c.s-q{margin-left:2px}
+.sm-steps .s-c.on{background:var(--green)}.sm-steps .s-c.ac{background:var(--red)}
+.sm-steps .s-ph{position:absolute;top:0;bottom:0;border:1px solid var(--yellow);pointer-events:none;display:none}
+.sm-steps .s-info{display:flex;align-items:center;gap:10px;padding:0 4px;border-top:1px solid var(--line);white-space:nowrap;overflow:hidden;color:var(--dim)}
+.sm-steps .s-info b{color:var(--yellow);font-weight:400}
+.sm-steps.zoom{grid-template-rows:264px 32px}.sm-steps.zoom .s-grid{grid-auto-rows:33px}
+.sm-steps.zoom .s-r{grid-template-columns:62px 28px 28px repeat(16,1fr);gap:2px;padding-top:2px}.sm-steps.zoom .s-ms{font-size:11px}
+/* one track */
+.sm-track{display:grid;grid-template-rows:28px 92px 38px 1fr;gap:4px;padding:3px}
+.sm-track .s-hd{display:flex;align-items:center;gap:5px;min-width:0}.sm-track .s-hd .b{width:30px;height:24px}.sm-track .s-hd .b:nth-of-type(2){width:42px}
+.sm-track .s-hd .s-nm{color:var(--yellow);font-size:14px;white-space:nowrap}.sm-track .s-hd .s-ty{color:var(--dim);white-space:nowrap;overflow:hidden}
+.sm-track .s-bs{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:1fr 1fr;gap:3px}
+.sm-track .s-bs .s-c{border:1px solid transparent;background:var(--off);border-radius:3px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:2px 4px;color:var(--dim);font:inherit}
+.sm-track .s-bs .s-c.on{background:var(--green);color:#000}.sm-track .s-bs .s-c.ac{background:var(--red);color:#000}.sm-track .s-bs .s-c.s-ph{border-color:var(--yellow)}
+.sm-track .s-bs .s-nt{align-self:flex-end;font-size:12px}
+.sm-track .s-wv{width:435px;height:36px;border:1px solid var(--line)}
+.sm-track .s-pots{display:grid;grid-template-columns:repeat(4,1fr) 62px;gap:3px;min-height:0}
+.sm-track .cell{border-radius:3px;gap:1px;background:none;border:1px solid var(--line)}.sm-track .cell .val{font-size:12px}.sm-track .cell .n{font-size:10px;letter-spacing:0}
+.sm-track .s-pots .s-pg{height:100%}
+/* mixer */
+.sm-mix{display:grid;grid-template-columns:repeat(16,minmax(0,1fr)) 42px;gap:1px;padding:2px 1px}
+.sm-mix .s-st{display:grid;grid-template-rows:16px 8px 8px 8px 1fr 20px 20px 18px;gap:3px;justify-items:stretch;border:1px solid transparent;border-radius:2px;padding:1px;min-height:0}
+.sm-mix .s-st.sel{border-color:var(--yellow)}
+.sm-mix .s-num{appearance:none;border:none;background:none;color:var(--dim);font:inherit;padding:0;text-align:center}.sm-mix .s-st.sel .s-num{color:var(--yellow)}
+.sm-mix .s-bar{position:relative;background:var(--off);border-radius:1px}.sm-mix .s-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--green)}.sm-mix .s-bar.s-pan i{background:var(--amber)}
+.s-sf{position:relative;min-height:0}.s-sf .s-slot{position:absolute;left:5px;top:0;bottom:0;width:3px;background:var(--off)}
+.s-sf .s-lv{position:absolute;bottom:0;width:4px;height:0;background:var(--green)}.s-sf .s-lv.y{background:var(--yellow)}.s-sf .s-lv.r{background:var(--red)}
+.s-sf .s-cap{position:absolute;left:0;width:14px;height:10px;background:#d9dcdf;border-radius:2px}
+.sm-mix .s-mst{grid-template-rows:16px 1fr 18px;border-left:1px solid var(--line);border-radius:0;padding-left:4px}.sm-mix .s-mst .s-num,.sm-mix .s-mst .s-val{text-align:center;color:var(--dim)}
+.sm-mix .s-mst .s-sf .s-slot{left:8px}.sm-mix .s-mst .s-sf .s-cap{width:20px}
+.sm-mix.zoom{grid-template-columns:repeat(8,minmax(0,1fr)) 46px;gap:2px}
+.sm-mix.zoom .s-st{grid-template-rows:18px 34px 34px 1fr 30px 30px 24px;justify-items:center}.sm-mix.zoom .s-st>*{width:100%}.sm-mix.zoom .kn{align-items:center}
+.sm-mix.zoom .s-sf .s-slot{left:14px;width:4px}.sm-mix.zoom .s-sf .s-cap{width:32px;height:12px}.sm-mix.zoom .s-sf .s-lv{width:8px}
+.sm-mix.zoom .s-mst{grid-template-rows:18px 1fr 24px}
+/* patterns */
+.sm-pat{display:grid;grid-template-rows:216px 40px 1fr;gap:4px;padding:3px}
+.sm-pat .s-pg{display:grid;grid-template-columns:14px repeat(8,1fr);grid-template-rows:repeat(8,1fr);gap:2px}
+.sm-pat .s-bn{color:var(--dim);align-self:center;text-align:center}
+.sm-pat .s-pp{appearance:none;border:1px solid var(--line);background:none;color:#4a4f55;font:inherit;border-radius:2px;padding:0}
+.sm-pat .s-pp.has{background:var(--off);color:var(--text)}.sm-pat .s-pp.cur{border-color:var(--green);color:var(--green);background:var(--off)}
+.sm-pat .s-pp.next{border:1px dashed var(--yellow);color:var(--yellow)}.sm-pat .s-pp.src{outline:1px solid var(--yellow)}
+.s-fx{display:grid;grid-template-columns:repeat(8,1fr);gap:3px}
+.s-fx .bigpad{font-size:10px;border-radius:3px;color:#8a6a1f;border-color:#4d3a10;box-shadow:none;padding:0}.s-fx .bigpad.on{background:var(--amber);color:#000;box-shadow:none}
+.sm-pat .s-ops{display:flex;gap:4px;align-items:stretch}.sm-pat .s-ops .b{width:62px}.sm-pat .s-hint{flex:1;align-self:center;text-align:right;color:var(--yellow);white-space:nowrap;overflow:hidden}
+.sm-pat.zoom{grid-template-rows:34px 1fr 92px 30px}
+.sm-pat.zoom .s-banks{display:grid;grid-template-columns:repeat(8,1fr);gap:3px}.sm-pat.zoom .s-banks .b.on{color:var(--yellow);border-color:var(--yellow)}
+.sm-pat.zoom .s-pg{grid-template-columns:repeat(4,1fr);grid-template-rows:1fr 1fr;gap:4px}.sm-pat.zoom .s-pp{font-size:16px}
+.sm-pat.zoom .s-fx{grid-template-columns:repeat(4,1fr);grid-template-rows:1fr 1fr}.sm-pat.zoom .s-fx .bigpad{font-size:12px}
+/* library */
+.sm-lib{display:grid;grid-template-columns:1fr 112px;grid-template-rows:28px 1fr 18px;gap:4px;padding:3px}
+.sm-lib .s-lt{grid-column:1 / -1;display:grid;grid-template-columns:repeat(4,1fr);gap:3px}body.small .b.s-tg.on{color:var(--text);border-color:var(--yellow)}
+.sm-lib .s-ll{display:grid;grid-template-rows:repeat(6,1fr);gap:3px;min-height:0}
+.sm-lib .s-li{appearance:none;display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:none;color:var(--dim);font:inherit;font-size:12px;border-radius:3px;padding:0 6px;min-width:0;text-align:left}
+.sm-lib .s-li.on{background:var(--off);border-color:var(--yellow);color:var(--text)}.sm-lib .s-li.s-dir{color:var(--amber)}
+.sm-lib .s-li .s-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sm-lib .s-li .s-d{font-size:10px;color:var(--dim);white-space:nowrap}.sm-lib .s-li canvas{width:110px;height:28px}
+.sm-lib .s-ls{display:grid;grid-template-rows:repeat(3,1fr) 34px;gap:4px}
+.sm-lib .s-nav{display:grid;grid-template-columns:34px 1fr 34px;align-items:stretch;text-align:center;gap:2px}.sm-lib .s-nav span{align-self:center;color:var(--dim)}
+.sm-lib .s-msg{grid-column:1 / -1;max-width:none;color:var(--dim)}
+/* system */
+.sm-sys{display:grid;grid-template-rows:auto 1fr 32px;gap:4px;padding:4px}
+.sm-sys .s-kv{display:grid;grid-template-columns:86px 1fr;gap:3px 6px}.sm-sys .s-k{color:var(--dim)}.sm-sys .s-v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sm-sys .s-v.bad{color:var(--red)}.sm-sys .s-v.warn{color:var(--yellow)}
+.sm-sys .s-log{white-space:pre;overflow:hidden;color:var(--dim);border-top:1px solid var(--line);padding-top:3px;font-size:10px}
+.sm-sys .s-bt{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
 </style>
 </head>
 <body>
@@ -400,6 +492,9 @@ const DIV = ["1/16", "1/8", "1/8 dot", "1/4", "1/4 dot", "1/2"];
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const Q = new URLSearchParams(location.search);
 const tv = Q.has("tv");
+/* ?small: the 480x320 touch screen on the companion box's own header (a Pi). Its views are
+   further down, under "the small layout". */
+const SMALL = Q.has("small"), SMALL_W = 480, SMALL_H = 320, VIEW_KEY = SMALL ? "apcbox-small-view" : "apcbox-view";
 /* One layout drawn for a 1920 px wide screen (TV, Mac, iPad on its side) and one
    for a 390 px wide phone held upright (also an iPad held upright). Whichever
    fits is scaled to the window, so nothing is ever cut off and the view bar is
@@ -410,6 +505,13 @@ let PHONE = false, SHORT = false, SCALE = 1;   /* PHONE: upright; SHORT: a phone
 const sz = (wide, tall, short) => SHORT ? short : PHONE ? tall : wide;
 function fit() {
   const vv = window.visualViewport, w = Math.round(vv ? vv.width : innerWidth), h = Math.round(vv ? vv.height : innerHeight);
+  if (SMALL) {   /* drawn 1:1; Chromium's window is never under 500 px wide, the panel shows the left 480 */
+    let s = Math.min(w / SMALL_W, h / SMALL_H); if (s > 0.98 && s < 1.1) s = 1;
+    const app = document.querySelector(".app");
+    app.style.width = SMALL_W + "px"; app.style.height = SMALL_H + "px"; app.style.transform = "scale(" + s + ")";
+    SCALE = s; document.body.classList.add("small");
+    return false;
+  }
   const tall = h > w * 1.1, short = !tall && h < 520 && !tv;
   const dw = tall ? TALL_W : short ? SHORT_W : WIDE_W, dh = tall ? TALL_MIN_H : short ? SHORT_MIN_H : WIDE_MIN_H;
   let s = w / dw;
@@ -729,6 +831,7 @@ function listenBtn() {
 /* ---------- top bar ---------- */
 const T = {};
 function buildTop() {
+  if (SMALL) return smTop();
   const top = document.querySelector(".top");
   top.textContent = "";
   T.stop = el("button", "tb", "■"); T.play = el("button", "tb", "▶"); T.rec = el("button", "tb rec", "●");
@@ -758,6 +861,7 @@ function buildTop() {
 }
 function topS() {
   if (!T.play) return;
+  if (SMALL) smTopS();
   T.play.classList.toggle("play", !!st.playing);
   T.rec.classList.toggle("on", !!st.rec);
   T.metro.classList.toggle("on", !!st.metro);
@@ -771,6 +875,7 @@ function topS() {
 let statusKey = "";
 function topStatus() {
   if (!T.leds) return;
+  if (SMALL) return smStatus();
   const br = st.bridge, parts = [
     ["Daisy", st.daisy ? (st.ctl >= 4 ? "ok" : "warn") : "bad", st.daisy ? (st.ctl >= 4 ? "" : "firmware too old for this page: flash v13.9") : "not connected"],
     ["APC40", st.apc ? "ok" : "off", ""],
@@ -1834,17 +1939,342 @@ V.system = {
   S() { }, P() { this.q.forEach(x => x.upd()); }, L() { this.logEl.textContent = st.log.slice(-sz(22, 14, 9)).join("\n"); },
 };
 
+/* ---------- the small layout: 480x320, the touch screen on the companion box ----------
+   Opened with ?small (the kiosk on a Pi with the 3.5" screen on its header). Six views on
+   a rail: STEP, TRK, MIX, PAT, LIB, SYS. Dense by default (a stylus or a fingernail: all
+   16 tracks, all 64 patterns on one page); ZOOM shows the 8 tracks of the selected
+   track's page, or one bank, with targets for a finger. Plain elements, not a canvas:
+   the screen is on a slow SPI link and only what changed is sent to it. */
+const SM_TABS = [["sm_steps", "STEP"], ["sm_track", "TRK"], ["sm_mix", "MIX"], ["sm_pat", "PAT"], ["sm_lib", "LIB"], ["sm_sys", "SYS"]];
+let smZoom = false; try { smZoom = localStorage.getItem("apcbox-small-zoom") === "1"; } catch (e) { }
+const smTracks = () => smZoom ? [...Array(8).keys()].map(i => i + (st.sel >> 3) * 8) : [...Array(16).keys()];
+function smTop() {
+  const top = document.querySelector(".top"); top.textContent = "";
+  T.play = el("button", "tb", "▶"); T.play.onclick = () => act(st.playing ? "stop" : "play");
+  T.rec = el("button", "tb rec", "●"); T.rec.onclick = () => act("rec 2");
+  T.stop = el("button"); T.metro = el("button"); T.set = el("span"); T.beat = [];   /* topS() writes to these; not shown here */
+  T.bpm = el("span", "big"); T.pat = el("span", "big pat"); T.pos = el("span", "pos");
+  T.pg = el("button", "tb zm"); T.pg.onclick = () => sel((st.sel + 8) % 16);
+  T.zoom = el("button", "tb zm" + (smZoom ? " on" : ""), "ZOOM");
+  T.zoom.onclick = () => { smZoom = !smZoom; try { localStorage.setItem("apcbox-small-zoom", smZoom ? "1" : "0"); } catch (e) { } T.zoom.classList.toggle("on", smZoom); show(curName); };
+  T.leds = el("span", "leds");
+  top.append(T.play, T.rec, T.bpm, T.pat, T.pos, el("span", "sp"), T.leds, T.pg, T.zoom);
+  topS(); topStatus();
+}
+function smTopS() { if (T.pg) { const x = st.sel < 8 ? "1-8" : "9-16"; if (T.pg.textContent !== x) T.pg.textContent = x; } }
+function smStatus() {
+  const p = sendErr ? [sendErr, "bad"] : !st.daisy ? ["no Daisy", "bad"] : st.ctl < 4 ? ["old firmware", "bad"] : (st.ver && st.ver !== REPORT_VERSION) ? ["page and firmware differ", "bad"]
+    : (st.ov.mask || st.ov.rev) ? [ovText(), "bad"] : ["cpu " + Math.round(st.cpu / 10) + "%", "ok"];
+  const key = p.join("|");
+  if (key === statusKey) return;
+  statusKey = key; T.leds.textContent = ""; T.leds.appendChild(el("span", "led " + p[1], p[0]));
+}
+function smTabs() {
+  const tb = document.getElementById("tabs"); tb.textContent = "";
+  SM_TABS.forEach(t => { const b = el("button", "tab" + (t[0] === curName ? " on" : ""), t[1]); b.onclick = () => show(t[0]); tb.appendChild(b); });
+}
+/* A fader in a narrow strip, with one meter bar beside its slot */
+function SmFader(onChange, bars) {
+  const f = el("div", "s-sf"), cap = el("i", "s-cap"), lv = [];
+  f.appendChild(el("i", "s-slot"));
+  for (let i = 0; i < (bars || 1); i++) { const m = el("i", "s-lv"); m.style.right = (1 + i * 5) + "px"; f.appendChild(m); lv.push([m, -1]); }
+  f.appendChild(cap);
+  let val = -1, drag = false;
+  function set(v) { if (v === val) return; val = v; cap.style.top = "calc(" + (1 - v / 127).toFixed(3) + " * (100% - 10px))"; }
+  function at(e) { const r = f.getBoundingClientRect(), v = Math.max(0, Math.min(127, Math.round((1 - (e.clientY - r.top - 5 * SCALE) / (r.height - 10 * SCALE)) * 127))); if (v !== val) { set(v); onChange(v); } }
+  f.addEventListener("pointerdown", e => { drag = true; f.setPointerCapture(e.pointerId); at(e); e.preventDefault(); });
+  f.addEventListener("pointermove", e => { if (drag) at(e); });
+  const end = () => { drag = false; };
+  f.addEventListener("pointerup", end); f.addEventListener("pointercancel", end);
+  f.style.touchAction = "none";
+  return { el: f, set, get dragging() { return drag; },
+    meter(p, i) { const m = lv[i || 0], db = p > 0 ? 20 * Math.log10(p / 255) : -99, k = Math.max(0, Math.min(12, Math.round((db + 48) / 4)));
+      if (k === m[1]) return; m[1] = k; m[0].style.height = (k / 12 * 100) + "%"; m[0].className = "s-lv" + (k >= 11 ? " r" : k >= 9 ? " y" : ""); } };
+}
+const smInfo = t => typeOf(t) === "303" ? ACID_POTS.slice(0, 5).map(p => p[0] + " " + p[2](st.tr[t].acid[p[1]])) : SAMPLE_POTS.slice(0, 4).concat([SAMPLE_POTS[7]]).map(p => p[0] + " " + p[3](st.tr[t].v[p[1]]));
+
+V.sm_steps = {
+  build() {
+    view.className = "sm sm-steps" + (smZoom ? " zoom" : "");
+    this.page = st.sel >> 3;
+    const g = el("div", "s-grid"); this.rows = []; this.head = el("i", "s-ph"); this.at = -2;
+    for (const t of smTracks()) {
+      const r = el("div", "s-r"), nm = el("button", "s-nm"), m = el("button", "s-ms m", "M"), s = el("button", "s-ms s", "S"), cells = [];
+      nm.onclick = () => sel(t); m.onclick = () => act(`mute ${t + 1} 2`); s.onclick = () => act(`solo ${t + 1} 2`);
+      r.append(nm, m, s);
+      for (let k = 0; k < 16; k++) { const c = el("i", k % 4 ? "s-c" : "s-c s-q"); c.onclick = () => { stepTap(t, k); this.G(); }; r.appendChild(c); cells.push(c); }
+      g.appendChild(r); this.rows.push({ t, r, nm, m, s, cells, row: "0".repeat(16), name: null });
+    }
+    g.appendChild(this.head);
+    this.info = el("div", "s-info"); this.infoKey = "";
+    view.append(g, this.info);
+  },
+  G() { for (const x of this.rows) { const row = st.grid.substr(x.t * 16, 16); if (row === x.row) continue;
+    for (let k = 0; k < 16; k++) if (row[k] !== x.row[k]) x.cells[k].className = (k % 4 ? "s-c" : "s-c s-q") + (row[k] === "2" ? " ac" : row[k] === "1" ? " on" : "");
+    x.row = row; } },
+  S() {
+    smTopS();
+    if (smZoom && this.page !== st.sel >> 3) return show(curName);
+    for (const x of this.rows) { x.r.classList.toggle("sel", st.sel === x.t); x.r.classList.toggle("shed", ovOut(x.t)); x.m.classList.toggle("on", !!(st.mute >> x.t & 1)); x.s.classList.toggle("on", !!(st.solo >> x.t & 1)); }
+    const at = st.playing ? st.step : -1;
+    if (at !== this.at) { this.at = at; this.head.style.display = at < 0 ? "none" : "block";
+      if (at >= 0) { const c = this.rows[0].cells[at]; this.head.style.left = c.offsetLeft + "px"; this.head.style.width = c.offsetWidth + "px"; } }
+    this.T();
+  },
+  N() { for (const x of this.rows) { const n = (x.t + 1) + " " + trackName(x.t); if (n !== x.name) x.nm.textContent = x.name = n; } this.T(); },
+  T() { const t = st.sel, key = (t + 1) + " " + trackName(t) + "|" + smInfo(t).join("  "); if (key === this.infoKey) return; this.infoKey = key;
+    this.info.textContent = ""; this.info.append(el("b", "", (t + 1) + " " + trackName(t)), el("span", "", smInfo(t).join("   "))); },
+  A() { this.T(); },
+};
+
+let smPotPg = 0;
+V.sm_track = {
+  build() {
+    view.className = "sm sm-track";
+    const t = this.t = st.sel; this.ty = typeOf(t);
+    const hd = el("div", "s-hd"), prev = el("button", "b", "‹"), next = el("button", "b", "›"), hear = el("button", "b", "HEAR");
+    prev.onclick = () => sel((t + 15) % 16); next.onclick = () => sel((t + 1) % 16); hear.onclick = () => act(`audition ${t + 1}`);
+    this.nm = el("span", "s-nm"); this.sub = el("span", "s-ty");
+    this.m = Btn("m", "M", () => act(`mute ${t + 1} 2`)); this.s = Btn("s", "S", () => act(`solo ${t + 1} 2`));
+    hd.append(prev, this.nm, this.sub, el("span", "sp"), hear, this.m.el, this.s.el, next);
+    const sg = el("div", "s-bs"); this.steps = [];
+    for (let k = 0; k < 16; k++) { const b = el("button", "s-c"), nt = el("span", "s-nt"); b.append(el("span", "s-k", String(k + 1)), nt); b.onclick = () => { stepTap(t, k); this.G(); }; sg.appendChild(b); this.steps.push({ b, nt, key: "" }); }
+    this.cv = el("canvas", "s-wv"); this.cv.width = 435; this.cv.height = 36; this.wkey = "";
+    const pr = el("div", "s-pots"); this.pots = [];
+    const acid = this.ty === "303", dev = acid ? ACID_POTS.map(p => [p[0], p[1], p[1] === 5 ? "pan" : "vol", p[2], true]) : SAMPLE_POTS.map(p => [p[0], p[1], p[2], p[3], false]);
+    const pages = [dev.slice(0, 4), dev.slice(4, 8), TRACK_POTS.map(p => [p[0], p[1], p[2], p[3], false])];
+    smPotPg %= 3;
+    for (const p of pages[smPotPg]) {
+      const k = Pot({ size: 50, cell: true, mode: p[2], color: p[4] ? AM : smPotPg === 2 ? GR : BL, label: p[0], fmt: p[3], reset: p[2] === "pan" ? 64 : undefined,
+        onChange: v => p[4] ? acidAct(t, p[1], v) : knobAct(t, p[1], v) });
+      k.i = p[1]; k.acid = p[4]; this.pots.push(k); pr.appendChild(k.el);
+    }
+    const pg = el("button", "b s-pg", ["SOUND 1", "SOUND 2", "MIX"][smPotPg] + " ›"); pg.onclick = () => { smPotPg = (smPotPg + 1) % 3; show(curName); };
+    pr.appendChild(pg);
+    view.append(hd, sg, this.cv, pr);
+  },
+  moved() { return st.sel !== this.t || typeOf(st.sel) !== this.ty; },
+  S() { smTopS(); if (this.moved()) return show(curName);
+    this.m.set(st.mute >> this.t & 1); this.s.set(st.solo >> this.t & 1); this.G(); },
+  N() { if (this.moved()) return show(curName); const n = (this.t + 1) + " " + trackName(this.t); if (this.nm.textContent !== n) this.nm.textContent = n; this.T(); },
+  G() { const t = this.t, tr = st.tr[t], ph = st.playing ? st.step : -1, acid = this.ty === "303";
+    this.steps.forEach((x, k) => { const v = st.grid[t * 16 + k], nb = tr.notes ? tr.notes[k] : 36, key = v + (k === ph ? "p" : "") + (acid ? nb : "");
+      if (key === x.key) return; x.key = key;
+      x.b.className = "s-c" + (v === "2" ? " ac" : v === "1" ? " on" : "") + (k === ph ? " ph" : "");
+      const n = nb & 127 || 36; x.nt.textContent = acid && v !== "0" ? NOTE[n % 12] + (Math.floor(n / 12) - 1) + (nb & 128 ? "~" : "") : ""; }); },
+  Q() { this.G(); },
+  T() { const v = st.tr[this.t].v, a = st.tr[this.t].acid;
+    for (const k of this.pots) { const key = (k.acid ? "a" : "k") + this.t + "." + k.i; if (!k.dragging && !isBusy(key)) k.set(k.acid ? a[k.i] : v[k.i]); }
+    const x = this.ty + "   vol " + fmt.pct(v[0]) + "   pan " + fmt.pan(v[1]); if (this.sub.textContent !== x) this.sub.textContent = x; },
+  A() { this.T(); },
+  Z() { const w = st.tr[this.t].wave, key = this.ty === "303" ? "303" : w ? w.key : "-"; if (key === this.wkey) return; this.wkey = key;
+    const g = this.cv.getContext("2d"), W = this.cv.width, H = this.cv.height; g.clearRect(0, 0, W, H);
+    g.fillStyle = "#2a2d31"; g.fillRect(0, H / 2, W, 1);
+    if (key === "303" || !w || !w.pts) { g.fillStyle = "#7d848c"; g.font = "11px ui-monospace,Menlo,monospace"; g.fillText(key === "303" ? "303 voice: no sample" : "no sound loaded", 6, 14); return; }
+    let top = 1; for (const p of w.pts) top = Math.max(top, p);
+    const n = w.pts.length, bw = W / n; g.fillStyle = BL;
+    for (let i = 0; i < n; i++) { const h = Math.max(1, Math.pow(w.pts[i] / top, 0.6) * H * 0.46); g.fillRect(i * bw, H / 2 - h, Math.max(1, bw * 0.72), 2 * h); } },
+};
+
+V.sm_mix = {
+  build() {
+    view.className = "sm sm-mix" + (smZoom ? " zoom" : "");
+    this.page = st.sel >> 3; this.st = [];
+    for (const t of smTracks()) {
+      const s = el("div", "s-st"), num = el("button", "s-num", String(t + 1)); num.onclick = () => sel(t);
+      s.appendChild(num);
+      const x = { t, s, num, pots: [], bars: [] };
+      if (smZoom) [[1, "pan", AM], [2, "vol", GR]].forEach(p => { const k = Pot({ size: 30, mode: p[1], color: p[2], reset: p[1] === "pan" ? 64 : undefined, onChange: v => knobAct(t, p[0], v) }); k.i = p[0]; x.pots.push(k); s.appendChild(k.el); });
+      else [1, 2, 3].forEach(i => { const b = el("i", "s-bar" + (i === 1 ? " s-pan" : "")), f = el("i"); b.appendChild(f); s.appendChild(b); x.bars.push([f, i, -1]); });
+      x.f = SmFader(v => knobAct(t, 0, v)); s.appendChild(x.f.el);
+      x.m = Btn("m", "M", () => act(`mute ${t + 1} 2`)); x.so = Btn("s", "S", () => act(`solo ${t + 1} 2`));
+      x.side = el("button", "b s-tg"); x.side.onclick = () => knobAct(t, 12, (st.tr[t].v[12] + 1) % 3);
+      s.append(x.m.el, x.so.el, x.side);
+      view.appendChild(s); this.st.push(x);
+    }
+    const ms = el("div", "s-st s-mst"); ms.appendChild(el("span", "s-num", "MST"));
+    this.mf = SmFader(v => globAct(0, v), 2); ms.appendChild(this.mf.el);
+    this.mv = el("span", "s-val"); ms.appendChild(this.mv);
+    view.appendChild(ms);
+  },
+  T() { for (const x of this.st) { const v = st.tr[x.t].v;
+    if (!x.f.dragging && !isBusy("k" + x.t + ".0")) x.f.set(v[0]);
+    for (const k of x.pots) if (!k.dragging && !isBusy("k" + x.t + "." + k.i)) k.set(v[k.i]);
+    for (const b of x.bars) { const q = Math.round(v[b[1]] / 127 * 16); if (q !== b[2]) { b[2] = q; if (b[1] === 1) { b[0].style.left = Math.min(q, 8) / 16 * 100 + "%"; b[0].style.width = Math.max(1, Math.abs(q - 8)) / 16 * 100 + "%"; } else b[0].style.width = q / 16 * 100 + "%"; } }
+    const sd = ["A+B", "A", "B"][v[12]] || "A+B"; if (x.side.textContent !== sd) x.side.textContent = sd; x.side.classList.toggle("on", v[12] > 0); } },
+  S() { smTopS(); if (smZoom && this.page !== st.sel >> 3) return show(curName);
+    for (const x of this.st) { x.s.classList.toggle("sel", st.sel === x.t); x.s.classList.toggle("shed", ovOut(x.t)); x.m.set(st.mute >> x.t & 1); x.so.set(st.solo >> x.t & 1); } },
+  M() { if (!this.mf.dragging && !isBusy("g0")) this.mf.set(st.glob[0]); const x = fmt.pct(st.glob[0]); if (this.mv.textContent !== x) this.mv.textContent = x; },
+  H() { for (const x of this.st) x.f.meter(st.meters[x.t]); this.mf.meter(st.meters[16], 0); this.mf.meter(st.meters[17], 1); },
+};
+
+let smPatMode = "";
+V.sm_pat = {
+  build() {
+    view.className = "sm sm-pat" + (smZoom ? " zoom" : "");
+    this.src = -1; this.pads = []; this.bank = st.pat >> 3; this.bk = [];
+    const g = el("div", "s-pg");
+    if (smZoom) {
+      const br = el("div", "s-banks");
+      for (let b = 0; b < 8; b++) { const x = el("button", "b", "ABCDEFGH"[b]); x.onclick = () => { this.bank = b; show0(); }; br.appendChild(x); this.bk.push(x); }
+      view.appendChild(br);
+    }
+    const show0 = () => { this.bk.forEach((x, b) => x.classList.toggle("on", b === this.bank)); this.pads.forEach(x => { x.p = this.bank * 8 + x.i; x.b.textContent = patName(x.p); x.key = ""; }); this.S(); };
+    for (let i = 0; i < (smZoom ? 8 : 64); i++) {
+      if (!smZoom && i % 8 === 0) g.appendChild(el("span", "s-bn", "ABCDEFGH"[i >> 3]));
+      const b = el("button", "s-pp"), x = { b, i, p: smZoom ? this.bank * 8 + i : i, key: "" };
+      b.textContent = patName(x.p); b.onclick = () => this.tap(x.p); g.appendChild(b); this.pads.push(x);
+    }
+    this.fxp = FxPads("s-fx");
+    const ops = el("div", "s-ops"); this.ops = {};
+    [["copy", "COPY"], ["clear", "CLEAR"]].forEach(([m, n]) => { const b = el("button", "b s-tg", n); b.onclick = () => { smPatMode = smPatMode === m ? "" : m; this.src = -1; this.S(); }; ops.appendChild(b); this.ops[m] = b; });
+    const u = el("button", "b", "UNDO"); u.onclick = () => act("undo"); ops.appendChild(u);
+    this.hint = el("span", "s-hint"); ops.appendChild(this.hint);
+    view.append(g, this.fxp.el, ops);
+    if (smZoom) show0();
+  },
+  tap(p) {
+    if (smPatMode === "clear") { act(`pclear ${p + 1} 0`); smPatMode = ""; }
+    else if (smPatMode === "copy") { if (this.src < 0) this.src = p; else { if (this.src !== p) act(`pcopy ${this.src + 1} ${p + 1}`); smPatMode = ""; this.src = -1; } }
+    else act("pat " + (p + 1));
+    this.S();
+  },
+  S() { smTopS(); this.fxp.S();
+    const q = st.qpat >= 0 && st.qpat !== st.pat ? st.qpat : -1;
+    const h = smPatMode === "copy" ? (this.src < 0 ? "copy: tap the source" : "copy " + patName(this.src) + ": tap where it goes") : smPatMode === "clear" ? "clear: tap a pattern" : q >= 0 ? "next: " + patName(q) : "";
+    if (this.hint.textContent !== h) this.hint.textContent = h;
+    for (const m in this.ops) this.ops[m].classList.toggle("on", smPatMode === m);
+    for (const x of this.pads) { const key = (x.p === st.pat ? "cur" : x.p === q ? "next" : (st.patmask >> BigInt(x.p) & 1n) ? "has" : "") + (x.p === this.src ? " src" : "");
+      if (key !== x.key) { x.key = key; x.b.className = "s-pp " + key; } } },
+  O() { this.S(); },
+};
+
+let smLib = "lib", smLibPage = 0;
+const smLibPath = { lib: "", sd: "" }, SM_ROWS = 6;
+V.sm_lib = {
+  build() {
+    view.className = "sm sm-lib";
+    const tabs = el("div", "s-lt");
+    [["lib", "LIBRARY"], ["sd", "CARD"], ["kits", "KITS"], ["sets", "SETS"]].forEach(([k, n]) => { const b = el("button", "b s-tg" + (smLib === k ? " on" : ""), n); b.onclick = () => { smLib = k; smLibPage = 0; show(curName); }; tabs.appendChild(b); });
+    this.list = el("div", "s-ll"); this.side = el("div", "s-ls"); this.msg = el("div", "s-msg");
+    view.append(tabs, this.list, this.side, this.msg);
+    this.items = []; this.pick = -1; this.sure = ""; this.token = 0;
+    if (smLib === "lib" || smLib === "sd") this.load(); else this.fill();
+  },
+  files() { return smLib === "lib" || smLib === "sd"; },
+  say(t, bad) { this.msg.textContent = t || ""; this.msg.classList.toggle("bad", !!bad); },
+  async load() {
+    const src = smLib;
+    try {
+      const d = await (await fetch("/samples?src=" + src + "&path=" + encodeURIComponent(smLibPath[src]))).json();
+      if (d.error) { if (smLibPath[src]) { smLibPath[src] = ""; return this.load(); } this.items = []; this.say(d.error, true); }
+      else { this.items = d.dirs.map(n => ({ dir: n })).concat(d.files.map(f => ({ file: f.name }))); this.say(this.items.length ? "" : src === "lib" ? "the library is empty: send files from a phone or laptop" : "nothing here"); }
+    } catch (e) { this.items = []; this.say("the bridge is not answering", true); }
+    if (curName === "sm_lib" && smLib === src) { this.pick = -1; this.render(); }
+  },
+  fill() {
+    this.items = smLib === "kits" ? st.kits.map((n, i) => ({ kit: i, name: n })).filter(x => x.name)
+      : st.sets.map((s, i) => ({ set: i, name: s.exists ? s.name || "set " + (i + 1) : "(empty)", d: s.exists ? s.bpm.toFixed(1) + " bpm  " + s.samples + " samples  " + s.loops + " loops  " + s.synths + " 303" : "", exists: s.exists }));
+    this.render();
+  },
+  full(name) { const p = smLibPath[smLib]; return p ? p + "/" + name : name; },
+  render() {
+    const pages = Math.max(1, Math.ceil(this.items.length / SM_ROWS)); smLibPage = Math.max(0, Math.min(pages - 1, smLibPage));
+    const token = ++this.token, want = [];
+    this.list.textContent = "";
+    this.items.slice(smLibPage * SM_ROWS, (smLibPage + 1) * SM_ROWS).forEach((it, k) => {
+      const i = smLibPage * SM_ROWS + k, row = el("button", "s-li" + (i === this.pick ? " on" : "") + (it.dir ? " s-dir" : "")), nm = el("span", "s-nm");
+      row.appendChild(nm);
+      if (it.dir) { nm.textContent = "▸ " + it.dir; row.onclick = () => { smLibPath[smLib] = this.full(it.dir); smLibPage = 0; this.load(); }; }
+      else if (it.file) { nm.textContent = it.file.replace(/\.[a-z0-9]+$/i, ""); const d = el("span", "s-d"), cv = el("canvas"); cv.width = 110; cv.height = 28; row.append(d, cv); want.push({ path: this.full(it.file), src: smLib, d, cv });
+        row.onclick = () => { this.pick = i; this.sure = ""; this.render(); }; }
+      else { nm.textContent = (it.kit !== undefined ? "" : (it.set + 1) + "  ") + it.name; if (it.d) row.appendChild(el("span", "s-d", it.d));
+        if (it.kit !== undefined && (st.kitPg[0] === it.kit || st.kitPg[1] === it.kit)) row.appendChild(el("span", "s-d", st.kitPg[0] === it.kit ? "on 1-8" : "on 9-16"));
+        if (it.set !== undefined && st.set === it.set) row.appendChild(el("span", "s-d", "open" + (st.dirty ? " *" : "")));
+        row.onclick = () => { this.pick = i; this.sure = ""; this.render(); }; }
+      this.list.appendChild(row);
+    });
+    this.side.textContent = "";
+    const it = this.items[this.pick], mk = (t, f, cls, off) => { const b = el("button", "b " + (cls || ""), t); b.disabled = !!off; b.onclick = f; this.side.appendChild(b); return b; };
+    if (this.files()) {
+      mk("TO TRACK " + (st.sel + 1), async () => { const r = await this.post("/samples/send", { src: smLib, path: this.full(it.file), track: st.sel + 1 }); this.say(r.error || it.file + ": on its way to track " + (st.sel + 1), !!r.error); }, "go", !it);
+      mk("HEAR TRACK " + (st.sel + 1), () => act(`audition ${st.sel + 1}`));
+      mk("FOLDER UP", () => { const p = smLibPath[smLib]; smLibPath[smLib] = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : ""; smLibPage = 0; this.load(); }, "", !smLibPath[smLib]);
+    } else if (smLib === "kits") {
+      mk("LOAD ON 1-8", () => { act(`kit ${it.kit + 1} 0`); this.say(it.name + ": loading into tracks 1-8"); }, "go", !it);
+      mk("LOAD ON 9-16", () => { act(`kit ${it.kit + 1} 1`); this.say(it.name + ": loading into tracks 9-16"); }, "go", !it);
+      mk("UNDO KIT", () => act("lrec undo"), "", st.lp.undo < 101);
+    } else {
+      mk("LOAD", () => { act("set load " + (it.set + 1)); this.say("set " + (it.set + 1) + ": switches on the bar"); }, "go", !it || !it.exists);
+      mk(this.sure === "save" ? "SURE?" : "SAVE HERE", () => { if (this.sure !== "save" && it.exists) { this.sure = "save"; return this.render(); } act("set save " + (it.set + 1)); this.sure = ""; this.say("saving to slot " + (it.set + 1)); this.render(); }, this.sure === "save" ? "warn" : "", !it);
+      mk("", null, "gap", true);
+    }
+    const nav = el("div", "s-nav"), pv = el("button", "b", "‹"), nx = el("button", "b", "›");
+    pv.disabled = smLibPage === 0; nx.disabled = smLibPage >= pages - 1;
+    pv.onclick = () => { smLibPage--; this.pick = -1; this.render(); }; nx.onclick = () => { smLibPage++; this.pick = -1; this.render(); };
+    nav.append(pv, el("span", "", (smLibPage + 1) + " / " + pages), nx); this.side.appendChild(nav);
+    (async () => { for (const w of want) {
+      let p = peakCache.get(w.src + ":" + w.path);
+      if (!p) { try { p = await (await fetch("/samples/peaks?src=" + w.src + "&path=" + encodeURIComponent(w.path))).json(); } catch (e) { p = { error: "?" }; }
+        if (!p.error) { p.pk = p.peaks ? p.peaks.match(/../g).map(h => parseInt(h, 16)) : null; peakCache.set(w.src + ":" + w.path, p); } }
+      if (this.token !== token) return;
+      w.d.textContent = p.error ? "" : p.secs < 10 ? p.secs.toFixed(1) + " s" : p.secs.toFixed(0) + " s";
+      if (p.pk) { const g = w.cv.getContext("2d"), W = w.cv.width, H = w.cv.height, bw = W / p.pk.length; g.fillStyle = BL;
+        for (let i = 0; i < p.pk.length; i++) { const h = Math.max(1, Math.pow(p.pk[i] / 255, 0.6) * H * 0.48); g.fillRect(i * bw, H / 2 - h, Math.max(1, bw * 0.7), 2 * h); } }
+    } })();
+  },
+  async post(path, body) { try { return await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json(); } catch (e) { return { error: "the bridge is not answering" }; } },
+  S() { smTopS(); if (this.was !== st.sel + "." + st.set + st.dirty) { this.was = st.sel + "." + st.set + st.dirty; this.render(); } },
+  K() { if (smLib === "kits") this.fill(); },
+  J() { if (smLib === "sets") this.fill(); },
+  P() { if (smLib === "kits") this.render(); },
+  X() { const x = st.xfer; if (!x || !this.files()) return;
+    const pct = x.chunks ? Math.round(x.acked / x.chunks * 100) : 0;
+    this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track + (x.cut ? " (cut to fit)" : "") + (x.kb_per_s ? " · " + x.kb_per_s + " kB/s" : "")
+      : x.name + " → track " + x.track + ": " + x.state + (x.state === "sending" ? " " + pct + "%" : ""), x.state === "failed"); },
+};
+
+V.sm_sys = {
+  build() {
+    view.className = "sm sm-sys";
+    this.kv = el("div", "s-kv"); this.log = el("div", "s-log");
+    const bt = el("div", "s-bt");
+    [["MODULES", () => { location.href = "/"; }], ["SETTINGS", () => { location.href = "/settings"; }], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
+    view.append(this.kv, this.log, bt);
+    this.key = ""; this.L();
+  },
+  B() {
+    const b = st.bridge || {}, pg = b.ping_ms || {}, sm = st.sm, secs = n => (n / 48000).toFixed(0) + " s";
+    const rows = [
+      ["Daisy", st.daisy ? "connected" + (b.port ? "  " + b.port : "") : "not connected", st.daisy ? "" : "bad"],
+      ["firmware", (st.fw || b.firmware || "?") + "   report " + (st.ver || "?") + "   control " + (st.ctl || "?"), st.ver && st.ver !== REPORT_VERSION ? "bad" : ""],
+      ["link", pg.count ? "ping " + pg.avg + " ms avg, " + pg.max + " max, " + (pg.lost || 0) + " lost" : "no ping yet", pg.lost ? "warn" : ""],
+      ["cpu", Math.round(st.cpu / 10) + "%" + (st.ov.mask || st.ov.rev ? "   " + ovText() : ""), st.ov.mask || st.ov.rev ? "bad" : ""],
+      ["loop memory", sm ? secs(sm.free) + " free of " + secs(sm.total) + ", longest piece " + secs(sm.largest) : "-", ""],
+      ["controllers", (b.controllers || []).map(c => c.name).join(", ") || (st.apc ? "APC40 on the Daisy" : "none"), ""],
+      ["card / set", (st.sd ? "card in" : "no card") + "   " + (st.set < 0 ? "set not saved" : "set " + (st.set + 1)) + (st.dirty ? " *" : ""), st.sd ? "" : "warn"],
+      ["this screen", innerWidth + " x " + innerHeight + "   " + location.host, ""],
+    ];
+    const key = JSON.stringify(rows); if (key === this.key) return; this.key = key;
+    this.kv.textContent = "";
+    for (const [k, v, c] of rows) this.kv.append(el("span", "s-k", k), el("span", "s-v " + c, v));
+  },
+  S() { smTopS(); this.B(); },
+  L() { this.log.textContent = st.log.slice(-4).join("\n"); },
+};
+
 /* ---------- shell ---------- */
-const TABS = [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
+const TABS = SMALL ? SM_TABS : [["perform", "Perform", "Perf"], ["steps", "Steps", "Steps"], ["mixer", "Mixer", "Mix"], ["sound", "Sound", "Sound"], ["samples", "Samples", "Smpl"], ["patterns", "Patterns", "Patt"], ["fx", "FX", "FX"], ["system", "System", "Sys"]];
 function buildTabs() {
+  if (SMALL) return smTabs();
   const tb = document.getElementById("tabs"); tb.textContent = "";
   TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === (curName === "map" ? "system" : curName) ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
   if (!PHONE && !SHORT) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
 }
 function show(name) {
-  if (!V[name]) name = "perform";
+  if (!V[name] || SMALL !== name.startsWith("sm_")) name = SMALL ? "sm_steps" : "perform";
   curName = name; cur = V[name];
-  try { localStorage.setItem("apcbox-view", name); } catch (e) { }
+  try { localStorage.setItem(VIEW_KEY, name); } catch (e) { }
   view.textContent = ""; view.removeAttribute("style"); view.className = "";
   cur.build();
   for (const k of ["N", "T", "A", "M", "G", "Q", "O", "Z", "H", "J", "K", "X", "P", "S"]) if (cur[k]) cur[k]();
@@ -1911,18 +2341,18 @@ setInterval(async () => { try { const b = await (await fetch("/health")).json();
 
 /* ---------- remote and keyboard ---------- */
 function remote(a) {
-  if (/^[1-8]$/.test(a)) show(TABS[+a - 1][0]);
+  if (/^[1-8]$/.test(a)) { if (TABS[+a - 1]) show(TABS[+a - 1][0]); }
   else if (a === "left" || a === "right") sel((st.sel + (a === "right" ? 1 : 15)) % 16);
   else if (a === "up" || a === "down") { const f = document.activeElement; if (f && f.classList.contains("pot")) f.dispatchEvent(new KeyboardEvent("keydown", { key: a === "up" ? "ArrowUp" : "ArrowDown", bubbles: true })); else knobStep(a === "up" ? 3 : -3); }
   else if (a === "play" || a === "ok") act(st.playing ? "stop" : "play");
   else if (a === "stop") act("stop");
-  else if (a === "next" || a === "prev") show(TABS[(TABS.findIndex(t => t[0] === curName) + (a === "next" ? 1 : 7)) % 8][0]);
+  else if (a === "next" || a === "prev") show(TABS[(TABS.findIndex(t => t[0] === curName) + (a === "next" ? 1 : TABS.length - 1)) % TABS.length][0]);
   else if (a === "home" || a === "menu" || a === "back") location.href = "/" + (tv ? "?tv=1" : "");
 }
 function knobStep(d) { const t = st.sel, v = Math.max(0, Math.min(127, st.tr[t].v[0] + d)); knobAct(t, 0, v); call("T", t); }   // no pot focused: the selected track's volume
 document.addEventListener("keydown", e => {
   if (e.target.tagName === "INPUT" || e.metaKey || e.ctrlKey) return;
-  if (/^[1-8]$/.test(e.key)) { show(TABS[+e.key - 1][0]); e.preventDefault(); }
+  if (/^[1-8]$/.test(e.key)) { if (TABS[+e.key - 1]) show(TABS[+e.key - 1][0]); e.preventDefault(); }
   else if (e.key === " ") { act(st.playing ? "stop" : "play"); e.preventDefault(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowRight") { remote(e.key === "ArrowLeft" ? "left" : "right"); e.preventDefault(); }
 });
@@ -1935,8 +2365,8 @@ if (window.visualViewport) visualViewport.addEventListener("resize", refit);
 document.addEventListener("gesturestart", e => e.preventDefault());   /* iOS: no pinch zoom over the controls */
 
 buildTop();
-let start = Q.get("v"); try { start = start || localStorage.getItem("apcbox-view"); } catch (e) { }
-show(start || "perform");
+let start = Q.get("v"); try { start = start || localStorage.getItem(VIEW_KEY); } catch (e) { }
+show(start || (SMALL ? "sm_steps" : "perform"));
 connect();
 </script>
 </body>

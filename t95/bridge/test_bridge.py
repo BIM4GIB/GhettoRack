@@ -1803,6 +1803,82 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
 
+    def test_p55_the_small_page_in_a_browser(self):
+        """?small: the 480x320 touch screen on a Pi's header. Six views, dense and zoomed, all inside the panel; controls work"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        shots = os.environ.get("APCBOX_SHOTS")
+        url = "http://127.0.0.1:%d/apcbox?small=1" % self.http
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            self.do("pat 1", "step 1 2 3 2")
+            # the kiosk's Chromium is never under 500 px wide: the panel shows the left 480
+            for name, vp in (("kiosk", {"width": 500, "height": 320}), ("exact", {"width": 480, "height": 320})):
+                pg = b.new_page(viewport=vp)
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+                for zoom in (0, 1):
+                    for v in ("sm_steps", "sm_track", "sm_mix", "sm_pat", "sm_lib", "sm_sys"):
+                        pg.goto(url + "&v=" + v)
+                        pg.wait_for_selector(".tab.on")
+                        pg.evaluate("z => { if (smZoom !== !!z) T.zoom.click(); }", zoom)
+                        pg.wait_for_timeout(300)
+                        out = pg.evaluate("""() => { const bad = [];
+                            for (const e of document.querySelectorAll('.tab, .tb, .b, .cell, .bigpad, .s-c, .s-pp, .s-li, .s-st, .s-nm, .s-ms')) {
+                                const r = e.getBoundingClientRect();
+                                if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+                            return [document.body.className, document.querySelectorAll('.tab').length, document.querySelector('.tab.on').textContent, bad]; }""")
+                        self.assertEqual(out[1:], [6, {"sm_steps": "STEP", "sm_track": "TRK", "sm_mix": "MIX", "sm_pat": "PAT", "sm_lib": "LIB", "sm_sys": "SYS"}[v], []],
+                                         "%s %s zoom %d: something is off the panel" % (name, v, zoom))
+                        self.assertEqual(out[0], "small")
+                        n = pg.evaluate("[document.querySelectorAll('.sm-steps .s-c').length, document.querySelectorAll('.sm-mix .s-st').length, document.querySelectorAll('.sm-pat .s-pp').length]")
+                        if v == "sm_steps": self.assertEqual(n[0], 128 if zoom else 256)
+                        if v == "sm_mix": self.assertEqual(n[1], 9 if zoom else 17)      # the tracks and the master
+                        if v == "sm_pat": self.assertEqual(n[2], 8 if zoom else 64)
+                        if shots:
+                            pg.screenshot(path=os.path.join(shots, "small-%s-%s-%d.png" % (name, v, zoom)))
+                pg.close()
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto(url + "&v=sm_steps")
+            pg.evaluate("() => { if (smZoom) T.zoom.click(); }")
+            pg.wait_for_function("document.querySelectorAll('.sm-steps .s-c.ac').length > 0")    # the accent set above, from the firmware
+            # a step on track 5: page -> firmware -> page
+            cell = pg.locator(".sm-steps .s-r").nth(4).locator(".s-c").nth(6)
+            cell.click()
+            pg.wait_for_function("st.grid[4 * 16 + 6] === '1' && !isBusy('G')")
+            self.assertIn("on", cell.get_attribute("class"))
+            # mute on track 3, select track 7
+            row = pg.locator(".sm-steps .s-r").nth(2)
+            row.locator(".s-ms.m").click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4))
+            pg.wait_for_function("document.querySelectorAll('.sm-steps .s-r')[2].querySelector('.s-ms.m').classList.contains('on')")
+            pg.locator(".sm-steps .s-r").nth(6).locator(".s-nm").click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 6))
+            pg.wait_for_function("document.querySelectorAll('.sm-steps .s-r')[6].classList.contains('sel')")
+            # zoom: the page of the selected track, 8 rows; the page button goes to 9-16
+            pg.locator(".tb.zm", has_text="ZOOM").click()
+            pg.wait_for_function("document.querySelectorAll('.sm-steps .s-r').length === 8")
+            pg.locator(".tb.zm").first.click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 14))
+            pg.wait_for_function("document.querySelector('.sm-steps .s-nm').textContent.startsWith('9 ')")
+            # patterns: a tap queues, the firmware says which
+            pg.locator(".tab", has_text="PAT").click()
+            pg.locator(".sm-pat .s-pp").nth(2).click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(2) == 2 or self.s(3) == 2))
+            # the mixer: a fader drag reaches the firmware
+            pg.locator(".tab", has_text="MIX").click()
+            box = pg.locator(".sm-mix .s-st").nth(1).locator(".s-sf").bounding_box()
+            pg.mouse.click(box["x"] + box["width"] / 2, box["y"] + 8)
+            self.assertTrue(self.box.wait_for(lambda c: int(self.last("T 9 ").split()[2]) > 110))
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("mute 3 2", "track 1", "pat 1")
+
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))
         pk = json.loads(body)

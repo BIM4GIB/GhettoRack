@@ -10,8 +10,8 @@ setup; the code under `t95/` is shared and unchanged.
 The Pi runs the bridge, the settings helper and the kiosk from `main`,
 installed with the stock `t95/bridge/install.sh` and `t95/kiosk/install.sh`.
 A second Seed on its USB runs ApcBox. The screen shows the kiosk and takes
-touch. **No comparison with the T95 has been measured yet**, and the page on
-the 3.5" screen is the TV layout, too small to use.
+touch, with a layout of its own (480x320). **No comparison with the T95 has
+been measured yet.**
 
 ## Hardware and evidence
 
@@ -95,11 +95,18 @@ numbers.
 
 ## Open
 
-- A page for 480x320. The kiosk opens the ApcBox page with `tv=1`; the views
-  in `daisy/tftui.h` are the ones made for this size.
-- Chromium will not make a window narrower than 500 px: 20 px are cut off on
-  the right.
-- The firmware should stop drawing when the screen is on the companion box.
+- The 480x320 layout (`t95/ui/VIEWS.md`, "Small") is on the screen since
+  2026-11-25: the kiosk opens `/apcbox?small=1` (`KIOSK_URL` in
+  `/etc/default/kiosk`). Seen through the kiosk's own browser on the Pi with
+  the real Seed: all six views dense and zoomed, a step, mute, track select,
+  pattern change and a fader reaching the Daisy and coming back. Not seen: how
+  it reads on the panel itself, touch on the small targets (calibration is
+  good to about 12 px, the smallest targets are 14 px), the frame rate with
+  the mixer's meters moving, LIBRARY with files in it.
+- Chromium will not make a window narrower than 500 px. The small layout is
+  drawn in the left 480, so nothing is cut off; the start screen and Settings
+  are still the TV pages.
+- Done in v13.29: the firmware no longer draws when no screen answers.
 - The A/B itself: both Seeds on one firmware version with the same things
   attached, then the T95's measurements repeated here (ping under load,
   bridge CPU, Wi-Fi ping with a page open, page speed, boot time, Bluetooth

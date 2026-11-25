@@ -26,6 +26,10 @@ ExecStartPre=/bin/sh -c 'for i in $(seq 60); do wget -q -O /dev/null http://127.
 # and Chromium shows a dialog instead of the page (seen on the T95, 2026-11-23).
 # Only this unit uses the profile, and it isn't running yet: the lock is stale.
 ExecStartPre=/bin/sh -c 'rm -f /var/lib/kiosk/chromium/SingletonLock /var/lib/kiosk/chromium/SingletonSocket /var/lib/kiosk/chromium/SingletonCookie'
+# KIOSK_URL in the same file opens another page than the selector, e.g. the
+# 480x320 layout on a Pi with the 3.5" screen on its header (pi4/screen):
+#   KIOSK_URL=http://127.0.0.1:8040/apcbox?small=1
+# ($$ in ExecStart: systemd passes a single $ on to the shell)
 # Extra Chromium flags to try without editing this file, e.g.
 #   echo 'CHROMIUM_FLAGS=--ignore-gpu-blocklist --enable-gpu-rasterization' | sudo tee /etc/default/kiosk
 #   sudo systemctl restart kiosk
@@ -34,7 +38,7 @@ ExecStart=/bin/sh -c 'exec /usr/bin/cage -s -- /usr/bin/chromium --kiosk --noerr
   --no-first-run --password-store=basic --disable-translate --disable-features=Translate \
   --check-for-update-interval=31536000 --ozone-platform=wayland --user-data-dir=/var/lib/kiosk/chromium \
   --remote-debugging-port=9222 --remote-debugging-address=127.0.0.1 $CHROMIUM_FLAGS \
-  "http://127.0.0.1:8040/?boot=1&tv=1"'
+  "$${KIOSK_URL:-http://127.0.0.1:8040/?boot=1&tv=1}"'
 Restart=always
 RestartSec=3
 
