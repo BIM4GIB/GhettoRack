@@ -126,6 +126,8 @@ live, with markers and bar lines), pad, list row with waveform.
 - v13.32 (control protocol 11): `file d` and `folder d`, the Daisy's own card
   from a page. The small LIB view has a DAISY CARD tab for it. A list of a
   folder's files is still missing: the firmware says only where the browser is.
+- v13.33 (control protocol 12): `set over n [name]`; `set save` no longer replaces a set.
+  SAVE HERE sends `set over` after its second tap.
 
 ## Layouts
 

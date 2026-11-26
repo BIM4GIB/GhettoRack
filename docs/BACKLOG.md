@@ -26,6 +26,19 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## v13.33: a save doesn't replace a set (on the Pi rig's Seed, flashed 2026-11-26)
+
+- `set save n` from a page or the bridge is refused ("n is used") when it would replace a set:
+  a used slot that isn't the open set, or the open set under another name. `set over n` does
+  it, and both ApcBox layouts send that only after their second tap. Control protocol 12.
+  Rene's set "128bpm" was lost on 2026-11-26 to one `set save 1 <new name>` sent by hand.
+- The Daisy's own SETS menu already asked for a slot that isn't the open one; unchanged.
+- Tested: `daisy/sets_test.cpp` and the page test `test_p7`. On the Pi rig's Seed, with throwaway
+  sets in free slots: `set save` under another name refused, `set save` onto a slot that isn't the
+  open set refused (its tempo stayed), `set over` replaced it; the saved set came back after the
+  flash and was left as it was. The T95 rig's Seed is still on v13.31. Not tried: the pages' second
+  tap on a real Seed.
+
 ## The Pi's settings: NetworkManager (2026-11-26, read-only on the Pi)
 
 - The helper knows NetworkManager (`NmHelper` in `t95/helper/ghettorack_helper.py`): scan, a

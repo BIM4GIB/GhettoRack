@@ -648,7 +648,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 11 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 12 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -721,7 +721,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 11 03 01 02 1") >= 1);
+        CHECK(T95Count("P 12 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -740,7 +740,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 11 ") >= 1);
+        CHECK(T95Count("P 12 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1054,8 +1054,53 @@ int main()
                 U(cmd);
                 wait_idle();
                 CHECK(e.track[4].mute && fabsf(e.global.bpm - 141.f) < 0.01f);
-                // save over it with a new name, rename, transition
+                /* v13.33: "save" doesn't replace a set. Under another name it is refused even on
+                   the open slot; the plain save of the open set goes through; "over" replaces */
+                U("tempo 1200");
+                T95Tick(600);
                 snprintf(cmd, sizeof(cmd), "set save %d second-take", free0 + 1);
+                U(cmd);
+                wait_idle();
+                CHECK(!strcmp(set_list[free0].name, "jam one") && set_dirty);
+                snprintf(cmd, sizeof(cmd), "set save %d", free0 + 1);
+                U(cmd);
+                wait_idle();
+                CHECK(!strcmp(set_list[free0].name, "jam one") && !set_dirty);
+                snprintf(cmd, sizeof(cmd), "set save %d jam one", free0 + 1);   // its own name said: still a plain save
+                U("tempo 1210");
+                T95Tick(600);
+                U(cmd);
+                wait_idle();
+                CHECK(!set_dirty);
+                {
+                    // another used slot: a set that isn't the open one is never replaced by "save"
+                    U("set new other one");
+                    wait_idle();
+                    int other = open_set;
+                    CHECK(other >= 0 && other != free0 && !strcmp(set_list[other].name, "other one"));
+                    U("tempo 1300");
+                    T95Tick(600);
+                    snprintf(cmd, sizeof(cmd), "set save %d", free0 + 1);
+                    U(cmd);
+                    wait_idle();
+                    CHECK(set_dirty && open_set == other);
+                    snprintf(cmd, sizeof(cmd), "set save %d jam one", free0 + 1);
+                    U(cmd);
+                    wait_idle();
+                    CHECK(set_dirty && open_set == other);
+                    snprintf(cmd, sizeof(cmd), "set over %d", free0 + 1);
+                    U(cmd);
+                    wait_idle();
+                    CHECK(!set_dirty && open_set == free0 && !strcmp(set_list[free0].name, "jam one"));
+                    snprintf(cmd, sizeof(cmd), "set delete %d", other + 1);
+                    U(cmd);
+                    T95Tick(50);
+                    CHECK(!set_exists[other]);
+                    U("set over 0");
+                    U("set over 9 x");
+                    wait_idle();
+                }
+                snprintf(cmd, sizeof(cmd), "set over %d second-take", free0 + 1);
                 U(cmd);
                 wait_idle();
                 CHECK(!strcmp(set_list[free0].name, "second-take"));
@@ -1199,7 +1244,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 11 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 12 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */

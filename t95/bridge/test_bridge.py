@@ -1752,7 +1752,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 11)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 12)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -2137,7 +2137,7 @@ class PageControlTest(unittest.TestCase):
             from playwright.sync_api import sync_playwright
         except ImportError:
             self.skipTest("playwright not installed")
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 11)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 12)
         self.do("track 4")
         self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 3))
         name = lambda: self.last("N 3 ")[4:]
@@ -2656,6 +2656,22 @@ class PageControlTest(unittest.TestCase):
             pg.wait_for_selector("button:text-is('DROP CHANGES? TAP AGAIN')")
             pg.click("button:text-is('DROP CHANGES? TAP AGAIN')")
             self.assertTrue(self.box.wait_for(lambda c: self.s(5) == 1410 and self.s(19) & 32 and self.s(55) == 0, 20), self.last("S "))
+            # v13.33: a bare "set save" under another name is refused by the Daisy (a set was lost that way);
+            # the page asks, then sends "set over"; the open set under its own name saves without asking
+            self.do("tempo 1000")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(54) == 1, 5))
+            self.do("set save 1 other name")
+            time.sleep(1.0)
+            self.assertEqual((self.last("J 0 ").split(" ", 7)[7], self.s(54)), ("night jam-", 1))
+            pg.locator(".setrow").first.click()
+            pg.click("button:text-is('SAVE HERE')")
+            self.assertTrue(self.box.wait_for(lambda c: self.s(54) == 0 and self.s(55) == 0, 20), self.last("S "))
+            self.assertEqual(self.last("J 0 ").split(" ", 6)[3], "1000")
+            pg.fill("input[type=text]", "take two")
+            pg.click("button:text-is('SAVE HERE')")
+            pg.click("button:text-is('OVERWRITE? TAP AGAIN')")
+            pg.wait_for_function("document.querySelector('.setrow.has .nm2').textContent === 'take two'", timeout=15000)
+            self.assertTrue(self.box.wait_for(lambda c: self.s(55) == 0, 20))
             # rename, change the transition, delete (two taps)
             pg.fill("input[type=text]", "second")
             pg.click("button:text-is('RENAME')")
@@ -3643,6 +3659,7 @@ class HttpsTest(unittest.TestCase):
             if os.path.exists(os.path.join(d, "tls.crt")):
                 try:
                     ctx = _ssl.create_default_context(cafile=os.path.join(d, "tls.crt"))
+                    ctx.check_hostname = False      # the certificate names the box, not the address the test comes by; it is still verified
                     with urllib.request.urlopen("https://127.0.0.1:%d/classic" % https, context=ctx, timeout=5) as r:
                         body = r.read()
                     break
@@ -3654,6 +3671,8 @@ class HttpsTest(unittest.TestCase):
         caps = json.loads(urllib.request.urlopen("https://127.0.0.1:%d/caps" % https, context=ctx, timeout=5).read())
         self.assertEqual(caps["https_port"], https)
         self.assertEqual(oct(os.stat(os.path.join(d, "tls.key")).st_mode & 0o777), "0o600")
+        host = socket.gethostname().split(".")[0]
+        self.assertEqual(open(os.path.join(d, "tls.san")).read(), "DNS:%s,DNS:%s.local,IP:10.42.0.1" % (host, host))
 
 
 

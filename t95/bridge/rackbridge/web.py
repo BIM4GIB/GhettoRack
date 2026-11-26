@@ -73,7 +73,7 @@ def tls_context(directory, host=None):
             log.warning("own.crt / own.key didn't load (%s): using the box's own certificate", type(e).__name__)
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     crt, key = os.path.join(directory, "tls.crt"), os.path.join(directory, "tls.key")
-    host = host or socket.gethostname()
+    host = (host or socket.gethostname()).split(".")[0]     # some systems give the name with its domain
     want = ",".join(["DNS:" + host, "DNS:" + host + ".local", "IP:" + TLS_HOTSPOT])
     stamp = os.path.join(directory, "tls.san")
     have = open(stamp).read() if os.path.exists(stamp) else ""

@@ -4495,6 +4495,7 @@ bool BoxUiCommand(const char* c, uint32_t now)
         const char* a2 = c + 4;
         char        name[kSetNameLen + 4] = "";
         int         slot = 0, len = 0;
+        bool        over = false;
         auto        take_name = [&](const char* s) {
             while(*s == ' ')
                 s++;
@@ -4518,9 +4519,19 @@ bool BoxUiCommand(const char* c, uint32_t now)
             else
                 Popup("%02d is empty", slot);
         }
-        else if(sscanf(a2, "save %d%n", &slot, &len) == 1 && slot >= 1 && slot <= kSetSlots)
+        else if((over = (strncmp(a2, "over ", 5) == 0)), sscanf(a2 + (over ? 5 : 0), over ? "%d%n" : "save %d%n", &slot, &len) == 1
+                && slot >= 1 && slot <= kSetSlots)
         {
-            take_name(a2 + len);
+            take_name(a2 + (over ? 5 : 0) + len);
+            /* v13.33: "save" never replaces another set. A used slot takes it only when it is
+               the open set under its own name (a plain save); anything else is "set over",
+               which a page sends after asking. A set was lost to one bare "set save". */
+            if(!over && set_exists[slot - 1]
+               && (slot - 1 != open_set || (name[0] && strcmp(name, set_list[slot - 1].name) != 0)))
+            {
+                Popup("%02d is used", slot);
+                return true;
+            }
             if(!name[0])
             {
                 if(set_exists[slot - 1])

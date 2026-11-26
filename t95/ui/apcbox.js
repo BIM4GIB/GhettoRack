@@ -751,10 +751,13 @@ const Sets = {
   },
   op(k) {
     const i = setSel, nm = cleanName(this.name.value), ex = st.sets[i] && st.sets[i].exists;
-    if ((k === "delete" || (k === "save" && ex && i !== st.set) || (k === "load" && st.dirty)) && setConfirm !== k) { setConfirm = k; return this.J(); }
+    /* a save that replaces a set (another slot, or the open one under a new name) asks first; from
+       v13.33 the Daisy refuses it as "set save" and takes it as "set over" */
+    const repl = ex && (i !== st.set || (!!nm && nm !== st.sets[i].name));
+    if ((k === "delete" || (k === "save" && repl) || (k === "load" && st.dirty)) && setConfirm !== k) { setConfirm = k; return this.J(); }
     setConfirm = "";
     if (k === "load") { if (ex) act("set load " + (i + 1)); }
-    else if (k === "save") act(("set save " + (i + 1) + " " + nm).trim());
+    else if (k === "save") act(((repl && st.ctl >= 12 ? "set over " : "set save ") + (i + 1) + " " + nm).trim());
     else if (k === "new") act(("set new " + nm).trim());
     else if (k === "name") { if (ex && nm) act("set name " + (i + 1) + " " + nm); }
     else if (k === "delete") { if (ex) act("set delete " + (i + 1)); }
@@ -1768,7 +1771,7 @@ V.sm_lib = {
       mk("UNDO KIT", () => act("lrec undo"), "", st.lp.undo < 101);
     } else {
       mk("LOAD", () => { act("set load " + (it.set + 1)); this.say("set " + (it.set + 1) + ": switches on the bar"); }, "go", !it || !it.exists);
-      mk(this.sure === "save" ? "SURE?" : "SAVE HERE", () => { if (this.sure !== "save" && it.exists) { this.sure = "save"; return this.render(); } act("set save " + (it.set + 1)); this.sure = ""; this.say("saving to slot " + (it.set + 1)); this.render(); }, this.sure === "save" ? "warn" : "", !it);
+      mk(this.sure === "save" ? "SURE?" : "SAVE HERE", () => { if (this.sure !== "save" && it.exists) { this.sure = "save"; return this.render(); } act((it.exists && st.ctl >= 12 ? "set over " : "set save ") + (it.set + 1)); this.sure = ""; this.say("saving to slot " + (it.set + 1)); this.render(); }, this.sure === "save" ? "warn" : "", !it);
       mk("", null, "gap", true);
     }
     const nav = el("div", "s-nav"), pv = el("button", "b", "‹"), nx = el("button", "b", "›");
