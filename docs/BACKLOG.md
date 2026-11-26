@@ -4,6 +4,28 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.31: the box starts with a demo set (on the Pi rig's Seed, 2026-11-25)
+
+`daisy/release/ApcBox.bin` is v13.31. `daisy/box.cpp` only (`DemoSet()`, where
+`DemoPattern()` was); no report line changed.
+
+- With nothing saved on the card, and after a full reset, the box used to hold
+  one four-on-the-floor beat on A1. Now: one track in eight stages on A1 to A8
+  at 128 BPM. A1 kick, hats, bass; A2 clap; A3 open hats and the lead; A4
+  everything; A5 a broken kick; A6 the breakdown; A7 a snare roll; A8 the drop.
+  808 drums on tracks 1-7, a 303 bass on 8, the 909 on 9-15, a 303 lead on 16
+  (square, into the delay). All from the firmware: no card needed.
+- The 303s are tracks 8 and 16, the last of each page: the box's desktop test
+  records a loop on track 7.
+- A set or project saved on the card still loads instead, as before.
+- `daisy/sets_test.cpp`: 128 BPM, a kick in every stage but A6, the bass in
+  all, the lead from A3, bank B empty, the two 303s and their notes, accents
+  and slides, and that a full reset brings it back.
+- Seen on the Pi rig's Seed through the bridge: 128.0 BPM, tracks 8 and 16
+  as 303s, A1's steps, playing with meters moving, CPU 15 %, no overload.
+  Rene, through the Pi's AV socket: sounds good. Written without hearing it;
+  not tuned further. The T95 rig's Seed is still on v13.30.
+
 ## v13.30: the encoder with no colour screen, named on the OLED (on the Pi rig's Seed, 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.30. `daisy/box.cpp` (shared with the Mac

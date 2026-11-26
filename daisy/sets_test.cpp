@@ -397,7 +397,8 @@ int main()
     CHECK(Exists("sets/01/04 tone b.wav"));
     CHECK(Exists("sets/01/07 loop.wav"));
     CHECK(!Exists("sets/01/06 loop.wav"));
-    CHECK(set_list[0].samples == 2 && set_list[0].loops == 1 && set_list[0].synths == 1);
+    /* 3 synths: the one made above and the two 303s the box starts with (the demo set, tracks 8 and 16) */
+    CHECK(set_list[0].samples == 2 && set_list[0].loops == 1 && set_list[0].synths == 3);
     CHECK(!strcmp(set_list[0].name, "128bpm"));
 
     /* save again, unchanged: no sound rewritten (mtime check via delete) */
@@ -760,6 +761,27 @@ int main()
         T95Frame("\x1bU back\n");
         T95Frame("\x1bU turn 1\n");
         SelectTrack(0);
+
+        /* v13.31: what the box starts with is the demo set. Eight patterns on bank A, each with a kick or
+           (the breakdown, A6) without; 303s on tracks 8 and 16 with notes; 128 BPM. FullReset brings it back */
+        {
+            Engine fresh_e; (void)fresh_e;
+            auto count = [&](int pat, int tr) { int n = 0; for(int st = 0; st < kSteps; st++) n += e.GetStep(pat, tr, st) ? 1 : 0; return n; };
+            FullReset(now_ms);
+            WaitIdle();
+            CHECK(e.global.bpm == 128.f);
+            for(int pat = 0; pat < 8; pat++)
+            {
+                CHECK((count(pat, 0) > 0) == (pat != 5));        // A6 is the breakdown
+                CHECK(count(pat, 7) >= 8);                         // the bass line, every stage
+            }
+            CHECK(count(0, 15) == 0 && count(2, 15) > 0);          // the lead comes in at A3
+            CHECK(count(8, 0) == 0);                               // bank B is empty
+            CHECK(e.IsSynth(7) && e.IsSynth(15) && !e.IsSynth(6) && !e.IsSynth(14));
+            CHECK(e.GetNote(0, 7, 0) == 36 && e.GetNote(3, 15, 0) == 72);
+            CHECK(e.GetStep(0, 7, 3) == kStepAccent && e.GetSlide(0, 7, 5));
+            SelectTrack(0);
+        }
 
         /* v13.30: a box with no colour screen. A push steps through the three
            jobs a turn has (not five views that can't be seen), back goes to

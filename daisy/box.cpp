@@ -3679,23 +3679,130 @@ void Report(uint32_t now)
 /* ================================================================== */
 /* Boot defaults                                                        */
 
-void DemoPattern()
+/* What the box plays when it is switched on with nothing saved: one track in
+   eight stages, A1 to A8, at 128 BPM. Step through the patterns and it builds:
+   A1 kick, hats and bass, A2 the clap, A3 open hats and the lead, A4 everything,
+   A5 a broken kick, A6 the breakdown (no kick), A7 the snare roll, A8 the drop.
+   808 drums on tracks 1-7, a 303 on 8 (bass, saw); the 909 on 9-15 for the kick
+   layer, the roll, a second open hat and a rim, a 303 on 16 (lead, square, into
+   the delay). The 303s are the last track of each page.
+   All of it is in the firmware: no card needed. */
+constexpr int kDemoBass = 7, kDemoLead = 15;
+
+void DemoSet()
 {
-    for(int s : {0, 4, 8, 12})
-        eng->SetStep(0, 0, s, kStepAccent);
-    eng->SetStep(0, 1, 4, kStepAccent);
-    eng->SetStep(0, 1, 12, kStepAccent);
-    for(int s = 0; s < 16; s += 2)
-        if(s != 14)
-            eng->SetStep(0, 2, s, (s % 4) ? kStepAccent : kStepOn);
-    eng->SetStep(0, 3, 14, kStepOn);
-    eng->SetStep(0, 4, 12, kStepOn);
-    eng->track[2].vol = 0.6f;
-    eng->track[3].vol = 0.6f;
-    eng->track[4].rev = 0.5f;
+    /* 16 steps as bits, step 1 on the left: 0x8888 is four on the floor */
+    auto hits = [](int pat, int tr, uint16_t on, uint16_t accent = 0) {
+        for(int st = 0; st < kSteps; st++)
+        {
+            const uint16_t bit = (uint16_t)(0x8000u >> st);
+            if((on | accent) & bit)
+                eng->SetStep(pat, tr, st, (accent & bit) ? kStepAccent : kStepOn);
+        }
+    };
+    /* a 303 line: a MIDI note a step (0 = rest), accents, and slides into the next note */
+    auto line = [](int pat, int tr, const int8_t* notes, uint16_t accent, uint16_t slide) {
+        for(int st = 0; st < kSteps; st++)
+        {
+            if(!notes[st])
+                continue;
+            const uint16_t bit = (uint16_t)(0x8000u >> st);
+            eng->SetStep(pat, tr, st, (accent & bit) ? kStepAccent : kStepOn);
+            eng->SetNote(pat, tr, st, notes[st]);
+            eng->SetSlide(pat, tr, st, (slide & bit) != 0);
+        }
+    };
+    enum { K, S, CH, OH, CP, TM, K9 = 8, S9, CH9, OH9, CP9, TM9, RM9, RD9 };
+    /* C minor: C2 36, Eb 39, G 43, Bb 46, C3 48, Eb3 51 */
+    static const int8_t bassA[16] = {36, 0, 36, 48, 0, 36, 39, 0, 36, 0, 48, 36, 0, 43, 46, 0};
+    static const int8_t bassB[16] = {36, 36, 0, 48, 36, 0, 51, 48, 0, 36, 43, 0, 46, 48, 0, 39};
+    static const int8_t lead1[16] = {0, 0, 72, 0, 0, 0, 75, 0, 0, 72, 0, 0, 79, 0, 0, 0};
+    static const int8_t lead2[16] = {72, 0, 75, 72, 0, 79, 0, 75, 72, 0, 82, 0, 79, 75, 0, 72};
+    static const int8_t lead3[16] = {84, 72, 0, 75, 79, 0, 72, 82, 0, 79, 75, 0, 72, 84, 0, 79};
+    auto bass = [&](int pat, bool b) { line(pat, kDemoBass, b ? bassB : bassA, b ? 0x1208 : 0x1022, b ? 0x0208 : 0x0404); };
+
+    /* A1: kick, offbeat hats, the bass line */
+    hits(0, K, 0x8888, 0x8000);
+    hits(0, CH, 0x2222);
+    bass(0, false);
+    /* A2: + clap, sixteenth hats */
+    hits(1, K, 0x8888, 0x8888);
+    hits(1, CH, 0xFFFF, 0x2222);
+    hits(1, CP, 0x0808);
+    bass(1, false);
+    /* A3: + open hats, a rim, the lead comes in */
+    hits(2, K, 0x8888, 0x8888);
+    hits(2, CH, 0xDDDD);
+    hits(2, OH, 0x2222);
+    hits(2, CP, 0x0808);
+    hits(2, RM9, 0x1240);
+    bass(2, false);
+    line(2, kDemoLead, lead1, 0x0008, 0);
+    /* A4: everything */
+    hits(3, K, 0x8888, 0x8888);
+    hits(3, CH, 0xFFFF, 0x2222);
+    hits(3, OH, 0x2222);
+    hits(3, CP, 0x0808);
+    hits(3, TM, 0x0012);
+    hits(3, OH9, 0xAAAA);
+    bass(3, true);
+    line(3, kDemoLead, lead2, 0x0420, 0x2008);
+    /* A5: the kick breaks up, a snare with a ghost note */
+    hits(4, K, 0x8892, 0x8080);
+    hits(4, S, 0x0908, 0x0808);
+    hits(4, CH, 0xFFFF, 0x2222);
+    hits(4, OH, 0x2222);
+    hits(4, RM9, 0x1240);
+    bass(4, true);
+    line(4, kDemoLead, lead1, 0x0008, 0);
+    /* A6: breakdown, no kick */
+    hits(5, CH, 0x2222);
+    hits(5, CP, 0x0808);
+    hits(5, OH9, 0x8888);
+    bass(5, false);
+    line(5, kDemoLead, lead2, 0x0420, 0x2008);
+    /* A7: the build, a 909 snare roll into the bar line */
+    hits(6, K, 0x8888);
+    hits(6, S9, 0x88AF, 0x000F);
+    hits(6, CH, 0xFFFF);
+    bass(6, false);
+    line(6, kDemoLead, lead2, 0x0420, 0x2008);
+    /* A8: the drop */
+    hits(7, K, 0x8888, 0x8888);
+    hits(7, K9, 0x8888);
+    hits(7, CH, 0xFFFF, 0x2222);
+    hits(7, OH, 0x2222);
+    hits(7, CP, 0x0808);
+    hits(7, TM, 0x0205);
+    hits(7, OH9, 0xAAAA);
+    bass(7, true);
+    line(7, kDemoLead, lead3, 0x8104, 0x1040);
+
+    TrackParams* t = eng->track;
+    t[K].vol = 0.85f, t[K].drive = 0.15f;
+    t[S].vol = 0.7f, t[S].rev = 0.2f;
+    t[CH].vol = 0.5f, t[CH].pan = 0.45f;
+    t[OH].vol = 0.5f, t[OH].pan = 0.55f, t[OH].decay = 0.6f;
+    t[CP].vol = 0.65f, t[CP].rev = 0.4f;
+    t[TM].vol = 0.6f, t[TM].pan = 0.3f, t[TM].dly = 0.25f;
+    t[kDemoBass].vol = 0.7f, t[kDemoBass].drive = 0.1f;
+    t[kDemoBass].acid.cutoff = 0.22f, t[kDemoBass].acid.reso = 0.72f, t[kDemoBass].acid.envmod = 0.6f;
+    t[kDemoBass].acid.decay = 0.28f, t[kDemoBass].acid.accent = 0.85f;
+    t[kDemoLead].vol = 0.5f, t[kDemoLead].pan = 0.62f, t[kDemoLead].dly = 0.45f, t[kDemoLead].rev = 0.25f;
+    t[kDemoLead].acid.cutoff = 0.42f, t[kDemoLead].acid.reso = 0.86f, t[kDemoLead].acid.envmod = 0.75f;
+    t[kDemoLead].acid.decay = 0.4f, t[kDemoLead].acid.accent = 0.8f, t[kDemoLead].acid.slide = 0.35f;
+    t[kDemoLead].acid.wave = 1.f;
+    t[K9].vol = 0.6f;
+    t[S9].vol = 0.6f, t[S9].rev = 0.25f;
+    t[RM9].vol = 0.5f, t[RM9].pan = 0.7f, t[RM9].dly = 0.35f;
+    t[OH9].vol = 0.4f, t[OH9].pan = 0.6f, t[OH9].decay = 0.5f;
+    eng->global.bpm      = 128.f;
+    eng->global.swing    = 0.08f;
+    eng->global.rev_size = 0.6f;
+    eng->global.dly_fb   = 0.4f;
 }
 
-/** Everything back to how it boots: demo beat, built-in kit 1,
+/** Everything back to how it boots: the demo set, the built-in kits,
  *  default knobs, pattern A1, transport stopped */
 void FullReset(uint32_t now)
 {
@@ -3733,9 +3840,11 @@ void FullReset(uint32_t now)
     for(int c = 0; c < 8; c++)
         fader_live[c] = false; // the faders don't match the defaults
     eng->QueuePattern(0);
-    DemoPattern();
+    DemoSet();
     LoadKit(0, false, 0);
     LoadKit(1, false, 1); // tracks 9-16: 909
+    QueueLoad(kDemoBass, kSynthPath, false); // the demo set's two 303s, after the kit
+    QueueLoad(kDemoLead, kSynthPath, false);
     flash_red_until = now + 600;
     MapDefault(); // and the buttons do what's printed on them again
     MapChanged();
@@ -3762,7 +3871,12 @@ void BoxInit(Platform* p, Engine* e)
     BuildLedTable();
     MapLedMeta();
     MapDefault();
-    DemoPattern();
+    DemoSet();
+    for(int t : {kDemoBass, kDemoLead}) // its two 303s
+    {
+        snprintf(slot_path[t], kPathLen, "%s", kSynthPath);
+        eng->SetSynth(t, true);
+    }
 }
 
 void BoxStorageReady(bool load_project)
