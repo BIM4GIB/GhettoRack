@@ -123,8 +123,9 @@ live, with markers and bar lines), pad, list row with waveform.
   the top bar of every view has a red "OVERLOAD: 4 of 8 303s out", the mixer
   strips of those tracks are dimmed with a red outline, and System > Links
   names the tracks. The Daisy's own screen shows the same line in a red bar.
-- Still missing in the firmware: sample browser on the Daisy's card from the
-  T95.
+- v13.32 (control protocol 11): `file d` and `folder d`, the Daisy's own card
+  from a page. The small LIB view has a DAISY CARD tab for it. A list of a
+  folder's files is still missing: the firmware says only where the browser is.
 
 ## Layouts
 
@@ -149,7 +150,7 @@ things by name.
 | TRK | the selected track: 16 big steps (303: with notes), waveform, 4 pots at a time (SOUND 1, SOUND 2, MIX), HEAR, mute, solo | the same |
 | MIX | 16 strips: pan and two sends as bars, fader with a meter, mute, solo, crossfader side; master | 8 strips with pan and reverb pots; master |
 | PAT | all 64 patterns, the 8 FX as hold pads, copy / clear / undo | one bank of 8 with a bank row, big FX pads |
-| LIB | LIBRARY and CARD (the box's files, a waveform each, TO TRACK), KITS (load on 1-8 / 9-16, undo), SETS (load, save here) | the same |
+| LIB | LIBRARY and BOX CARD (files on the box and on the card in its slot: a waveform each, TO TRACK), DAISY CARD (the samples on the Daisy's own card: a folder and a file stepped with ‹ ›, each step loads into the selected track, UNDO; says so when the Daisy has no card), KITS (load on 1-8 / 9-16, undo), SETS (load, save here) | the same |
 | SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, RELOAD | the same |
 
 The 1-8 / 9-16 button selects the same track on the other page. ZOOM is kept

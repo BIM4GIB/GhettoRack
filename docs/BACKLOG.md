@@ -4,6 +4,28 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.32: the Daisy's card from a page (on the Pi rig's Seed, 2026-11-26)
+
+`daisy/release/ApcBox.bin` is v13.32. `daisy/box.cpp`, `ports.h` (control
+protocol 11). No report line changed.
+
+- The samples on the Daisy's own card could only be reached with the encoder
+  or the APC40: a page had no action for it, and on the 3.5" screen the card
+  was a black box (Rene). Two page actions now: `file d` (d files on, into the
+  selected track, on into the next folder past an end) and `folder 1 / -1` (the
+  next folder that has files). `B` / `BF` / `BN` already said where the browser
+  is.
+- The small page: LIB > DAISY CARD, with the card's state, the folder and the
+  file by name and number, ‹ › (and ‹‹ ›› for ten files), HEAR TRACK, UNDO.
+  LIB > CARD is now BOX CARD: it was always the card in the box's own slot.
+- `sets_test.cpp` (folder steps never land in an empty one, a file loads after
+  the 120 ms wait, back, undo, bad values ignored) and `test_p58` in the bridge
+  tests (the tab against the firmware's control code, with a card of samples).
+- Seen on the Pi rig: 20 folders; two folder steps to `clap`, two file steps to
+  "Clap 707" in track 1 on the Daisy, UNDO back to the 808 kick; the saved set
+  loaded again afterwards so nothing stays marked unsaved.
+- Not there: a list of a folder's files (needs new report lines).
+
 ## Open from the rig, 2026-11-26
 
 - **A card put back while the Seed runs is not found** (Pi rig's Seed, v13.31): `SdPoll` in

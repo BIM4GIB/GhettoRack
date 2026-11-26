@@ -1683,11 +1683,45 @@ V.sm_lib = {
   build() {
     view.className = "sm sm-lib";
     const tabs = el("div", "s-lt");
-    [["lib", "LIBRARY"], ["sd", "CARD"], ["kits", "KITS"], ["sets", "SETS"]].forEach(([k, n]) => { const b = el("button", "b s-tg" + (smLib === k ? " on" : ""), n); b.onclick = () => { smLib = k; smLibPage = 0; show(curName); }; tabs.appendChild(b); });
+    /* LIBRARY and BOX CARD: files on the box (its own storage, the card in its slot). DAISY CARD: the samples
+       on the Daisy's own card. KITS and SETS are on the Daisy's card too */
+    [["lib", "LIBRARY"], ["sd", "BOX CARD"], ["dcard", "DAISY CARD"], ["kits", "KITS"], ["sets", "SETS"]].forEach(([k, n]) => { const b = el("button", "b s-tg" + (smLib === k ? " on" : ""), n); b.onclick = () => { smLib = k; smLibPage = 0; show(curName); }; tabs.appendChild(b); });
     this.list = el("div", "s-ll"); this.side = el("div", "s-ls"); this.msg = el("div", "s-msg");
+    this.items = []; this.pick = -1; this.sure = ""; this.token = 0; this.dc = null;
+    if (smLib === "dcard") { view.append(tabs, this.card(), this.msg); return this.R(); }
     view.append(tabs, this.list, this.side, this.msg);
-    this.items = []; this.pick = -1; this.sure = ""; this.token = 0;
     if (smLib === "lib" || smLib === "sd") this.load(); else this.fill();
+  },
+  /* The samples on the Daisy's card: a folder and a file, stepped with ‹ ›. Each file step loads that sample into
+     the selected track at once (as the encoder does), so it is heard by playing the track. Control protocol 11 */
+  card() {
+    const box = el("div", "s-dc"), d = this.dc = { n: 0 };
+    const step = cmd => () => { if (st.ctl < 11) return this.say("needs firmware v13.32 or newer on the Daisy", true); act(cmd, "dc" + (d.n++)); };
+    const row = (label, cmd, big) => { const r = el("div", "s-dcr"), a = el("button", "b", "‹"), z = el("button", "b", "›"), mid = el("div", "s-dcm"), cnt = el("span", "s-d"), nm = el("span", "s-dcn");
+      a.onclick = step(cmd + " -1"); z.onclick = step(cmd + " 1"); mid.append(el("span", "s-d", label), cnt, nm); r.append(a, mid, z);
+      if (big) { const a10 = el("button", "b", "‹‹"), z10 = el("button", "b", "››"); a10.onclick = step(cmd + " -10"); z10.onclick = step(cmd + " 10"); r.prepend(a10); r.append(z10); r.classList.add("big"); }
+      box.appendChild(r); return { nm, cnt, btns: [...r.querySelectorAll("button")] }; };
+    d.state = el("div", "s-dcs"); box.appendChild(d.state);
+    d.folder = row("folder", "folder", false); d.file = row("file", "file", true);
+    const foot = el("div", "s-dcf");
+    d.hear = el("button", "b", ""); d.hear.onclick = () => act(`audition ${st.sel + 1}`);
+    d.undo = el("button", "b", "UNDO"); d.undo.onclick = () => act("lrec undo");
+    foot.append(d.hear, d.undo); box.appendChild(foot);
+    return box;
+  },
+  R() {
+    const d = this.dc; if (!d) return;
+    const b = st.br || { folder: 0, folders: 0, file: -1, files: 0 }, old = st.ctl && st.ctl < 11, none = !st.sd;
+    d.state.textContent = old ? "The Daisy's firmware is too old for this: flash v13.32" : none ? "No card in the Daisy. Put one in, then restart the Daisy: it does not find a card put in while it runs"
+      : "Card in: " + b.folders + " folders. A step loads that sample into track " + (st.sel + 1) + " at once";
+    d.state.classList.toggle("bad", !!(old || none));
+    const base = n => (n || "").replace(/^.*\//, "");
+    d.folder.nm.textContent = none ? "-" : base(st.brF) || "-"; d.folder.cnt.textContent = b.folders ? (b.folder + 1) + " / " + b.folders : "";
+    d.file.nm.textContent = none || !st.brN || st.brN === "-" ? (b.files ? "tap › for the first" : "none here: folder ›") : st.brN.replace(/\.[a-z0-9]+$/i, "");
+    d.file.cnt.textContent = b.files ? (b.file >= 0 ? b.file + 1 : "-") + " / " + b.files : "";
+    for (const x of d.folder.btns.concat(d.file.btns)) x.disabled = !!(old || none);
+    for (const x of d.file.btns) x.disabled = x.disabled || !b.files;
+    d.hear.textContent = "HEAR TRACK " + (st.sel + 1); d.undo.disabled = !st.lp.undo;    /* any undo the Daisy has: a browsed sample is one */
   },
   files() { return smLib === "lib" || smLib === "sd"; },
   say(t, bad) { this.msg.textContent = t || ""; this.msg.classList.toggle("bad", !!bad); },
@@ -1752,10 +1786,10 @@ V.sm_lib = {
     } })();
   },
   async post(path, body) { try { return await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json(); } catch (e) { return { error: "the bridge is not answering" }; } },
-  S() { smTopS(); if (this.was !== st.sel + "." + st.set + st.dirty) { this.was = st.sel + "." + st.set + st.dirty; this.render(); } },
+  S() { smTopS(); if (this.dc) return this.R(); if (this.was !== st.sel + "." + st.set + st.dirty) { this.was = st.sel + "." + st.set + st.dirty; this.render(); } },
   K() { if (smLib === "kits") this.fill(); },
   J() { if (smLib === "sets") this.fill(); },
-  P() { if (smLib === "kits") this.render(); },
+  P() { if (this.dc) return this.R(); if (smLib === "kits") this.render(); },
   X() { const x = st.xfer; if (!x || !this.files()) return;
     const pct = x.chunks ? Math.round(x.acked / x.chunks * 100) : 0;
     this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track + (x.cut ? " (cut to fit)" : "") + (x.kb_per_s ? " · " + x.kb_per_s + " kB/s" : "")
@@ -1811,7 +1845,7 @@ function show(name) {
   try { localStorage.setItem(VIEW_KEY, name); } catch (e) { }
   view.textContent = ""; view.removeAttribute("style"); view.className = "";
   cur.build();
-  for (const k of ["N", "T", "A", "M", "G", "Q", "O", "Z", "H", "J", "K", "X", "P", "S"]) if (cur[k]) cur[k]();
+  for (const k of ["N", "T", "A", "M", "G", "Q", "O", "Z", "H", "J", "K", "X", "P", "R", "S"]) if (cur[k]) cur[k]();
   buildTabs();
 }
 function call(k, arg) { if (cur && cur[k]) cur[k](arg); }
@@ -1842,6 +1876,10 @@ function line(l) {
     case "J": { const f = rest.split(" "), i = +f[0]; if (!(i >= 0 && i < 8)) break;
       st.sets[i] = f[1] === "1" ? { exists: true, bpm: +f[2] / 10, samples: +f[3], loops: +f[4], synths: +f[5], name: f.slice(6).join(" ") } : { exists: false }; call("J"); break; }
     case "JT": { const i = rest.indexOf(" "); st.trans = +rest.slice(0, i); st.transName = rest.slice(i + 1); call("J"); break; }
+    /* where the Daisy's own sample browser is (its card): folder and file by number, and their names */
+    case "B": { const f = rest.split(" ").map(Number); if (f.length >= 4) { st.br = { folder: f[0], folders: f[1], file: f[2], files: f[3] }; call("R"); } break; }
+    case "BF": st.brF = rest; call("R"); break;
+    case "BN": st.brN = rest; call("R"); break;
     case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
     case "KP": { const f = rest.split(" ").map(Number); st.kitPg = [f[0], f[1]]; st.kitNb = f.length > 3 ? f[3] : null; if (st.kits.length > f[2]) st.kits.length = f[2]; call("K"); break; }
     case "CK": st.ext = rest[0] === "1"; topStatus(); break;

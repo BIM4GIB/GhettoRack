@@ -1706,6 +1706,11 @@ class PageControlTest(unittest.TestCase):
         make_wav(os.path.join(cls.lib, "a kick.wav"), secs=0.4, hz=60)
         make_wav(os.path.join(cls.lib, "b tone.wav"), secs=1.0, hz=440)
         make_wav(os.path.join(cls.lib, "breaks", "loop.wav"), secs=2.0, hz=220)
+        # samples on the Daisy's own card, for the page's DAISY CARD tab (control protocol 11)
+        for folder, names in (("bass", ("deep.wav",)), ("drums", ("a kick.wav", "b snare.wav"))):
+            os.makedirs(os.path.join(cls.card, "samples", folder))
+            for i, n in enumerate(names):
+                make_wav(os.path.join(cls.card, "samples", folder, n), secs=0.2, hz=110 * (i + 1))
         cls.sim = subprocess.Popen([SIM, link, cls.card], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         cls.addClassCleanup(cls.sim.kill)
         end = time.time() + 5
@@ -1747,7 +1752,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 10)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 11)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -2102,6 +2107,62 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
         self.post("/clock", {"on": False})
+
+    def test_p58_small_daisy_card_tab(self):
+        """LIB > DAISY CARD on the small page: the samples on the Daisy's own card, stepped by folder and by file (control protocol 11)"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 11)
+        self.do("track 4")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 3))
+        name = lambda: self.last("N 3 ")[4:]
+        was = name()
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            pg.goto("http://127.0.0.1:%d/apcbox?small=1&v=sm_lib" % self.http)
+            pg.wait_for_selector(".sm-lib .s-lt")
+            self.assertEqual(pg.locator(".sm-lib .s-lt .b").all_text_contents(), ["LIBRARY", "BOX CARD", "DAISY CARD", "KITS", "SETS"])
+            pg.locator(".s-lt .b", has_text="DAISY CARD").click()
+            pg.wait_for_function("document.querySelector('.s-dcs') && document.querySelector('.s-dcs').textContent.startsWith('Card in')")
+            out = pg.evaluate("""() => { const bad = [];
+                for (const e of document.querySelectorAll('.tab, .tb, .b, .s-dcm, .s-dcs')) { const r = e.getBoundingClientRect();
+                    if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+                return bad; }""")
+            self.assertEqual(out, [])
+            folder = lambda: pg.locator(".s-dcr").nth(0).locator(".s-dcn").text_content()
+            file_ = lambda: pg.locator(".s-dcr").nth(1).locator(".s-dcn").text_content()
+            self.assertIn("track 4", pg.locator(".s-dcs").text_content())
+            # folder ›: the first folder with files, by name and number; the top folder (no files) is passed over
+            pg.locator(".s-dcr").nth(0).locator(".b").nth(1).click()
+            pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'bass'")
+            self.assertEqual(pg.locator(".s-dcr").nth(0).locator(".s-d").nth(1).text_content(), "2 / 3")
+            pg.locator(".s-dcr").nth(0).locator(".b").nth(1).click()
+            pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'drums'")
+            # file ›: the sample is in the selected track, on the Daisy, and named on the page
+            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
+            self.assertTrue(self.box.wait_for(lambda c: name() == "a kick.wav", 5), name())
+            pg.wait_for_function("document.querySelectorAll('.s-dcr')[1].querySelector('.s-dcn').textContent === 'a kick'")
+            self.assertEqual(pg.locator(".s-dcr").nth(1).locator(".s-d").nth(1).text_content(), "1 / 2")
+            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
+            self.assertTrue(self.box.wait_for(lambda c: name() == "b snare.wav", 5), name())
+            # past the folder's end: on into the next folder that has files (round to the first)
+            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
+            self.assertTrue(self.box.wait_for(lambda c: name() == "deep.wav", 5), name())
+            pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'bass'")
+            # UNDO: the sound from before the browsing
+            pg.wait_for_function("!document.querySelector('.s-dcf .b:nth-child(2)').disabled")
+            pg.locator(".s-dcf .b", has_text="UNDO").click()
+            self.assertTrue(self.box.wait_for(lambda c: name() == was, 5), name())
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("track 1")
 
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))

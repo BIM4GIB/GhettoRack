@@ -648,7 +648,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 10 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 11 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -721,7 +721,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 10 03 01 02 1") >= 1);
+        CHECK(T95Count("P 11 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -740,7 +740,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 10 ") >= 1);
+        CHECK(T95Count("P 11 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1199,7 +1199,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 10 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 11 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1497,6 +1497,52 @@ int main()
         U("lrec undo");
         WaitIdle();
         CHECK(!IsRecPath(slot_path[6]) && BuiltInKitOf(slot_path[6]) >= 0);
+
+        /* v13.32, control protocol 11: the card's samples from a page. "folder 1" goes on to the next
+           folder that has files, "file 1" loads the next file into the selected track (the box waits
+           120 ms after the last one), and the same undo brings the old sound back */
+        {
+            SelectTrack(10);
+            char was[kPathLen];
+            snprintf(was, kPathLen, "%s", slot_path[10]);
+            ScanFolders();
+            cur_folder = 0;
+            ScanFiles(0);
+            int steps = 0;
+            for(; steps < num_folders && strcmp(folders[cur_folder], "samples/test"); steps++)
+            {
+                int before = cur_folder;
+                T95Frame("\x1bU folder 1\n");
+                CHECK(cur_folder != before && num_files > 0); // never lands in an empty one
+            }
+            CHECK(!strcmp(folders[cur_folder], "samples/test") && num_files >= 2);
+            T95Frame("\x1bU file 1\n");
+            Tick(200); // the box waits 120 ms after the last one
+            WaitIdle();
+            Tick(40);
+            CHECK(cur_file == 0 && strncmp(slot_path[10], "samples/test/", 13) == 0);
+            char first[kPathLen];
+            snprintf(first, kPathLen, "%s", slot_path[10]);
+            T95Frame("\x1bU file 1\n");
+            Tick(200); // the box waits 120 ms after the last one
+            WaitIdle();
+            Tick(40);
+            CHECK(cur_file == 1 && strcmp(slot_path[10], first));
+            T95Frame("\x1bU file -1\n");
+            Tick(200); // the box waits 120 ms after the last one
+            WaitIdle();
+            Tick(40);
+            CHECK(cur_file == 0 && !strcmp(slot_path[10], first));
+            T95Frame("\x1bU file 0\n\x1bU file 99\n\x1bU folder 2\n"); // none of these is an action
+            Tick(200);
+            WaitIdle();
+            CHECK(cur_file == 0 && !strcmp(folders[cur_folder], "samples/test"));
+            T95Frame("\x1bU lrec undo\n");
+            WaitIdle();
+            Tick(40);
+            CHECK(!strcmp(slot_path[10], was));
+            SelectTrack(0);
+        }
 
         /* a sample changed by accident with the arrows: undo gives the original back */
         {

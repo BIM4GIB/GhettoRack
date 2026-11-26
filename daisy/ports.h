@@ -29,7 +29,7 @@ class T95Ports
     static constexpr int      kPorts     = 8; // 1..8
     static constexpr uint32_t kKeepalive = 2000;
     static constexpr uint32_t kIdentify  = 1000; // no identity reply by then: decide by name
-    static constexpr int      kVersion   = 10;   // the "P" line's control version (2: ESC U, 3: ESC F, 4: page actions, 5: sets, 6: ESC T clock, 7: looper/quantise/roll, 8: redo, FX quantise, 9: kits, 10: button map)
+    static constexpr int      kVersion   = 11;   // the "P" line's control version (2: ESC U, 3: ESC F, 4: page actions, 5: sets, 6: ESC T clock, 7: looper/quantise/roll, 8: redo, FX quantise, 9: kits, 10: button map, 11: file / folder: the card's samples from a page)
 
     /** send: queue one line; false = no room right now (nothing queued) */
     using SendFn = bool (*)(const char* line);

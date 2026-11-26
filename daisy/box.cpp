@@ -4466,6 +4466,28 @@ bool BoxUiCommand(const char* c, uint32_t now)
     }
     else if(sscanf(c, "audition %d", &n) == 1 && n >= 1 && n <= kTracks)
         eng->Audition(n - 1);
+    /* ---- control protocol 11: the samples on the Daisy's own card, from a page. What the encoder
+       does in its samples job and the APC40's BANK buttons do, as actions. B / BF / BN say where it is ---- */
+    else if(sscanf(c, "file %d", &a) == 1 && a >= -16 && a <= 16 && a != 0)
+    {
+        browse_accum += a; // loads into the selected track; past a folder's end, on into the next
+        browse_time = g_now;
+    }
+    else if(sscanf(c, "folder %d", &a) == 1 && (a == 1 || a == -1))
+    {
+        for(int tries = num_folders; tries > 0; tries--) // the next folder that has files (the top one has none)
+        {
+            cur_folder = (cur_folder + a + num_folders) % num_folders;
+            ScanFiles(cur_folder);
+            if(num_files > 0)
+                break;
+        }
+        if(num_folders > 0)
+        {
+            const char* f = strrchr(folders[cur_folder], '/');
+            Popup("%s", f ? f + 1 : folders[cur_folder]);
+        }
+    }
     /* ---- control protocol 5: sets from the T95 pages. Slots count from 1.
        Names: what the Daisy's own screen allows; anything else becomes "_" ---- */
     else if(strncmp(c, "set ", 4) == 0)
