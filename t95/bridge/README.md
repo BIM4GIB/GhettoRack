@@ -118,6 +118,27 @@ open. Don't open the port with `cat`, `stty` or `screen` yourself; use
 - Anyone on the network can change the bindings and the last module (the
   POST endpoints). Fine on a home network; don't expose port 8040 further.
 
+## A game controller
+
+A USB game controller on the box (`rackbridge/gamepad.py`; found by what it has: a south
+button and two stick axes; held exclusively). Seen: a Sony PlayStation 3 pad by cable on the
+Pi, recognised by the kernel with nothing installed.
+
+| On the pad | Does |
+|---|---|
+| D-pad, X, O, triangle, PS | the remote's `up` `down` `left` `right`, `ok`, `back`, `menu`, `home`, sent to every open page as `ir` events: a page needs nothing new. A held arrow repeats |
+| L1 / R1 | `prev` / `next`: the view before / after |
+| start / select | `play` / `stop`, to the Daisy itself, once (two open pages would each toggle) |
+| left stick X | the master filter: low-pass left, high-pass right, off in the middle |
+| right stick X | the crossfader |
+| left stick Y, right stick Y | the selected track's filter and pitch. Let go and each is what it was before the stick moved, on the track it started on |
+| L2 / R2 | the selected track's sound, once per pull. No velocity yet |
+
+A stick's middle is a dead zone and is sent as exactly the middle; a moving stick sends a
+control at most every 40 ms and the last value always goes. `/health` has `pad` (device, name,
+presses, sent, dropped). Not there: the face buttons' pressure (this kernel driver gives only
+on and off), the pad by Bluetooth, its tilt sensor, choosing what a stick does from a page.
+
 ## Samples (firmware v13.8 on)
 
 The T95 keeps the sample library; the Daisy only gets a track's sound.

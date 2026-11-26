@@ -26,6 +26,21 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## A game controller on the box (2026-11-26, on the Pi, real presses NOT watched yet)
+
+- A PlayStation 3 pad by USB cable: the Pi's kernel knows it (17 buttons, both sticks and the
+  two triggers 0-255, tilt as a second device; the face buttons' pressure is not given).
+  `t95/bridge/rackbridge/gamepad.py` turns the buttons into the remote's actions for the pages
+  and the sticks into sweeps that spring back (table in `t95/bridge/README.md`).
+- Tested with a stand-in pad against the simulated firmware (`test_p59`). On the Pi the bridge
+  found the real pad; nobody has pressed a button on it with this running.
+- Known gap: only the ApcBox page and the big layouts of the others act on remote actions. The
+  small layouts of the start screen, jam recorder, clock, hub and Settings do not: the D-pad does
+  nothing there yet. That wants one shared piece in `t95/ui/small.js` (move between buttons,
+  OK taps), per the canon, not five copies.
+- Next: the pad by Bluetooth (pairs over the cable once; delay to be measured), triggers as
+  notes with velocity (needs a keyboard port to the Daisy), tilt.
+
 ## v13.34: the default set, any time (on the Pi rig's Seed, flashed 2026-11-26)
 
 - The set the box starts with is now a set like any other, built in memory (`DemoFill` in

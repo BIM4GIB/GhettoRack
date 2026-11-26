@@ -27,7 +27,7 @@ of the wider project; do not narrow the architecture to any one controller.
 daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: the APC40 button map), desktop tests, mac/ (same engine on macOS
             with the APC40 on the Mac), ui/ (monitor page, Chrome Web Serial),
             release/ApcBox.bin (latest built firmware)
-t95/        companion box: findings, plan, bridge/ (Daisy link, controllers,
+t95/        companion box: findings, plan, bridge/ (Daisy link, controllers, a game controller,
             remote, router, network MIDI), ui/ (selector, MIDI hub, clock, the
             ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen;
             small.css/.js: the frame every page shares at 480x320),

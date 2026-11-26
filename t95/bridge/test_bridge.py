@@ -1717,9 +1717,12 @@ class PageControlTest(unittest.TestCase):
         while not os.path.exists(link) and time.time() < end:
             time.sleep(0.05)
         cls.http = free_port()
+        cls.padfifo = os.path.join(cls.dir, "pad")               # a game controller, as its input events
+        os.mkfifo(cls.padfifo)
+        cls.padw = os.open(cls.padfifo, os.O_RDWR | os.O_NONBLOCK)
         cls.proc = subprocess.Popen(
             [sys.executable, BRIDGE, "--port", link, "--host", "127.0.0.1", "--https-port", "0", "--rtp-port", "0", "--library", cls.lib,
-             "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--no-midi"],
+             "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"), "--no-midi", "--pad", cls.padfifo],
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "w"))
         cls.addClassCleanup(cls.proc.kill)
         BridgeTest.http = cls.http
@@ -2198,6 +2201,81 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
         self.do("track 1", "tempo %d" % bpm)
+
+    def test_p59_a_game_controller(self):
+        """A PlayStation pad on the box: buttons are the remote's actions for the pages, start and select go to
+        the Daisy once, the sticks sweep and spring back, a trigger plays the selected track"""
+        EV = struct.Struct("llHHi")
+        ev = lambda typ, code, value: os.write(self.padw, EV.pack(0, 0, typ, code, value) + EV.pack(0, 0, 0, 0, 0))
+        pad = lambda: BridgeTest.health()["pad"]
+        irs = lambda: [d["action"] for e, d in list(self.box.named) if e == "ir"]
+        m = lambda i: int(self.last("M ").split()[1 + i])
+        t = lambda tr, k: int(self.last("T %d " % tr).split()[2 + k])
+        BridgeTest.wait_health(lambda h: h["pad"]["device"] == self.padfifo, 10)
+        # buttons: a press acts once, a held arrow repeats, letting go ends it
+        n = len(irs())
+        ev(1, 304, 1); ev(1, 304, 0)                                    # X
+        ev(1, 305, 1); ev(1, 305, 0)                                    # O
+        ev(1, 311, 1); ev(1, 311, 2); ev(1, 311, 0)                     # R1, with a repeat of the kernel's own
+        self.assertTrue(self.box.wait_for(lambda c: irs()[n:] == ["ok", "back", "next"], 5), irs()[n:])
+        n = len(irs())
+        ev(1, 547, 1)                                                   # D-pad right, held
+        time.sleep(1.0)
+        ev(1, 547, 0)
+        time.sleep(0.3)
+        got = irs()[n:]
+        self.assertTrue(set(got) == {"right"} and 4 <= len(got) <= 7, got)
+        time.sleep(0.4)
+        self.assertEqual(len(irs()[n:]), len(got))
+        ev(1, 999, 1)                                                   # a button with no job
+        # start and select: to the Daisy, once, and not through the pages
+        self.do("stop")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0, 5))
+        n = len(irs())
+        ev(1, 315, 1); ev(1, 315, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 1, 5))
+        ev(1, 314, 1); ev(1, 314, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0, 5))
+        self.assertEqual(irs()[n:], [])
+        # left stick X: the master filter; the middle is exactly off, however the stick rests
+        self.do("glob 9 64", "glob 1 64")
+        ev(3, 0, 255)
+        self.assertTrue(self.box.wait_for(lambda c: m(9) == 127, 5), self.last("M "))
+        ev(3, 0, 0)
+        self.assertTrue(self.box.wait_for(lambda c: m(9) == 0, 5))
+        for v in range(0, 120, 3):                                      # a sweep: the last value always arrives
+            ev(3, 0, v)
+        ev(3, 0, 60)
+        self.assertTrue(self.box.wait_for(lambda c: 15 < m(9) < 45, 5), self.last("M "))
+        ev(3, 0, 138)                                                   # let go: rests a little off centre
+        self.assertTrue(self.box.wait_for(lambda c: m(9) in (63, 64), 5), self.last("M "))
+        ev(3, 3, 0)                                                     # right stick X: the crossfader
+        self.assertTrue(self.box.wait_for(lambda c: m(1) == 0, 5))
+        ev(3, 3, 120)
+        self.assertTrue(self.box.wait_for(lambda c: m(1) in (63, 64), 5))
+        # left stick Y: the selected track's filter, and what it was comes back
+        self.do("track 3", "knob 3 6 40", "knob 3 4 70")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 2 and t(2, 6) == 40 and t(2, 4) == 70, 5))
+        time.sleep(0.3)
+        ev(3, 1, 0)                                                     # up
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 6) == 127, 5), self.last("T 2 "))
+        self.do("track 5")                                              # another track picked mid-sweep: the first is put back
+        ev(3, 1, 128)
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 6) == 40, 5), self.last("T 2 "))
+        self.do("track 3")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 2, 5))
+        ev(3, 4, 255)                                                   # right stick down: pitch down
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 4) == 0, 5))
+        ev(3, 4, 127)
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 4) == 70, 5))
+        # a trigger: once per pull
+        sent = pad()["sent"]
+        for v in (10, 80, 200, 255, 200, 90, 10, 0):
+            ev(3, 5, v)
+        time.sleep(0.4)
+        self.assertEqual(pad()["sent"], sent + 1)
+        self.assertEqual(pad()["dropped"], 0)
+        self.do("track 1", "knob 3 6 64", "knob 3 4 64")
 
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))

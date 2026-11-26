@@ -6,6 +6,7 @@ from .midi import *
 from .samples import *
 from .state import *
 from .ir import *
+from .gamepad import Gamepad
 from .hdmi import *
 from .web import *
 from .router import *
@@ -83,6 +84,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             log.warning("no MIDI hub page at %s", args.hub)
         self.state = State(args.state)
         self.ir = IrReader(self)
+        self.pad = Gamepad(self)
         self.hdmi = HdmiAudio(self)
         self.listen = Listen(self)
         self.ble = Ble(self)
@@ -121,6 +123,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "controllers": [p.info(self.kinds()) for p in sorted(self.ports.values(), key=lambda p: p.num)],
             "ping_ms": self.ping_stats(),
             "ir": self.ir.info(),
+            "pad": self.pad.info(),
             "samples": self.samples_info(),
             "hdmi_audio": self.hdmi.info(),
             "ble_midi": self.ble.info(),
@@ -153,7 +156,7 @@ async def main_async(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task(), b.jam.task())
+                             b.ir.task(), b.pad.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task(), b.jam.task())
     finally:
         # Stop taking connections, and don't wait for the open ones. `async with server` did:
         # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
@@ -207,6 +210,7 @@ def main(argv=None):
     ap.add_argument("--state", default=os.path.join(os.environ.get("STATE_DIRECTORY", "/var/lib/apcbox-bridge"),
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
+    ap.add_argument("--pad", metavar="PATH", help="game controller's input event device instead of finding it under /sys (tests)")
     ap.add_argument("--ir-lirc", metavar="PATH", help="IR lirc device instead of finding it under /sys")
     ap.add_argument("--library", help="sample library folder (default: next to the state file)")
     ap.add_argument("--alsaloop", default="/usr/bin/alsaloop", help="for the HDMI audio setting")
