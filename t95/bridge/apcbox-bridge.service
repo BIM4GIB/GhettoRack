@@ -3,7 +3,10 @@ Description=ApcBox bridge (Daisy USB serial, T95 MIDI controllers, page on :8040
 After=network.target
 
 [Service]
-ExecStart=/opt/apcbox-bridge/venv/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ble --ui /opt/apcbox-bridge/apcbox-ui.html --selector /opt/apcbox-bridge/selector.html --hub /opt/apcbox-bridge/midihub.html --clock-page /opt/apcbox-bridge/clock.html --apcbox-page /opt/apcbox-bridge/apcbox.html --settings-page /opt/apcbox-bridge/settings.html
+# Extra arguments for this box without editing this file, e.g. on a Pi (pi4/README.md):
+#   echo 'APCBOX_ARGS=--loop-latency-us 10000 --loop-sync 4' | sudo tee /etc/default/apcbox-bridge
+EnvironmentFile=-/etc/default/apcbox-bridge
+ExecStart=/opt/apcbox-bridge/venv/bin/python3 /opt/apcbox-bridge/apcbox_bridge.py --ble --ui /opt/apcbox-bridge/apcbox-ui.html --selector /opt/apcbox-bridge/selector.html --hub /opt/apcbox-bridge/midihub.html --clock-page /opt/apcbox-bridge/clock.html --apcbox-page /opt/apcbox-bridge/apcbox.html --settings-page /opt/apcbox-bridge/settings.html $APCBOX_ARGS
 Restart=always
 RestartSec=2
 # Own user (install.sh makes it: a made-up one can't use the system bus on this box); dialout for the Daisy, audio for the MIDI controllers,

@@ -4,6 +4,20 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-23. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## Open from the rig, 2026-11-26
+
+- **A card put back while the Seed runs is not found** (Pi rig's Seed, v13.31): `SdPoll` in
+  `daisy/main.cpp` retries the mount every 2 s and never got it; a restart did. Not looked
+  into: whether the card needs its power-up sequence again, or the SD driver is left in a
+  failed state by the removal. `sd_last_code` is only logged for "not FAT32": log it.
+- **A Seed's main loop stopped once** (v13.30, Pi rig): audio and USB audio went on, no
+  report lines, no answer to a state dump. Cleared by a power cycle, which also cleared the
+  record of where it was. Not reproduced in 260 sample loads. Press RESET, not the plug, if
+  it happens again: the firmware then says the stage.
+- **Saving a set from a page writes over the slot without asking the box** (the small page
+  asks SURE? only for a slot it knows is taken; `set save n` from anywhere else does not).
+  A set was lost this way.
+
 ## v13.31: the box starts with a demo set (on the Pi rig's Seed, 2026-11-25)
 
 `daisy/release/ApcBox.bin` is v13.31. `daisy/box.cpp` only (`DemoSet()`, where

@@ -76,7 +76,7 @@ class HdmiAudio:
                         log.warning("HDMI audio: the shared capture device doesn't work here; opening the card directly "
                                     "(listening in a browser then needs the TV sound off)")
                 cmd = [self.b.args.alsaloop, "-C", self.b.listen.device(),
-                       "-P", "plughw:CARD=" + card, "-t", "40000", "-S", "1"]
+                       "-P", "plughw:CARD=" + card, "-t", str(self.b.args.loop_latency_us), "-S", str(self.b.args.loop_sync)]
                 try:
                     self.used_shared = self.b.listen.shared
                     self.started_at = now()

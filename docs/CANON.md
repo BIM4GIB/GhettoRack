@@ -202,6 +202,20 @@ which were seen and which were not:
 On the rig, look but do not change: no scan, join, rename, restart or
 record without being asked. Those have their own tests with stand-ins.
 
+Someone may be playing. Before anything that interrupts or writes on a rig
+(restarting the bridge, which every `install.sh` does; flashing or resetting
+a Seed; saving, loading or deleting a set, kit or take):
+
+- ask the bridge first: `/jam?json=1` (is a take recording), the `S` line
+  (is it playing, is the set unsaved), the `J` lines (which slots are taken);
+- never save over a slot, a kit or a file that exists without having read
+  what is there, in a step of its own, before the write;
+- a Seed with an unsaved set is not flashed or reset. Save it to a free slot
+  first, or wait.
+
+Both were learned on 2026-11-26: a bridge restart 76 s after a 49 minute
+take ended, and a set saved over one already in slot 1.
+
 ## 10. Adding a module, in order
 
 1. Agree what it is for and what its views are, with a drawing at 480x320.

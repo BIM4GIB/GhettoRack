@@ -25,6 +25,7 @@ been measured yet.**
 | Bridge | Installed unchanged, found the Seed by VID/PID, control protocol 10, report 19, 0 bad lines in 310,000 |
 | Second Seed | Fresh Seed, bootloader and v13.26 written from the Pi with `dfu-util` (the steps of `tools/seed2-setup.sh`, done by hand). After the bootloader the Seed came back in the Daisy bootloader by itself; no replug was needed. Wired: OLED, SD module (CS soldered to 3V3 on the module), encoder, back button (Rene, 2026-11-25; the T95 rig's Seed has OLED and encoder, no back button). Not wired: audio, USB-A host |
 | Seed's card | 32 GB SDHC, FAT32, filled with `tools/sdprep.py --go` (4 kits, 19 folders, 4,123 files). The Seed lists the four kits. Not a copy of the T95 rig's card: that one also has a kit `stk` and its settings files |
+| Seed's card, in use | 2026-11-26. On the Mac, read-only: 4,123 samples in 19 folders and 4 kits, every WAV header valid, all mono 48 kHz 16-bit; and what the Seed wrote itself, `sets/01/set.bin` with the set's one sample copied beside it. On the Seed, through the bridge: 14 samples loaded by encoder turns, 37 to 796 kB each, 0.94 MB/s over all and 1.15 MB/s on the largest (1 data wire at 12.5 MHz allows about 1.5); a card kit of 7 sounds onto tracks 9-16 in 0.66 s; the saved set loaded again by itself after a restart and by `set load`, same tempo, sounds and 303. **Putting the card back while the Seed runs was not picked up**: no card for minutes, until the Seed was restarted |
 | Ping Pi to Daisy | 300 pings: min 0.29, avg 0.60, p99 5.1, max 6.3 ms. After a reboot, 36 pings: avg 0.48, max 1.27. **Not comparable with the T95's figures yet:** this Seed has no screen, APC40 or audio attached, and the T95 figures are from v13.6 to v13.9 |
 | Seed's loop | Its own log: slowest pass 119.5 ms in 10 s, of which 114.9 ms in the screen code, with no screen attached. The firmware still draws for a screen that is on the Pi now |
 | Kiosk | cage + Chromium 156 on the 3.5" screen, software rendering (pixman), no restarts. HDMI not tried |
@@ -53,6 +54,13 @@ been measured yet.**
   takes the card picked in Settings > DEV (SOUND OUT steps through them), else the first there
   is: on the Pi the AV socket. Seen: `alsaloop` running to `Headphones` with the Seed playing;
   Rene heard the demo set through it.
+- The pass-through's delay. With the defaults (`alsaloop -t 40000 -S 1`) the sound queued for the
+  AV socket crept up over hours to the whole buffer, 153 ms, and an LPK25 felt half a second late
+  (Rene). On the Pi `/etc/default/apcbox-bridge` holds
+  `APCBOX_ARGS=--loop-latency-us 10000 --loop-sync 4`: 24 to 36 ms over 70 s, 17 ms after the
+  restart. The headphone output's own delay comes on top and can't be read. Keys reach the Daisy in
+  0.7 ms on average: for playing, wire a jack to the Daisy's own audio out. That file is written by
+  hand, no installer makes it yet.
 
 ## The screen on the Pi's header
 

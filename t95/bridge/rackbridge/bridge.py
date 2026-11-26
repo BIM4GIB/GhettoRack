@@ -215,6 +215,10 @@ def main(argv=None):
     ap.add_argument("--asound", default="/proc/asound", help="where the sound cards are listed by name")
     ap.add_argument("--daisy-card", default="ApcBox", help="the Daisy's USB audio card name")
     ap.add_argument("--hdmi-card", default="HDMI", help="the T95's HDMI audio card name")
+    ap.add_argument("--loop-latency-us", type=int, default=40000, help="alsaloop -t: how much sound the pass-through keeps queued")
+    ap.add_argument("--loop-sync", type=int, default=1, choices=range(6),
+                    help="alsaloop -S: how it follows the Daisy's clock. 1 (simple) lets the queue creep up to the whole "
+                         "buffer over hours (153 ms seen on a Pi); 4 (samplerate) holds it")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
     ap.add_argument("--sysblock", default="/sys/block", help="where the block devices are listed (is a card in the SD slot)")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")

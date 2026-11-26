@@ -149,7 +149,7 @@ ul.tight { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
         <li>VCC: plain breakout with no chips on it, 3.3 V (pin 38). A module with a regulator chip on it, 5 V from the supply. If you're not sure, use 3.3 V.</li>
         <li>If the log says code 3 (no card answering): add 10 kΩ pull-ups from CMD and DAT0 to 3.3 V, and shorten the wires.</li>
         <li>Code 13: the card isn't FAT32. exFAT doesn't work.</li>
-        <li>Hot-swap works: pull it, put it back, the box remounts within about 2 s.</li>
+        <li>Taking the card out while the box runs is safe: it carries on from memory. Putting it back is <b>not</b> picked up on the rig (2026-11-26, the Pi rig's Seed: card back in, still "no card" minutes later; after a restart of the Seed it was there and the last set loaded). The firmware does retry every 2 s, and that works in the desktop build. Until that is found: restart the Seed after putting a card in.</li>
       </ul>
     </div>
   </div>
