@@ -244,7 +244,7 @@ void SetsTap(int x, int y)
     if(y >= 268 && y < 300) // action buttons
     {
         int a = (x - 4) / 79;
-        if(a < 0 || a >= kNumActs)
+        if(a < 0 || a >= kTftActs)
             return;
         sets_act = a;
         if(NeedsConfirm(a))

@@ -74,9 +74,11 @@ enum SetsAct
     kActRename,
     kActDelete,
     kActTrans,
+    kActDemo, // the default set, built into the firmware (v13.34); not on the colour screen's row of six
     kNumActs
 };
-const char* const kActNames[kNumActs] = {"LOAD", "SAVE HERE", "SAVE NEW", "RENAME", "DELETE", "FX"};
+constexpr int kTftActs = 6;
+const char* const kActNames[kNumActs] = {"LOAD", "SAVE HERE", "SAVE NEW", "RENAME", "DELETE", "FX", "DEFAULT"};
 const char* const kTransNames[kNumTransitions] = {"CUT", "FILTER", "TAPE STOP", "ECHO OUT"};
 
 bool     sets_open    = false;
@@ -494,24 +496,32 @@ void SetsTrackLoaded(int t)
     MarkSaved();
 }
 
+void DemoFill(SetFile& f); // box.cpp: the default set
+
+/** slot -1: the default set, from the firmware instead of the card */
 void LoadSetBegin(int slot)
 {
-    if(!sd_ok || set_op)
+    if((slot >= 0 && !sd_ok) || set_op)
         return;
     if(XferBusy()) // the staging pool holds a sample from the T95
     {
         Popup("busy receiving a sample");
         return;
     }
-    char p[40];
-    snprintf(p, sizeof(p), "sets/%02d/set.bin", slot + 1);
-    int32_t n = plat->ReadFile(p, &setf, sizeof(setf));
-    if(n != (int32_t)sizeof(setf) || memcmp(setf.info.magic, "APS1", 4)
-       || setf.info.size != sizeof(SetFile))
+    if(slot < 0)
+        DemoFill(setf);
+    else
     {
-        Popup("set %02d unreadable", slot + 1);
-        Log("set %02d doesn't match this firmware", slot + 1);
-        return;
+        char p[40];
+        snprintf(p, sizeof(p), "sets/%02d/set.bin", slot + 1);
+        int32_t n = plat->ReadFile(p, &setf, sizeof(setf));
+        if(n != (int32_t)sizeof(setf) || memcmp(setf.info.magic, "APS1", 4)
+           || setf.info.size != sizeof(SetFile))
+        {
+            Popup("set %02d unreadable", slot + 1);
+            Log("set %02d doesn't match this firmware", slot + 1);
+            return;
+        }
     }
     setf.info.name[kSetNameLen] = 0;
     SetSwap& sw   = set_swap;
@@ -571,7 +581,10 @@ void LoadSetBegin(int slot)
     load_slot  = slot;
     load_phase = 1;
     set_op     = 2;
-    snprintf(op_msg, sizeof(op_msg), "loading %02d %s", slot + 1, setf.info.name);
+    if(slot < 0)
+        snprintf(op_msg, sizeof(op_msg), "loading the default set");
+    else
+        snprintf(op_msg, sizeof(op_msg), "loading %02d %s", slot + 1, setf.info.name);
     Log("%s", op_msg);
 }
 
@@ -607,16 +620,20 @@ void AfterSwap()
         eng->SetRoll(t, false);
     }
     open_set = load_slot;
-    snprintf(open_name, sizeof(open_name), "%s", setf.info.name);
+    snprintf(open_name, sizeof(open_name), "%s", load_slot < 0 ? "" : setf.info.name); // the default is no slot's set
     loaded_kit_pg[0] = loaded_kit_pg[1] = -1;
     view_bank        = sw.pattern / 8;
     for(int c = 0; c < 8; c++)
         fader_live[c] = false; // pick up: faders don't jump the new levels
     ClearUndo();
     ReleaseKeys();
-    WriteLast();
+    if(sd_ok)
+        WriteLast();
     MarkSaved();
-    Popup("set %02d %s", load_slot + 1, setf.info.name);
+    if(load_slot < 0)
+        Popup("default set");
+    else
+        Popup("set %02d %s", load_slot + 1, setf.info.name);
     Log("set %02d in", load_slot + 1);
     copy_t   = 0;
     copy_pos = 0;
@@ -634,8 +651,10 @@ void LoadStep()
                 eng->ArmSwap(&set_swap);
             else
                 eng->ApplySwapNow(&set_swap);
-            snprintf(op_msg, sizeof(op_msg), "%02d %s at the next bar", load_slot + 1,
-                     setf.info.name);
+            if(load_slot < 0)
+                snprintf(op_msg, sizeof(op_msg), "default set at the next bar");
+            else
+                snprintf(op_msg, sizeof(op_msg), "%02d %s at the next bar", load_slot + 1, setf.info.name);
             return;
         case 2:
             if(!eng->TakeSwapDone())
@@ -729,6 +748,7 @@ bool NeedsConfirm(int act)
     switch(act)
     {
         case kActLoad: return set_dirty;
+        case kActDemo: return set_dirty;
         case kActSaveHere: return set_exists[sets_cur] && sets_cur != open_set;
         case kActDelete: return true;
         default: return false;
@@ -740,6 +760,7 @@ const char* ConfirmText(int act, char* buf, size_t n)
     switch(act)
     {
         case kActLoad: snprintf(buf, n, "unsaved changes. load %02d anyway?", sets_cur + 1); break;
+        case kActDemo: snprintf(buf, n, "unsaved changes. load the default?"); break;
         case kActSaveHere:
             snprintf(buf, n, "overwrite %02d %s?", sets_cur + 1, set_list[sets_cur].name);
             break;
@@ -812,6 +833,12 @@ void DoAct(int act)
     if(set_op)
     {
         Popup("busy");
+        return;
+    }
+    if(act == kActDemo) // needs no card
+    {
+        LoadSetBegin(-1);
+        sets_mode = kSetsList;
         return;
     }
     if(!sd_ok)
@@ -956,9 +983,9 @@ void SetsBack()
     }
 }
 
-/* APC40 without the screen: row 3 picks the slot, row 4 pads 1-5 are
-   LOAD, SAVE HERE, SAVE NEW, DELETE, FX; a second press confirms */
-const int kApcActs[5] = {kActLoad, kActSaveHere, kActSaveNew, kActDelete, kActTrans};
+/* APC40 without the screen: row 3 picks the slot, row 4 pads 1-6 are
+   LOAD, SAVE HERE, SAVE NEW, DELETE, FX, DEFAULT; a second press confirms */
+const int kApcActs[6] = {kActLoad, kActSaveHere, kActSaveNew, kActDelete, kActTrans, kActDemo};
 
 void SetsApcPad(int row, int col)
 {
@@ -973,7 +1000,7 @@ void SetsApcPad(int row, int col)
             Popup("%02d empty", sets_cur + 1);
         return;
     }
-    if(col >= 5)
+    if(col >= 6)
         return;
     int act = kApcActs[col];
     if(NeedsConfirm(act) && !(apc_confirm == col && g_now - apc_confirm_at < 3000))

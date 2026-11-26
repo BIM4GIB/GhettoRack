@@ -2638,7 +2638,7 @@ void UpdateLeds(uint32_t now)
             c = kRed;
         Want(led_grid[3][f], c);
     }
-    /* Sets screen: row 3 = slots, row 4 = LOAD, SAVE HERE, SAVE NEW, DELETE, FX */
+    /* Sets screen: row 3 = slots, row 4 = LOAD, SAVE HERE, SAVE NEW, DELETE, FX, DEFAULT */
     if(sets_open)
     {
         for(int i = 0; i < 8; i++)
@@ -2658,8 +2658,8 @@ void UpdateLeds(uint32_t now)
         for(int f = 0; f < 8; f++)
         {
             uint8_t c = kOff;
-            if(f < 5)
-                c = apc_confirm == f ? kRedBlink : (f == 3 ? kRed : (f == 4 ? kYellow : kGreen));
+            if(f < 6) // 6: the default set
+                c = apc_confirm == f ? kRedBlink : (f == 3 ? kRed : (f == 4 || f == 5 ? kYellow : kGreen));
             if(set_op && f < 4)
                 c = kGreenBlink;
             Want(led_grid[3][f], c);
@@ -3679,47 +3679,67 @@ void Report(uint32_t now)
 /* ================================================================== */
 /* Boot defaults                                                        */
 
-/* What the box plays when it is switched on with nothing saved: one track in
-   eight stages, A1 to A8, at 128 BPM. Step through the patterns and it builds:
-   A1 kick, hats and bass, A2 the clap, A3 open hats and the lead, A4 everything,
-   A5 a broken kick, A6 the breakdown (no kick), A7 the snare roll, A8 the drop.
-   808 drums on tracks 1-7, a 303 on 8 (bass, saw); the 909 on 9-15 for the kick
-   layer, the roll, a second open hat and a rim, a 303 on 16 (lead, square, into
-   the delay). The 303s are the last track of each page.
-   All of it is in the firmware: no card needed. */
+/* The default set: what the box plays when it is switched on with nothing saved, and
+   what "set demo" brings back at any time. One track in sixteen stages at 128 BPM.
+   Bank A builds to the first drop, as it did in v13.31: A1 kick, hats and bass, A2 the
+   clap, A3 open hats and the lead, A4 everything, A5 a broken kick, A6 the breakdown
+   (no kick), A7 the snare roll, A8 the drop. Bank B is the second half: B1 the groove
+   with a driving bass, B2 the arpeggio, B3 the second break, B4 a longer roll, B5 the
+   peak, B6 a broken peak, B7 stripped down, B8 the outro.
+   808 drums on tracks 1-7, a 303 on 8 (bass, saw); the 909 on 9-15, a 303 on 16 (lead,
+   square, into the delay). The 303s are the last track of each page. The 808 is on the
+   crossfader's A side and the 909 on B, the 303s on both: the crossfader blends the kits.
+   All of it is in the firmware: no card needed, nothing can save over it. */
 constexpr int kDemoBass = 7, kDemoLead = 15;
 
-void DemoSet()
+void DemoFill(SetFile& f)
 {
+    memset(&f, 0, sizeof(f));
+    memcpy(f.info.magic, "APS1", 4);
+    f.info.size = sizeof(SetFile);
+    snprintf(f.info.name, sizeof(f.info.name), "default");
+    for(int tr = 0; tr < kTracks; tr++)
+    {
+        f.tracks[tr] = TrackParams();
+        if(tr == kDemoBass || tr == kDemoLead)
+            snprintf(f.file[tr], kPathLen, "%s", kSynthPath);
+        else
+            snprintf(f.file[tr], kPathLen, "@k%d", tr / 8); // 1-8 the 808, 9-16 the 909
+    }
+    f.global = GlobalParams();
     /* 16 steps as bits, step 1 on the left: 0x8888 is four on the floor */
-    auto hits = [](int pat, int tr, uint16_t on, uint16_t accent = 0) {
+    auto hits = [&](int pat, int tr, uint16_t on, uint16_t accent = 0) {
         for(int st = 0; st < kSteps; st++)
         {
             const uint16_t bit = (uint16_t)(0x8000u >> st);
             if((on | accent) & bit)
-                eng->SetStep(pat, tr, st, (accent & bit) ? kStepAccent : kStepOn);
+                f.patterns[pat][tr][st] = (accent & bit) ? kStepAccent : kStepOn;
         }
     };
     /* a 303 line: a MIDI note a step (0 = rest), accents, and slides into the next note */
-    auto line = [](int pat, int tr, const int8_t* notes, uint16_t accent, uint16_t slide) {
+    auto line = [&](int pat, int tr, const int8_t* notes, uint16_t accent, uint16_t slide) {
         for(int st = 0; st < kSteps; st++)
         {
             if(!notes[st])
                 continue;
             const uint16_t bit = (uint16_t)(0x8000u >> st);
-            eng->SetStep(pat, tr, st, (accent & bit) ? kStepAccent : kStepOn);
-            eng->SetNote(pat, tr, st, notes[st]);
-            eng->SetSlide(pat, tr, st, (slide & bit) != 0);
+            f.patterns[pat][tr][st] = (accent & bit) ? kStepAccent : kStepOn;
+            f.notes[pat][tr][st]    = (uint8_t)((notes[st] & 0x7F) | ((slide & bit) ? kNoteSlide : 0));
         }
     };
-    enum { K, S, CH, OH, CP, TM, K9 = 8, S9, CH9, OH9, CP9, TM9, RM9, RD9 };
+    enum { K, S, CH, OH, CP, TM, RM, K9 = 8, S9, CH9, OH9, CP9, TM9, RM9 };
     /* C minor: C2 36, Eb 39, G 43, Bb 46, C3 48, Eb3 51 */
     static const int8_t bassA[16] = {36, 0, 36, 48, 0, 36, 39, 0, 36, 0, 48, 36, 0, 43, 46, 0};
     static const int8_t bassB[16] = {36, 36, 0, 48, 36, 0, 51, 48, 0, 36, 43, 0, 46, 48, 0, 39};
+    static const int8_t bassC[16] = {36, 36, 48, 36, 36, 48, 36, 39, 36, 36, 48, 36, 43, 46, 48, 51};
+    static const int8_t bassD[16] = {36, 0, 0, 0, 0, 0, 36, 0, 0, 0, 48, 0, 0, 0, 0, 0};
     static const int8_t lead1[16] = {0, 0, 72, 0, 0, 0, 75, 0, 0, 72, 0, 0, 79, 0, 0, 0};
     static const int8_t lead2[16] = {72, 0, 75, 72, 0, 79, 0, 75, 72, 0, 82, 0, 79, 75, 0, 72};
     static const int8_t lead3[16] = {84, 72, 0, 75, 79, 0, 72, 82, 0, 79, 75, 0, 72, 84, 0, 79};
+    static const int8_t lead4[16] = {0, 0, 0, 84, 0, 0, 82, 0, 0, 79, 0, 0, 75, 0, 72, 0};
+    static const int8_t lead5[16] = {60, 63, 67, 72, 75, 72, 67, 63, 60, 63, 67, 72, 79, 75, 72, 67};
     auto bass = [&](int pat, bool b) { line(pat, kDemoBass, b ? bassB : bassA, b ? 0x1208 : 0x1022, b ? 0x0208 : 0x0404); };
+    auto drive = [&](int pat) { line(pat, kDemoBass, bassC, 0x2212, 0x0101); };
 
     /* A1: kick, offbeat hats, the bass line */
     hits(0, K, 0x8888, 0x8000);
@@ -3767,24 +3787,103 @@ void DemoSet()
     hits(6, CH, 0xFFFF);
     bass(6, false);
     line(6, kDemoLead, lead2, 0x0420, 0x2008);
-    /* A8: the drop */
+    /* A8: the drop, the 909's clap under the 808's */
     hits(7, K, 0x8888, 0x8888);
     hits(7, K9, 0x8888);
     hits(7, CH, 0xFFFF, 0x2222);
     hits(7, OH, 0x2222);
     hits(7, CP, 0x0808);
+    hits(7, CP9, 0x0808);
     hits(7, TM, 0x0205);
     hits(7, OH9, 0xAAAA);
     bass(7, true);
     line(7, kDemoLead, lead3, 0x8104, 0x1040);
 
-    TrackParams* t = eng->track;
+    /* B1: the groove after the drop: the driving bass, a rim against the beat, ghost hats */
+    hits(8, K, 0x8888, 0x8888);
+    hits(8, K9, 0x8888);
+    hits(8, CH, 0xFFFF, 0x2222);
+    hits(8, CH9, 0x5555);
+    hits(8, OH, 0x2222);
+    hits(8, CP, 0x0808);
+    hits(8, CP9, 0x0808);
+    hits(8, RM, 0x0492);
+    drive(8);
+    line(8, kDemoLead, lead1, 0x0008, 0);
+    /* B2: the arpeggio over it, toms at the end of the bar */
+    hits(9, K, 0x8888, 0x8888);
+    hits(9, K9, 0x8888);
+    hits(9, CH, 0xFFFF, 0x2222);
+    hits(9, CH9, 0x5555);
+    hits(9, OH, 0x2222);
+    hits(9, OH9, 0xAAAA);
+    hits(9, CP, 0x0808);
+    hits(9, CP9, 0x0808);
+    hits(9, RM, 0x0492);
+    hits(9, TM9, 0x0015, 0x0001);
+    drive(9);
+    line(9, kDemoLead, lead5, 0x8888, 0x1111);
+    /* B3: the second break: no kick, no hats, the lead answers itself */
+    hits(10, RM, 0x0492);
+    hits(10, CP9, 0x0008);
+    hits(10, TM, 0x8000);
+    hits(10, OH9, 0x0080);
+    bass(10, false);
+    line(10, kDemoLead, lead4, 0x1000, 0x0200);
+    /* B4: the longer build: the roll over half the bar, sixteenth 909 hats, the arpeggio */
+    hits(11, K, 0x8888);
+    hits(11, S9, 0x8AFF, 0x00FF);
+    hits(11, CH9, 0xFFFF);
+    hits(11, CP9, 0x0808);
+    hits(11, TM9, 0x000F, 0x0003);
+    drive(11);
+    line(11, kDemoLead, lead5, 0x8888, 0x1111);
+    /* B5: the peak: both kits, the driving bass, the high lead */
+    hits(12, K, 0x8888, 0x8888);
+    hits(12, K9, 0x8888);
+    hits(12, CH, 0xFFFF, 0x2222);
+    hits(12, CH9, 0x5555);
+    hits(12, OH, 0x2222);
+    hits(12, OH9, 0xAAAA);
+    hits(12, CP, 0x0808);
+    hits(12, CP9, 0x0808);
+    hits(12, RM, 0x0492);
+    hits(12, RM9, 0x1240);
+    hits(12, TM, 0x0205);
+    drive(12);
+    line(12, kDemoLead, lead3, 0x8104, 0x1040);
+    /* B6: the peak broken up: the kick stumbles, a snare, the busy bass */
+    hits(13, K, 0x8892, 0x8080);
+    hits(13, K9, 0x8080);
+    hits(13, S, 0x0908, 0x0808);
+    hits(13, CH, 0xFFFF, 0x2222);
+    hits(13, CH9, 0x5555);
+    hits(13, OH, 0x2222);
+    hits(13, RM, 0x0492);
+    hits(13, TM9, 0x0041);
+    bass(13, true);
+    line(13, kDemoLead, lead2, 0x0420, 0x2008);
+    /* B7: stripped down: kick, offbeat hats, the rim, the first bass line */
+    hits(14, K, 0x8888, 0x8000);
+    hits(14, CH, 0x2222);
+    hits(14, RM, 0x0492);
+    bass(14, false);
+    line(14, kDemoLead, lead1, 0x0008, 0);
+    /* B8: the outro: half the kicks, a few notes left */
+    hits(15, K, 0x8080);
+    hits(15, CH, 0x2222);
+    hits(15, OH9, 0x0002);
+    line(15, kDemoBass, bassD, 0x8000, 0);
+    line(15, kDemoLead, lead4, 0x1000, 0x0200);
+
+    TrackParams* t = f.tracks;
     t[K].vol = 0.85f, t[K].drive = 0.15f;
     t[S].vol = 0.7f, t[S].rev = 0.2f;
     t[CH].vol = 0.5f, t[CH].pan = 0.45f;
     t[OH].vol = 0.5f, t[OH].pan = 0.55f, t[OH].decay = 0.6f;
     t[CP].vol = 0.65f, t[CP].rev = 0.4f;
     t[TM].vol = 0.6f, t[TM].pan = 0.3f, t[TM].dly = 0.25f;
+    t[RM].vol = 0.45f, t[RM].pan = 0.35f, t[RM].dly = 0.3f;
     t[kDemoBass].vol = 0.7f, t[kDemoBass].drive = 0.1f;
     t[kDemoBass].acid.cutoff = 0.22f, t[kDemoBass].acid.reso = 0.72f, t[kDemoBass].acid.envmod = 0.6f;
     t[kDemoBass].acid.decay = 0.28f, t[kDemoBass].acid.accent = 0.85f;
@@ -3794,18 +3893,39 @@ void DemoSet()
     t[kDemoLead].acid.wave = 1.f;
     t[K9].vol = 0.6f;
     t[S9].vol = 0.6f, t[S9].rev = 0.25f;
-    t[RM9].vol = 0.5f, t[RM9].pan = 0.7f, t[RM9].dly = 0.35f;
+    t[CH9].vol = 0.3f, t[CH9].pan = 0.66f, t[CH9].decay = 0.4f, t[CH9].prob = 0.7f; // ghost hats: not the same twice
     t[OH9].vol = 0.4f, t[OH9].pan = 0.6f, t[OH9].decay = 0.5f;
-    eng->global.bpm      = 128.f;
-    eng->global.swing    = 0.08f;
-    eng->global.rev_size = 0.6f;
-    eng->global.dly_fb   = 0.4f;
+    t[CP9].vol = 0.45f, t[CP9].pan = 0.56f, t[CP9].rev = 0.35f;
+    t[TM9].vol = 0.55f, t[TM9].pan = 0.7f, t[TM9].dly = 0.2f, t[TM9].pitch = 0.42f;
+    t[RM9].vol = 0.5f, t[RM9].pan = 0.7f, t[RM9].dly = 0.35f;
+    for(int tr = 0; tr < kTracks; tr++) // the crossfader blends the two kits; the 303s stay
+        t[tr].xfade = (tr == kDemoBass || tr == kDemoLead) ? 0 : tr < 8 ? 1 : 2;
+    f.global.bpm      = 128.f;
+    f.global.swing    = 0.08f;
+    f.global.rev_size = 0.6f;
+    f.global.dly_fb   = 0.4f;
+}
+
+/** The default set straight into the engine (at power-up and after a full reset) */
+void DemoSet()
+{
+    DemoFill(setf);
+    memcpy(eng->PatternData(), setf.patterns, sizeof(setf.patterns));
+    memcpy(eng->NoteData(), setf.notes, sizeof(setf.notes));
+    for(int tr = 0; tr < kTracks; tr++)
+        eng->track[tr] = setf.tracks[tr];
+    eng->global = setf.global;
 }
 
 /** Everything back to how it boots: the demo set, the built-in kits,
  *  default knobs, pattern A1, transport stopped */
 void FullReset(uint32_t now)
 {
+    if(set_op) // a set is being written or read through the buffer the default set is built in
+    {
+        Popup("busy");
+        return;
+    }
     eng->Stop();
     eng->Panic();
     memset(eng->PatternData(), 0, sizeof(uint8_t) * kPatterns * kTracks * kSteps);
@@ -4505,6 +4625,11 @@ bool BoxUiCommand(const char* c, uint32_t now)
         if(set_op && strncmp(a2, "trans ", 6) != 0)
         {
             Popup("busy");
+            return true;
+        }
+        if(!strcmp(a2, "demo")) // v13.34: the default set, from the firmware: no card needed. A page asks first
+        {
+            LoadSetBegin(-1);
             return true;
         }
         if(!sd_ok)

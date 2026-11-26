@@ -43,7 +43,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 5 Samples | Mic | `sampler` | record with this device's microphone (HTTPS on phones), live waveform, into the library, on to the selected track | built |
 | 5 Samples | Kits | - | the 8 tracks of a page as slots with waveforms (tap: select and hear); SAVE AS KIT / SAVE OVER (asks), RENAME, DELETE (asks), UNDO KIT; every kit on the Daisy, load into tracks 1-8 or 9-16 | built (v13.14) |
 | 6 Patterns | Patterns | `patterns` | 8 banks x 8 with a thumbnail each, playing and queued, copy/clear/undo | built |
-| 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition | built (v13.10) |
+| 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition; DEFAULT SET (v13.34): the set in the firmware, any time | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
 | 8 System | APC40 map | - | a drawing of the APC40: every button, knob and fader with what it does alone (white), with SHIFT (amber), on SEND C or a 303 track (blue); tap one for the full description. From v13.15 it is the editor: tap a control, CHANGE (alone or SHIFT), tap the control whose job it should do (asks which if it has two), or pick a job no button has, or nothing; "whole row" moves 8 at once; knobs and faders swap among themselves; ↺ one control back, RESET ALL (asks). Changed controls are dashed | built (v13.15; the job texts are written by hand from `daisy/box.cpp`) |
 | 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat; held FX: at once/step/beat), other modules | built |
@@ -128,6 +128,8 @@ live, with markers and bar lines), pad, list row with waveform.
   folder's files is still missing: the firmware says only where the browser is.
 - v13.33 (control protocol 12): `set over n [name]`; `set save` no longer replaces a set.
   SAVE HERE sends `set over` after its second tap.
+- v13.34 (control protocol 13): `set demo`, the default set from the firmware, switched in on
+  the bar. DEFAULT SET in both layouts' SETS (asks when there are unsaved changes).
 
 ## Layouts
 

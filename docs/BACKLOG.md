@@ -26,6 +26,25 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## v13.34: the default set, any time (on the Pi rig's Seed, flashed 2026-11-26)
+
+- The set the box starts with is now a set like any other, built in memory (`DemoFill` in
+  `daisy/box.cpp`) and switched in on the bar by `set demo`: no card, no slot, nothing can save
+  over it. DEFAULT SET on both ApcBox layouts (a second tap when there are unsaved changes), the
+  seventh action in the Daisy's SETS menu (encoder and OLED; not on the colour screen's row of
+  six), pad 6 of row 4 on the APC40's sets screen. Control protocol 13.
+- It is longer: bank A as in v13.31 (Rene: sounds great), bank B the second half: groove,
+  arpeggio, second break, a longer roll, peak, broken peak, stripped, outro. Every track has a
+  part; the 808 is on the crossfader's A side, the 909 on B, the 303s on both.
+- Tested: `daisy/sets_test.cpp` plays all 16 stages (none silent, none clipping: peak 0.74 of
+  full scale) and `APCBOX_DEMO_WAV=<file>` keeps the play-through as a WAV; the page tests load it
+  from both layouts. **Nobody has heard bank B yet.** No performance FX are preset: they are
+  momentary, a set does not store them.
+- After loading it the box remembers "no set open", so the next power-up starts with it too.
+- On the Pi rig's Seed: `set demo` with the transport stopped gave 128 BPM, no set open, the
+  kits on their crossfader sides, slot 1 untouched; `set load 1` brought the saved set back.
+  Not tried there: the switch while playing, the buttons on the pages, the APC40 pad.
+
 ## v13.33: a save doesn't replace a set (on the Pi rig's Seed, flashed 2026-11-26)
 
 - `set save n` from a page or the bridge is refused ("n is used") when it would replace a set:

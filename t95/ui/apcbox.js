@@ -741,9 +741,9 @@ const Sets = {
     this.name = el("input"); this.name.type = "text"; this.name.maxLength = 16; this.name.placeholder = "name (a-z, 0-9)"; this.name.autocapitalize = "off"; this.name.autocomplete = "off"; this.name.spellcheck = false;
     this.name.addEventListener("blur", () => setTimeout(refit, 300));
     const nmrow = el("div", "hdr"); nmrow.append(el("span", "lbl", "name"), this.name);
-    const ops = el("div", "pg"); ops.style.cssText = `grid-template-columns:repeat(${PHONE ? 3 : 5},1fr);grid-auto-rows:${sz(56, 46, 36)}px`;
+    const ops = el("div", "pg"); ops.style.cssText = `grid-template-columns:repeat(${PHONE ? 3 : 6},1fr);grid-auto-rows:${sz(56, 46, 36)}px`;
     this.btn = {};
-    [["load", "LOAD"], ["save", "SAVE HERE"], ["new", "SAVE AS NEW"], ["name", "RENAME"], ["delete", "DELETE"]].forEach(([k, n]) => { const b = el("button", "bigpad", n); b.onclick = () => this.op(k); ops.appendChild(b); this.btn[k] = b; });
+    [["load", "LOAD"], ["save", "SAVE HERE"], ["new", "SAVE AS NEW"], ["name", "RENAME"], ["delete", "DELETE"], ["demo", "DEFAULT SET"]].forEach(([k, n]) => { const b = el("button", "bigpad", n); b.onclick = () => this.op(k); ops.appendChild(b); this.btn[k] = b; });
     if (SHORT) { nmrow.appendChild(ops); ops.style.flex = "1"; view.append(hdr, list, nmrow); }
     else if (PHONE) { view.style.gridTemplateRows = "auto auto 1fr auto auto"; view.append(hdr, this.state, list, nmrow, ops); }
     else view.append(hdr, list, nmrow, ops);
@@ -754,8 +754,10 @@ const Sets = {
     /* a save that replaces a set (another slot, or the open one under a new name) asks first; from
        v13.33 the Daisy refuses it as "set save" and takes it as "set over" */
     const repl = ex && (i !== st.set || (!!nm && nm !== st.sets[i].name));
-    if ((k === "delete" || (k === "save" && repl) || (k === "load" && st.dirty)) && setConfirm !== k) { setConfirm = k; return this.J(); }
+    if ((k === "delete" || (k === "save" && repl) || ((k === "load" || k === "demo") && st.dirty)) && setConfirm !== k) { setConfirm = k; return this.J(); }
     setConfirm = "";
+    /* the default set is in the firmware (v13.34): no slot, no card, nothing can save over it */
+    if (k === "demo") { act("set demo"); return this.J(); }
     if (k === "load") { if (ex) act("set load " + (i + 1)); }
     else if (k === "save") act(((repl && st.ctl >= 12 ? "set over " : "set save ") + (i + 1) + " " + nm).trim());
     else if (k === "new") act(("set new " + nm).trim());
@@ -777,7 +779,9 @@ const Sets = {
     this.btn.load.textContent = setConfirm === "load" ? "DROP CHANGES? TAP AGAIN" : "LOAD";
     this.btn.save.textContent = setConfirm === "save" ? "OVERWRITE? TAP AGAIN" : "SAVE HERE";
     this.btn.delete.textContent = setConfirm === "delete" ? "DELETE? TAP AGAIN" : "DELETE";
-    for (const k of ["load", "save", "delete"]) this.btn[k].classList.toggle("warn", setConfirm === k);
+    this.btn.demo.textContent = setConfirm === "demo" ? "DROP CHANGES? TAP AGAIN" : "DEFAULT SET";
+    this.btn.demo.disabled = !!st.setOp || st.ctl < 13; this.btn.demo.title = st.ctl < 13 ? "needs firmware v13.34 or newer on the Daisy" : "the set the box comes with: 16 stages on banks A and B";
+    for (const k of ["load", "save", "delete", "demo"]) this.btn[k].classList.toggle("warn", setConfirm === k);
     this.trans.textContent = "switch: " + (st.transName || "-").toLowerCase();
     this.state.textContent = !st.sd ? "no SD card in the Daisy: sets need one" : st.setOp === 1 ? "saving…" : st.setOp === 2 ? "loading: switches on the bar" : "sets are saved on the Daisy's card, with their sounds";
   },
@@ -1292,7 +1296,7 @@ function apcMap() {
   db(1, "DEVICE ON/OFF", "track type", "reset knobs", "Sample or 303", "Tap: the selected track goes card sample → kit sound → 303 → kit sound. SHIFT + tap: the track's knobs back to their defaults.");
   db(2, "◄", "undo", "sample −", "Undo", "Tap: undo the last looper take, a sample changed by accident, or a kit loaded by accident. SHIFT + tap: previous sample in the folder, into the selected track.", "am");
   db(3, "►", "redo", "sample +", "Redo", "Tap: redo what undo took back. SHIFT + tap: next sample in the folder, into the selected track.", "am");
-  db(4, "DETAIL VIEW", "", "sets", "Sets screen", "SHIFT + tap: opens / closes the sets screen (pad row 3 picks a slot, row 4 pads 1-5: load, save here, save new, delete, transition; a second press confirms). Alone: nothing yet.");
+  db(4, "DETAIL VIEW", "", "sets", "Sets screen", "SHIFT + tap: opens / closes the sets screen (pad row 3 picks a slot, row 4 pads 1-6: load, save here, save new, delete, transition, the default set; a second press confirms). Alone: nothing yet.");
   db(5, "REC QUANTIZATION", "", "reload", "Reload the project", "SHIFT + tap: loads the project saved on the card again. Alone: nothing yet.");
   db(6, "MIDI OVERDUB", "overdub", "", "Overdub the loop", "Tap: record on top of the selected track's loop, in time, only at the loop's own tempo. Tap again: stop.", "warn");
   db(7, "METRONOME", "click", "monitor", "Metronome", "Tap: click on / off. SHIFT + tap: hear the audio input all the time.");
@@ -1772,7 +1776,9 @@ V.sm_lib = {
     } else {
       mk("LOAD", () => { act("set load " + (it.set + 1)); this.say("set " + (it.set + 1) + ": switches on the bar"); }, "go", !it || !it.exists);
       mk(this.sure === "save" ? "SURE?" : "SAVE HERE", () => { if (this.sure !== "save" && it.exists) { this.sure = "save"; return this.render(); } act((it.exists && st.ctl >= 12 ? "set over " : "set save ") + (it.set + 1)); this.sure = ""; this.say("saving to slot " + (it.set + 1)); this.render(); }, this.sure === "save" ? "warn" : "", !it);
-      mk("", null, "gap", true);
+      mk(this.sure === "demo" ? "SURE?" : "DEFAULT SET", () => { if (st.ctl < 13) return this.say("needs firmware v13.34 or newer on the Daisy", true);
+        if (this.sure !== "demo" && st.dirty) { this.sure = "demo"; this.say("unsaved changes go"); return this.render(); }
+        act("set demo"); this.sure = ""; this.say("default set: switches on the bar"); this.render(); }, this.sure === "demo" ? "warn" : "");
     }
     const nav = el("div", "s-nav"), pv = el("button", "b", "‹"), nx = el("button", "b", "›");
     pv.disabled = smLibPage === 0; nx.disabled = smLibPage >= pages - 1;

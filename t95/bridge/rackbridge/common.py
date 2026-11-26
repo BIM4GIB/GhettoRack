@@ -97,8 +97,8 @@ UI_ACTIONS = {"play": 2, "stop": 2, "track": 2, "turn": 2, "push": 2, "back": 2,
 UI_ACTIONS2 = {"lrec over": 7, "lrec shot": 7, "lrec undo": 7, "lrec len": 7, "lrec count": 7,
                "lrec redo": 8, "quant fx": 8,
                "kit save": 9, "kit over": 9, "kit rename": 9, "kit delete": 9,
-               "set over": 12}
-UI_FIRMWARE = {4: "v13.9", 5: "v13.10", 6: "v13.11", 7: "v13.12", 8: "v13.13", 9: "v13.14", 10: "v13.15", 11: "v13.32", 12: "v13.33"}   # control version -> firmware
+               "set over": 12, "set demo": 13}
+UI_FIRMWARE = {4: "v13.9", 5: "v13.10", 6: "v13.11", 7: "v13.12", 8: "v13.13", 9: "v13.14", 10: "v13.15", 11: "v13.32", 12: "v13.33", 13: "v13.34"}   # control version -> firmware
 UI_ACTION_MAX = 31        # HostCmd::kMaxText on the Daisy is 32
 DAISY_UI = {"play": "play", "stop": "stop", "left": "turn -1", "right": "turn 1",
             "ok": "push", "back": "back", "0": "track 10",

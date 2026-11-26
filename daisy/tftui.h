@@ -681,7 +681,7 @@ void ViewSets(uint32_t now)
 
     /* actions */
     TFill(0, 266, kTftW, 1, cLine);
-    for(int a = 0; a < kNumActs; a++)
+    for(int a = 0; a < kTftActs; a++) // DEFAULT (the seventh) is on the encoder and the APC40
     {
         int  ax = 4 + a * 79, w = 75;
         bool on = sets_mode == kSetsActions && a == sets_act;

@@ -211,7 +211,9 @@ Someone may be playing. Before anything that interrupts or writes on a rig
 a Seed; saving, loading or deleting a set, kit or take):
 
 - ask the bridge first: `/jam?json=1` (is a take recording), the `S` line
-  (is it playing, is the set unsaved), the `J` lines (which slots are taken);
+  (is it playing, is the set unsaved: counting the first number after `S` as 0, playing is
+  number 0, the open set 53, unsaved 54, busy 55; one off and "unsaved" reads the open slot),
+  the `J` lines (which slots are taken);
 - never save over a slot, a kit or a file that exists without having read
   what is there, in a step of its own, before the write;
 - a Seed with an unsaved set is not flashed or reset. Save it to a free slot

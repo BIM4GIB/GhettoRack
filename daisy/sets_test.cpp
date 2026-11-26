@@ -648,7 +648,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 12 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 13 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -721,7 +721,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 12 03 01 02 1") >= 1);
+        CHECK(T95Count("P 13 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -740,7 +740,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 12 ") >= 1);
+        CHECK(T95Count("P 13 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -776,7 +776,104 @@ int main()
                 CHECK(count(pat, 7) >= 8);                         // the bass line, every stage
             }
             CHECK(count(0, 15) == 0 && count(2, 15) > 0);          // the lead comes in at A3
-            CHECK(count(8, 0) == 0);                               // bank B is empty
+            /* v13.34: bank B is the second half. B3 is the second break (no kick, no hats), every
+               track has a part somewhere, the two kits are on the crossfader's two sides */
+            for(int pat = 8; pat < 16; pat++)
+                CHECK((count(pat, 0) > 0) == (pat != 10));
+            CHECK(count(10, 2) == 0 && count(11, 9) >= 8 && count(15, 0) == 2);
+            CHECK(count(16, 0) == 0);                              // bank C is empty
+            for(int tr = 0; tr < kTracks; tr++)
+            {
+                int n = 0;
+                for(int pat = 0; pat < 16; pat++)
+                    n += count(pat, tr);
+                CHECK(n > 0);
+                CHECK(e.track[tr].xfade == (tr == 7 || tr == 15 ? 0 : tr < 8 ? 1 : 2));
+            }
+            CHECK(e.global.xfader == 0.5f && e.track[10].prob < 1.f);
+            CHECK(e.GetNote(8, 7, 0) == 36 && e.GetNote(9, 15, 3) == 72 && e.GetSlide(9, 15, 3));
+            /* "set demo" brings it back from anywhere, on the set switch's own path: no card needed,
+               no slot opened, nothing left unsaved; refused words do nothing */
+            {
+                T95Frame("\x1bU tempo 900\n");
+                e.SetStep(0, 0, 0, 0);
+                e.SetStep(20, 3, 3, kStepOn);
+                e.track[4].mute = true;
+                T95Tick(600);
+                CHECK(set_dirty && e.global.bpm == 90.f);
+                T95Frame("\x1bU set demox\n");
+                T95Frame("\x1bU set demo 1\n");
+                T95Tick(50);
+                CHECK(e.global.bpm == 90.f && !set_op);
+                bool had = sd_ok;
+                sd_ok    = false;
+                T95Frame("\x1bU set demo\n");
+                WaitIdle();
+                T95Tick(600);
+                sd_ok = had;
+                CHECK(e.global.bpm == 128.f && e.GetStep(0, 0, 0) == kStepAccent && !e.GetStep(20, 3, 3));
+                CHECK(!e.track[4].mute && e.IsSynth(7) && e.IsSynth(15) && !e.IsSynth(6));
+                CHECK(open_set == -1 && !open_name[0] && !set_dirty && !set_op);
+            }
+            /* the default set played through, two bars a stage: every stage sounds, none clips, and the
+               peak stages are the loud ones. APCBOX_DEMO_WAV=<file> keeps it as a WAV to listen to */
+            {
+                const char* wav = getenv("APCBOX_DEMO_WAV");
+                FILE*       f   = wav ? fopen(wav, "wb") : nullptr;
+                uint32_t    frames = 0;
+                if(f)
+                    fseek(f, 44, SEEK_SET);
+                float rms[16], pk[16];
+                T95Frame("\x1bU play\n");
+                for(int pat = 0; pat < 16; pat++)
+                {
+                    e.QueuePattern(pat);
+                    double sum = 0;
+                    float  top = 0;
+                    for(int ms = 0; ms < 3750; ms++) // 2 bars at 128
+                    {
+                        Tick();
+                        for(int k = 0; k < 48; k++)
+                        {
+                            sum += outl[k] * outl[k] + outr[k] * outr[k];
+                            top = fmaxf(top, fmaxf(fabsf(outl[k]), fabsf(outr[k])));
+                            if(f)
+                            {
+                                int16_t lr[2] = {(int16_t)(fmaxf(-1.f, fminf(1.f, outl[k])) * 32767.f),
+                                                 (int16_t)(fmaxf(-1.f, fminf(1.f, outr[k])) * 32767.f)};
+                                fwrite(lr, 2, 2, f);
+                                frames++;
+                            }
+                        }
+                    }
+                    rms[pat] = (float)sqrt(sum / (3750 * 48 * 2));
+                    pk[pat]  = top;
+                }
+                T95Frame("\x1bU stop\n");
+                Tick(50);
+                e.QueuePattern(0);
+                Tick(50);
+                printf("default set, rms/peak per stage:");
+                for(int pat = 0; pat < 16; pat++)
+                    printf(" %c%d %.2f/%.2f", pat < 8 ? 'A' : 'B', pat % 8 + 1, rms[pat], pk[pat]);
+                printf("\n");
+                for(int pat = 0; pat < 16; pat++)
+                    CHECK(rms[pat] > 0.02f && pk[pat] <= 1.0f);
+                CHECK(rms[12] > rms[10] && rms[7] > rms[5] && rms[12] > rms[15]); // peaks over breaks and the outro
+                if(f)
+                {
+                    uint32_t data = frames * 4, v;
+                    uint16_t w;
+                    fseek(f, 0, SEEK_SET);
+                    fwrite("RIFF", 1, 4, f); v = 36 + data; fwrite(&v, 4, 1, f);
+                    fwrite("WAVEfmt ", 1, 8, f); v = 16; fwrite(&v, 4, 1, f);
+                    w = 1; fwrite(&w, 2, 1, f); w = 2; fwrite(&w, 2, 1, f);
+                    v = 48000; fwrite(&v, 4, 1, f); v = 192000; fwrite(&v, 4, 1, f);
+                    w = 4; fwrite(&w, 2, 1, f); w = 16; fwrite(&w, 2, 1, f);
+                    fwrite("data", 1, 4, f); fwrite(&data, 4, 1, f);
+                    fclose(f);
+                }
+            }
             CHECK(e.IsSynth(7) && e.IsSynth(15) && !e.IsSynth(6) && !e.IsSynth(14));
             CHECK(e.GetNote(0, 7, 0) == 36 && e.GetNote(3, 15, 0) == 72);
             CHECK(e.GetStep(0, 7, 3) == kStepAccent && e.GetSlide(0, 7, 5));
@@ -1244,7 +1341,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 12 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 13 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
