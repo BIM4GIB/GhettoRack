@@ -144,9 +144,18 @@ The T95 keeps the sample library; the Daisy only gets a track's sound.
   microphone (echo cancellation, noise suppression and auto gain off), up to
   30 s, uploads it and, unless unticked, sends it to the selected track.
   Phones only allow the microphone on HTTPS, so the bridge also serves
-  `https://<t95-ip>:8443/` with a self-signed certificate it makes itself
-  (openssl, in the state folder, remade when the address changes). The
-  browser warns once. On plain HTTP the panel links to the HTTPS page.
+  `https://<box>.local:8443/` with a self-signed certificate it makes itself
+  (openssl, in the state folder, kept until the box is renamed; it names the
+  box and the hotspot's address, not the address of the day). The browser
+  warns once per device. On plain HTTP the panel links to the HTTPS page.
+  No warning on your own devices: `tools/boxcert.py ca` once, then
+  `tools/boxcert.py box <ssh host>` per box. That makes an authority of your
+  own on your computer (it can only sign `.local` names and the hotspot's
+  address) and puts `own.crt` / `own.key` in the box's state folder, which
+  the bridge prefers. Each device trusts the authority once; a phone gets it
+  from `http://<box>.local:8040/ca.crt`. Until the address-of-the-day was
+  dropped (2026-11-26) the Pi made a new certificate at every boot, because
+  the Wi-Fi was not up yet when the bridge started: seen in its log.
 - `/health` → `samples`: current transfer, queue, recent results, speed.
   Browsers get `xfer` events with the same.
 

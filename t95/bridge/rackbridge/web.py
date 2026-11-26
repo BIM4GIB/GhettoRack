@@ -50,15 +50,31 @@ def local_ips():
     return sorted(i for i in ips if ":" not in i)
 
 
-def tls_context(directory):
-    """Self-signed certificate for the HTTPS port (phones only give the page
-    the microphone over HTTPS). Made once with openssl, kept in the state
-    folder; a new one when the T95's address changes."""
+TLS_HOTSPOT = "10.42.0.1"          # the box on its own hotspot (the settings helper's --hot-addr)
+
+
+def tls_context(directory, host=None):
+    """The certificate for the HTTPS port (phones only give the page the microphone
+    over HTTPS). own.crt + own.key in the state folder, if they are there and load:
+    one signed for this box by the owner's own authority (tools/boxcert.py), never
+    replaced here. Else a self-signed one, made once with openssl and kept until the
+    box is renamed: a new one at every boot would cost every browser its exception
+    again. It names the box, not its address on the network (that changes), and the
+    hotspot's address (that doesn't)."""
     os.makedirs(directory, exist_ok=True)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    own, own_key = os.path.join(directory, "own.crt"), os.path.join(directory, "own.key")
+    if os.path.exists(own) and os.path.exists(own_key):
+        try:
+            ctx.load_cert_chain(own, own_key)
+            log.info("HTTPS with the certificate supplied for this box (own.crt)")
+            return ctx
+        except (ssl.SSLError, OSError) as e:
+            log.warning("own.crt / own.key didn't load (%s): using the box's own certificate", type(e).__name__)
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     crt, key = os.path.join(directory, "tls.crt"), os.path.join(directory, "tls.key")
-    ips = local_ips()
-    host = socket.gethostname()
-    want = ",".join(["DNS:" + host, "DNS:" + host + ".local"] + ["IP:" + i for i in ips])
+    host = host or socket.gethostname()
+    want = ",".join(["DNS:" + host, "DNS:" + host + ".local", "IP:" + TLS_HOTSPOT])
     stamp = os.path.join(directory, "tls.san")
     have = open(stamp).read() if os.path.exists(stamp) else ""
     if not (os.path.exists(crt) and os.path.exists(key)) or have != want:
@@ -71,7 +87,6 @@ def tls_context(directory):
         with open(stamp, "w") as f:
             f.write(want)
         log.info("made a TLS certificate for %s", want)
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(crt, key)
     return ctx
 
@@ -282,6 +297,12 @@ class WebMixin:
                     await self.reply(writer, 404, "text/plain", b"not installed\n")
                 else:
                     await self.reply(writer, 200, "text/css; charset=utf-8" if path.endswith(".css") else "text/javascript; charset=utf-8", body)
+            elif path == "/ca.crt":            # the owner's authority (tools/boxcert.py), for a phone to install; public by nature
+                try:
+                    with open(os.path.join(os.path.dirname(self.args.state), "own-ca.crt"), "rb") as f:
+                        await self.reply(writer, 200, "application/x-x509-ca-cert", f.read(65536))
+                except OSError:
+                    await self.reply(writer, 404, "text/plain", b"this box has no certificate of the owner's (tools/boxcert.py)\n")
             elif path == "/clock" and "json" not in params:
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["clock"])
             elif path == "/clock":

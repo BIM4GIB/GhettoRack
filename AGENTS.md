@@ -38,7 +38,8 @@ pi4/        the same companion on a Raspberry Pi 4 with the 3.5" touch screen on
             touchlag.py, shot.py: a screenshot of the kiosk's page)
 protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
-            flash-seed.sh (flash one chosen Seed; macOS and Linux)
+            flash-seed.sh (flash one chosen Seed; macOS and Linux),
+            boxcert.py (HTTPS without a browser warning: your own authority, a certificate per box)
 docs/       CANON.md (how a module and its screens are made: read it before touching a
             page), wiring-guide.html (every connection, diagrams), images/
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules

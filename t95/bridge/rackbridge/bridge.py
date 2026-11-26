@@ -143,7 +143,7 @@ async def main_async(args):
             ctx = tls_context(os.path.dirname(args.state))
             tls = await asyncio.start_server(b.handle_http, args.host, args.https_port, ssl=ctx, limit=16384)
             servers.append(tls.serve_forever())
-            log.info("serving https://%s:%d/ (self-signed: the browser warns once)", args.host, args.https_port)
+            log.info("serving https://%s:%d/", args.host, args.https_port)
         except (OSError, ssl.SSLError) as e:
             log.warning("no HTTPS (the page's record button needs it on phones): %s", e)
     import signal

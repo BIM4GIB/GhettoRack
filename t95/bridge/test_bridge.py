@@ -3749,6 +3749,16 @@ class SettingsTest(unittest.TestCase):
     def state(self):
         return json.loads(BridgeTest.get("/sys/state")[2])
 
+    def test_s00_the_owners_authority_for_a_phone(self):
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen("http://127.0.0.1:%d/ca.crt" % self.http, timeout=5)
+        self.assertEqual(e.exception.code, 404)
+        with open(os.path.join(self.dir, "own-ca.crt"), "w") as f:
+            f.write("-----BEGIN CERTIFICATE-----\nabc\n")
+        r = urllib.request.urlopen("http://127.0.0.1:%d/ca.crt" % self.http, timeout=5)
+        self.assertEqual((r.headers["Content-Type"], r.read()), ("application/x-x509-ca-cert", b"-----BEGIN CERTIFICATE-----\nabc\n"))
+        os.unlink(os.path.join(self.dir, "own-ca.crt"))
+
     def test_s0_devices(self):
         """Settings > Devices: the sound cards with what the box uses each for, the SD card"""
         BridgeTest.http = self.http
@@ -4482,6 +4492,51 @@ while True:
     if d > 0:
         time.sleep(d)
 """
+
+
+class CertTest(unittest.TestCase):
+    """The HTTPS certificate: kept across starts, replaced only by a rename, and the owner's own one wins"""
+
+    def test_c1_kept_until_the_box_is_renamed_and_a_supplied_one_wins(self):
+        import ssl
+        from rackbridge.web import tls_context
+        d = tempfile.mkdtemp()
+        rd = lambda n: open(os.path.join(d, n), "rb").read()
+        tls_context(d, "rack")
+        first = rd("tls.crt")
+        self.assertEqual(open(os.path.join(d, "tls.san")).read(), "DNS:rack,DNS:rack.local,IP:10.42.0.1")   # no address of the day
+        self.assertEqual(os.stat(os.path.join(d, "tls.key")).st_mode & 0o777, 0o600)
+        tls_context(d, "rack")
+        self.assertEqual(rd("tls.crt"), first, "a start must not cost the browsers their exception")
+        tls_context(d, "other")
+        self.assertNotEqual(rd("tls.crt"), first)
+        # the owner's own: used as it is, nothing made beside it; one that doesn't load falls back
+        e = tempfile.mkdtemp()
+        os.rename(os.path.join(d, "tls.crt"), os.path.join(e, "own.crt"))
+        os.rename(os.path.join(d, "tls.key"), os.path.join(e, "own.key"))
+        ctx = tls_context(e, "rack")
+        self.assertEqual(sorted(os.listdir(e)), ["own.crt", "own.key"])
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        got = []
+
+        def serve():
+            c, _ = srv.accept()
+            try:
+                ctx.wrap_socket(c, server_side=True).close()
+            except OSError:
+                pass
+        threading.Thread(target=serve, daemon=True).start()
+        cl = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        cl.check_hostname, cl.verify_mode = False, ssl.CERT_NONE
+        with cl.wrap_socket(socket.create_connection(srv.getsockname())) as c:
+            got.append(ssl.DER_cert_to_PEM_cert(c.getpeercert(True)))
+        self.assertEqual(got[0].replace("\n", ""), open(os.path.join(e, "own.crt")).read().replace("\n", ""))
+        with open(os.path.join(e, "own.crt"), "w") as f:
+            f.write("not a certificate\n")
+        tls_context(e, "rack")
+        self.assertIn("tls.crt", os.listdir(e))
 
 
 class JamTest(unittest.TestCase):
