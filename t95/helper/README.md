@@ -25,6 +25,24 @@ Tests: `python3 t95/helper/test_helper.py` (fake `wpa_cli`, `netplan`,
 `systemctl`; no root, no network). The bridge's side is in
 `t95/bridge/test_bridge.py` (`SettingsTest`).
 
+## On a box with NetworkManager (a Raspberry Pi)
+
+`--net auto` (the default) takes NetworkManager when it runs; `--net wpa` or `--net nm`
+says it outright. The commands, the PIN and what a page sees are the same; underneath:
+
+| | |
+|---|---|
+| A network | A connection profile, written as a keyfile (mode 600) into `/etc/NetworkManager/system-connections` and loaded, so a password is never on a command line. Scanning is `nmcli device wifi list` |
+| No lockout | A join is the profile `ghettorack-trial`, not one NetworkManager returns to by itself. No connection in 25 s, or no confirm in 60 s: it is deleted and the connection from before is brought up again. Confirmed: it is renamed `ghettorack <name>` and set to connect by itself. Only profiles with that prefix can be forgotten on the page; the one from the install stays |
+| Hotspot | The profile `ghettorack-hotspot`: access point, WPA2, channel 6, `10.42.0.1`, NetworkManager's shared mode hands out the addresses (it needs `dnsmasq-base`). Unlike the T95's it gives the phone a route through the box. Who is on it: `iw dev wlan0 station dump`. Same rules: by hand it goes back to the Wi-Fi when nobody joins in 2 minutes; by itself it steps aside every few minutes to look for a network the box knows |
+| Bluetooth | No attach tool: the radio is there from the start. On and off is its block switch and `bluetoothctl power` |
+
+Tested with a stand-in `nmcli` (`NmTest` in `test_helper.py`). **On the Pi itself only what
+reads has run** (2026-11-26: status, a scan, the Settings tabs on its screen). A join, the
+hotspot and Bluetooth on have not been tried on the radio; do the first join with a second
+way in at hand (a keyboard, or the card in a reader).
+
+
 Seen on the T95 (2026-11-23): PIN, box name, scan, Bluetooth at boot and at
 shutdown. A wrong password in the join trial: the box left its network, got
 "wrong password" from wpa_supplicant (TEMP-DISABLED, reason WRONG_KEY) and was

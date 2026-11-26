@@ -3763,9 +3763,15 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(sd["bytes"] > sd["free"] > 0)
         os.rename(self.sd, self.sd + ".out")                                    # the card pulled
         BridgeTest.wait_health(lambda h: h["devices"]["sd"] == {"state": "none"}, 10)
-        os.makedirs(os.path.join(self.dir, "block", "mmcblk0", "device"))      # one the box can't read (not FAT)
-        with open(os.path.join(self.dir, "block", "mmcblk0", "device", "type"), "w") as f:
+        os.makedirs(os.path.join(self.dir, "block", "mmcblk7", "device"))      # one the box can't read (not FAT)
+        with open(os.path.join(self.dir, "block", "mmcblk7", "device", "type"), "w") as f:
             f.write("SD\n")
+        from rackbridge import devices                                          # the card a Pi runs from is not "a card in the slot"
+        mounts = os.path.join(self.dir, "mounts")
+        with open(mounts, "w") as f:
+            f.write("/dev/mmcblk7p2 / ext4 rw 0 0\n/dev/mmcblk7p1 /boot/firmware vfat rw 0 0\n")
+        self.assertTrue(devices.sd_in_slot(os.path.join(self.dir, "block"), os.path.join(self.dir, "no-such")))
+        self.assertFalse(devices.sd_in_slot(os.path.join(self.dir, "block"), mounts))
         BridgeTest.wait_health(lambda h: h["devices"]["sd"] == {"state": "unreadable"}, 10)
         os.rename(self.sd + ".out", self.sd)
         BridgeTest.wait_health(lambda h: h["devices"]["sd"]["state"] == "ready", 10)

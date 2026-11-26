@@ -51,6 +51,134 @@ exit 0
 """
 
 
+FAKE_NM = r"""#!/usr/bin/env python3
+# NetworkManager as far as the helper uses it: nmcli, and iw for who is on the hotspot.
+# State in $FAKEDIR/nm.json; nm-mode (ok / wrong / never) is what a tried network does,
+# nm-air the networks in the air, nm-clients the phones on the hotspot.
+import fcntl, json, os, sys, time
+D, me, a = os.environ["FAKEDIR"], os.path.basename(sys.argv[0]), sys.argv[1:]
+open(os.environ["FAKELOG"], "a").write(me + " " + " ".join(a) + "\n")
+def rd(n, dflt):
+    try:
+        return open(os.path.join(D, n)).read().strip()
+    except OSError:
+        return dflt
+if me == "iw":
+    for c in rd("nm-clients", "").split():
+        print("Station %s (on wlan0)" % c)
+    sys.exit(0)
+lock = open(os.path.join(D, "nm.lock"), "w")
+fcntl.flock(lock, fcntl.LOCK_EX)
+P = os.path.join(D, "nm.json")
+st = json.load(open(P))
+air = json.loads(rd("nm-air", '["Home Net", "Cafe Open"]'))
+def save():
+    json.dump(st, open(P + ".tmp", "w")); os.replace(P + ".tmp", P)
+def esc(x):
+    return x.replace("\\", "\\\\").replace(":", "\\:")
+def can(n):
+    c = st["cons"][n]
+    return c.get("mode") == "ap" or c["ssid"] in air
+def settle():
+    if st["active"] is None:
+        for n, c in st["cons"].items():
+            if c["auto"] and c.get("mode") != "ap" and can(n):
+                st["active"] = n
+                return True
+    return st["active"] is not None
+def bye(rc, msg=""):
+    save()
+    if msg:
+        print(msg)
+    sys.exit(rc)
+wait = 0
+if a[:1] == ["--wait"]:
+    wait, a = float(a[1]), a[2:]
+if st["active"] and not can(st["active"]):
+    st["active"] = None
+if a[:3] == ["-t", "-f", "NAME,TYPE"]:
+    bye(0, "\n".join(esc(n) + ":802-11-wireless" for n in st["cons"]) + "\nWired connection 1:802-3-ethernet")
+if a[:2] == ["-t", "-f"] and a[3:5] == ["device", "show"]:
+    settle()
+    n = st["active"]
+    out = ["GENERAL.STATE:" + ("100 (connected)" if n else "30 (disconnected)"), "GENERAL.CONNECTION:" + (esc(n) if n else "")]
+    if n:
+        out.append("IP4.ADDRESS[1]:" + ("10.42.0.1/24" if st["cons"][n].get("mode") == "ap" else "198.51.100.7/24"))
+    bye(0, "\n".join(out))
+if a[:2] == ["-t", "-f"] and a[3:6] == ["device", "wifi", "list"]:
+    if rd("nm-dead", ""):
+        bye(8, "Error: NetworkManager is not running.")
+    n = st["active"]
+    cur = st["cons"][n]["ssid"] if n and st["cons"][n].get("mode") != "ap" else None
+    rows = [("Home Net", 82, "WPA2"), ("Home Net", 40, "WPA2"), ("Cafe Open", 38, ""), ("", 60, "WPA2"), ("Studio \"5G\": x", 70, "WPA2 WPA3"), ("Venue", 55, "WPA2")]
+    out = []
+    for ssid, sig, sec in rows:
+        if ssid == "" or ssid in air:
+            star = "*" if ssid == cur and sig != 40 else " "
+            out.append(":".join([star, esc(ssid)] + ([str(sig), sec] if "SIGNAL" in a[2] else [])))
+    bye(0, "\n".join(out))
+if a[:2] == ["connection", "load"]:
+    c = {"path": a[2], "auto": True, "ssid": "", "mode": "", "psk": False}
+    name = None
+    for l in open(a[2]).read().splitlines():
+        k, _, v = l.partition("=")
+        if k == "id": name = v
+        if k == "autoconnect": c["auto"] = v == "true"
+        if k == "ssid": c["ssid"] = bytes(int(x) for x in v.split(";") if x).decode()
+        if k == "mode": c["mode"] = v
+        if k == "psk": c["psk"] = True
+        if k == "method" and v == "shared": c["shared"] = True
+    if os.stat(a[2]).st_mode & 0o077 or name is None:
+        bye(1, "Error: failed to load connection")
+    st["cons"][name] = c
+    bye(0)
+if a[:3] == ["connection", "delete", "id"]:
+    if a[3] not in st["cons"]:
+        bye(10, "Error: unknown connection '%s'." % a[3])
+    c = st["cons"].pop(a[3])
+    if c.get("path") and os.path.exists(c["path"]):
+        os.unlink(c["path"])
+    if st["active"] == a[3]:
+        st["active"] = None
+    bye(0)
+if a[:3] == ["connection", "up", "id"]:
+    n = a[3]
+    if n not in st["cons"]:
+        bye(10, "Error: unknown connection '%s'." % n)
+    mode = rd("nm-mode", "ok")
+    if st["cons"][n].get("mode") != "ap":
+        if mode == "wrong":
+            st["active"] = None
+            bye(4, "Error: Connection activation failed: (7) Secrets were required, but not provided.")
+        if mode == "never" or not can(n):
+            st["active"] = None
+            save()
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            time.sleep(min(wait, 1.0))
+            print("Error: Timeout expired (%d seconds)" % wait)
+            sys.exit(3)
+    elif rd("nm-noap", ""):
+        bye(4, "Error: Connection activation failed: (1) Unknown error.")
+    st["active"] = n
+    bye(0)
+if a[:3] == ["connection", "modify", "id"]:
+    if a[3] not in st["cons"] or rd("nm-nosave", ""):
+        bye(1, "Error: failed to modify connection")
+    c, name = st["cons"].pop(a[3]), a[3]
+    for k, v in zip(a[4::2], a[5::2]):
+        if k == "connection.id": name = v
+        if k == "connection.autoconnect": c["auto"] = v == "yes"
+    st["cons"][name] = c
+    if st["active"] == a[3]:
+        st["active"] = name
+    bye(0)
+if a[:2] == ["device", "connect"]:
+    st["active"] = None
+    bye(0 if settle() else 4, "")
+bye(0)
+"""
+
+
 class FakeWpa(threading.Thread):
     """wpa_supplicant's control socket, as far as the helper uses it. mode: what a
     tried network does: "ok" connects, "wrong" gets temp-disabled, "never" keeps scanning."""
@@ -550,6 +678,272 @@ def wav(data, says=None):
     n = len(data) if says is None else says
     return (b"RIFF" + struct.pack("<I", 36 + n) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, 48000, 192000, 4, 16)
             + b"data" + struct.pack("<I", n) + data)
+
+
+class NmTest(unittest.TestCase):
+    """The same commands on a box with NetworkManager (a Raspberry Pi), against a stand-in nmcli."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp()
+        cls.bin = os.path.join(cls.dir, "bin")
+        cls.nmdir = os.path.join(cls.dir, "system-connections")
+        os.makedirs(cls.bin)
+        os.makedirs(cls.nmdir)
+        tools = {}
+        for t in ("hostnamectl", "systemctl", "bluetoothctl", "dnsmasq", "nmcli", "iw"):
+            p = os.path.join(cls.bin, t)
+            open(p, "w").write(FAKE_NM.replace("#!/usr/bin/env python3", "#!" + sys.executable) if t in ("nmcli", "iw") else FAKE)
+            os.chmod(p, 0o755)
+            tools[t] = p
+        for i, (typ, soft) in enumerate((("wlan", "0"), ("bluetooth", "1"))):
+            os.makedirs(os.path.join(cls.dir, "rfkill", "rfkill%d" % i))
+            open(os.path.join(cls.dir, "rfkill", "rfkill%d" % i, "type"), "w").write(typ + "\n")
+            open(os.path.join(cls.dir, "rfkill", "rfkill%d" % i, "soft"), "w").write(soft)
+        os.makedirs(os.path.join(cls.dir, "btclass", "hci0"))                                        # the Pi's radio is there from the start
+        cls.log = os.path.join(cls.dir, "calls.log")
+        cls.sock = os.path.join(cls.dir, "h.sock")
+        json.dump({"active": "preconfigured", "cons": {
+            "preconfigured": {"ssid": "Home Net", "auto": True, "mode": ""},                          # from the install
+            "ghettorack-hotspot": {"ssid": "old", "auto": False, "mode": "ap"}}},                      # from a helper that died
+            open(os.path.join(cls.dir, "nm.json"), "w"))
+        env = dict(os.environ, FAKELOG=cls.log, FAKEDIR=cls.dir)
+        cls.proc = subprocess.Popen(
+            [sys.executable, os.path.join(HERE, "ghettorack_helper.py"), "--socket", cls.sock, "--state-dir", os.path.join(cls.dir, "state"),
+             "--net", "nm", "--nmcli", tools["nmcli"], "--iw", tools["iw"], "--nm-dir", cls.nmdir, "--dnsmasq", tools["dnsmasq"],
+             "--trial-s", "1.5", "--select-s", "0.05", "--connect-s", "1.5", "--watch-s", "0.05",
+             "--keep-s", "0.1", "--auto-s", "0.8", "--hot-trial-s", "1.5", "--rescan-s", "0.8", "--lock-s", "1.2",
+             "--rfkill-dir", os.path.join(cls.dir, "rfkill"), "--bt-class-dir", os.path.join(cls.dir, "btclass"),
+             "--attach", os.path.join(cls.dir, "no-attach-tool"), "--group", "no-such-group",
+             "--hostnamectl", tools["hostnamectl"], "--systemctl", tools["systemctl"], "--bluetoothctl", tools["bluetoothctl"]],
+            env=env, stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "helper.log"), "w"))
+        for _ in range(100):
+            if os.path.exists(cls.sock):
+                break
+            time.sleep(0.05)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.proc.kill()
+
+    ask = HelperTest.ask
+    join = HelperTest.join
+    hot_set = HelperTest.hot_set
+    calls = HelperTest.calls
+
+    def nm(self):
+        for _ in range(20):
+            try:
+                return json.load(open(os.path.join(self.dir, "nm.json")))
+            except (OSError, ValueError):
+                time.sleep(0.02)
+
+    def put(self, name, text):
+        p = os.path.join(self.dir, name)
+        if text is None:
+            if os.path.exists(p):
+                os.unlink(p)
+        else:
+            open(p + ".tmp", "w").write(text)
+            os.replace(p + ".tmp", p)
+
+    def until(self, f, t=5):
+        end = time.time() + t
+        while not f() and time.time() < end:
+            time.sleep(0.05)
+        self.assertTrue(f())
+
+    def trial(self):
+        return self.ask(cmd="status")["trial"]
+
+    def ended(self, t=4):
+        end = time.time() + t
+        while self.trial() and time.time() < end:
+            time.sleep(0.05)
+        self.assertIsNone(self.trial())
+        return self.ask(cmd="status")["last"]
+
+    def test_n1_status_and_scan(self):
+        self.until(lambda: "ghettorack-hotspot" not in self.nm()["cons"])                             # the left-over hotspot is gone
+        st = self.ask(cmd="status")
+        self.assertEqual(st["wifi"], {"ssid": "Home Net", "state": "COMPLETED", "ip": "198.51.100.7", "iface": "wlan0"})
+        self.assertEqual((st["saved"], st["trial"], st["last"]), ([], None, None))
+        n = self.ask(cmd="scan")["networks"]
+        self.assertEqual([(x["ssid"], x["signal"], x["secure"], x["current"], x["saved"]) for x in n],
+                         [("Home Net", 82, True, True, False), ("Cafe Open", 38, False, False, False)])   # best of two, hidden one dropped
+        self.put("nm-dead", "1")
+        self.assertIn("isn't answering", self.ask(cmd="scan")["error"])
+        self.put("nm-dead", None)
+        self.assertEqual(self.ask(cmd="pin_set", new="4711"), {"ok": True})
+
+    def test_n2_join_is_a_trial(self):
+        P, name, key = "4711", 'Studio "5G": x', " pass\\word 123 "
+        self.put("nm-air", json.dumps(["Home Net", "Cafe Open", name]))
+        self.assertIn("8 to 63", self.join("X", "short")["error"])
+        self.assertIn("can't be used", self.join("a\nb", "longenough")["error"])
+        # wrong password: back at once, nothing kept, the old network is back
+        self.put("nm-mode", "wrong")
+        t0 = time.time()
+        self.assertEqual(self.join(name, key), {"ok": True, "trial_s": 1.5, "connect_s": 1.5})
+        self.assertEqual(self.ended(), {"ssid": name, "ok": False, "why": "wrong password"})
+        self.assertLess(time.time() - t0, 1.5)
+        self.assertEqual((list(self.nm()["cons"]), self.nm()["active"]), (["preconfigured"], "preconfigured"))
+        self.assertEqual(os.listdir(self.nmdir), [])
+        # it never connects: back after the connect time; nothing else meanwhile
+        self.put("nm-mode", "never")
+        self.assertTrue(self.join(name, key)["ok"])
+        self.assertEqual((self.trial()["ssid"], self.trial()["phase"]), (name, "connecting"))
+        self.assertIn("being tried", self.join("Other", "12345678")["error"])
+        self.assertIn("being tried", self.ask(cmd="forget", pin=P, ssid="Other")["error"])
+        self.assertIn("being tried", self.ask(cmd="hotspot", pin=P, on=True)["error"])
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": False})
+        self.assertIn("no connection", self.ended()["why"])
+        self.assertEqual((list(self.nm()["cons"]), self.nm()["active"]), (["preconfigured"], "preconfigured"))
+        # it connects but nobody confirms: back after the trial time
+        self.put("nm-mode", "ok")
+        self.assertTrue(self.join(name, key)["ok"])
+        self.until(lambda: (self.trial() or {}).get("phase") == "connected")
+        c = self.nm()["cons"]["ghettorack-trial"]
+        self.assertEqual((self.nm()["active"], c["ssid"], c["auto"], c["psk"]), ("ghettorack-trial", name, False, True))   # not one it returns to by itself
+        f = os.path.join(self.nmdir, "ghettorack-trial.nmconnection")
+        self.assertEqual(stat.S_IMODE(os.stat(f).st_mode), 0o600)
+        self.assertIn("psk" + "=\\spass\\\\word 123\\s\n", open(f).read())                              # as a keyfile wants it
+        self.assertEqual(self.ask(cmd="status")["wifi"]["ssid"], name)
+        self.assertIn("nobody confirmed", self.ended()["why"])
+        self.assertEqual((list(self.nm()["cons"]), self.nm()["active"]), (["preconfigured"], "preconfigured"))
+        self.assertEqual(os.listdir(self.nmdir), [])
+        # confirmed: kept under its own name, comes back by itself from now on; the one from the install stays
+        self.assertTrue(self.join(name, key)["ok"])
+        self.until(lambda: (self.trial() or {}).get("phase") == "connected")
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": True})
+        self.assertEqual(self.ask(cmd="status")["last"], {"ssid": name, "ok": True, "why": ""})
+        time.sleep(1.9)
+        kept = "ghettorack " + name
+        self.assertEqual((sorted(self.nm()["cons"]), self.nm()["active"], self.nm()["cons"][kept]["auto"]), (sorted(["preconfigured", kept]), kept, True))
+        self.assertEqual(self.ask(cmd="status")["saved"], [name])
+        self.assertTrue([n for n in self.ask(cmd="scan")["networks"] if n["ssid"] == name][0]["saved"])
+        # an open one; the next try doesn't take the kept one's file with it
+        self.assertTrue(self.join("Cafe Open", "")["ok"])
+        self.until(lambda: (self.trial() or {}).get("phase") == "connected")
+        self.assertIn(kept, self.nm()["cons"])
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": True})
+        self.assertEqual(self.ask(cmd="status")["saved"], ["Cafe Open", name])
+        self.assertFalse(self.nm()["cons"]["ghettorack Cafe Open"]["psk"])
+        # NetworkManager says no at the confirm: not kept, and the box goes back
+        self.put("nm-nosave", "1")
+        self.put("nm-air", json.dumps(["Home Net", "Cafe Open", name, "Venue"]))
+        self.assertTrue(self.join("Venue", "12345678")["ok"])
+        self.until(lambda: (self.trial() or {}).get("phase") == "connected")
+        self.assertIn("didn't keep it", self.ask(cmd="confirm")["error"])
+        self.put("nm-nosave", None)
+        self.assertIsNone(self.trial())
+        self.assertEqual((self.nm()["active"], "ghettorack Venue" in self.nm()["cons"]), ("ghettorack Cafe Open", False))
+        # forget: only what was added here, and not the one the box is on
+        self.assertIn("came with the install", self.ask(cmd="forget", pin=P, ssid="Home Net")["error"])
+        self.assertIn("right now", self.ask(cmd="forget", pin=P, ssid="Cafe Open")["error"])
+        self.assertIn("PIN", self.ask(cmd="forget", ssid=name)["error"])
+        self.assertEqual(self.ask(cmd="forget", pin=P, ssid=name), {"ok": True})
+        self.put("nm-air", json.dumps(["Home Net"]))
+        self.until(lambda: self.ask(cmd="status")["wifi"]["ssid"] == "Home Net")
+        self.assertEqual(self.ask(cmd="forget", pin=P, ssid="Cafe Open"), {"ok": True})
+        self.assertEqual(list(self.nm()["cons"]), ["preconfigured"])
+        # passwords never reach the log or a command line
+        for text in (open(os.path.join(self.dir, "helper.log")).read(), "\n".join(self.calls())):
+            self.assertNotIn("word 123", text)
+            self.assertNotIn("12345678", text)
+
+    def test_n3_hotspot(self):
+        P, key, name = "4711", "rack rack 99", socket.gethostname()
+        self.put("nm-air", json.dumps(["Home Net"]))
+
+        def hot():
+            return self.ask(cmd="status")["hotspot"]
+
+        def ap():
+            n = self.nm()
+            return n["active"] == "ghettorack-hotspot" and n["cons"].get("ghettorack-hotspot")
+        self.assertEqual(hot(), {"set": False, "auto": False, "tool": True, "on": False, "by": "", "clients": 0, "ssid": name, "addr": "10.42.0.1"})
+        self.assertIn("password first", self.ask(cmd="hotspot", pin=P, on=True)["error"])
+        self.assertEqual(self.hot_set(P, key, auto=False), {"ok": True})
+        # by hand: named like the box, with a password, NetworkManager hands out the addresses; nobody joins: back to the Wi-Fi
+        r = self.ask(cmd="hotspot", pin=P, on=True)
+        self.assertEqual((r["ok"], r["ssid"], r["addr"]), (True, name, "10.42.0.1"))
+        self.until(ap)
+        c = ap()
+        self.assertEqual((c["ssid"], c["mode"], c["psk"], c.get("shared"), c["auto"]), (name, "ap", True, True, False))
+        self.assertEqual((hot()["on"], hot()["by"]), (True, "hand"))
+        self.assertEqual(self.ask(cmd="status")["wifi"]["state"], "DISCONNECTED")                       # the hotspot is not "on a Wi-Fi"
+        self.until(lambda: self.nm()["active"] == "preconfigured")
+        self.assertEqual((hot()["on"], list(self.nm()["cons"]), os.listdir(self.nmdir)), (False, ["preconfigured"], []))
+        self.assertIn("nobody joined", self.ask(cmd="status")["last"]["why"])
+        # somebody joins: it stays, also after they leave
+        self.ask(cmd="hotspot", pin=P, on=True)
+        self.until(ap)
+        self.put("nm-clients", "XX:XX:XX:XX:XX:01 XX:XX:XX:XX:XX:02")
+        self.until(lambda: hot()["clients"] == 2)
+        time.sleep(1.8)
+        self.assertTrue(ap())
+        self.put("nm-clients", "")
+        time.sleep(1.8)
+        self.assertTrue(ap())
+        # a join from the hotspot that fails brings the hotspot back; one that works ends it
+        self.put("nm-mode", "wrong")
+        self.assertTrue(self.join("Venue", "12345678")["ok"])
+        self.until(lambda: self.ask(cmd="status")["last"] is not None and not self.trial())
+        self.assertTrue(ap())
+        self.assertTrue(hot()["on"])
+        self.put("nm-mode", "ok")
+        self.put("nm-air", json.dumps(["Home Net", "Venue"]))
+        self.assertTrue(self.join("Venue", "12345678")["ok"])
+        self.until(lambda: (self.trial() or {}).get("phase") == "connected")
+        self.assertEqual(self.ask(cmd="confirm"), {"ok": True, "kept": True})
+        self.assertEqual((hot()["on"], sorted(self.nm()["cons"]), self.nm()["active"]), (False, ["ghettorack Venue", "preconfigured"], "ghettorack Venue"))
+        self.put("nm-air", json.dumps(["Home Net"]))
+        self.until(lambda: self.ask(cmd="status")["wifi"]["ssid"] == "Home Net")
+        self.assertEqual(self.ask(cmd="forget", pin=P, ssid="Venue"), {"ok": True})
+        # off in Settings ends it
+        self.ask(cmd="hotspot", pin=P, on=True)
+        self.until(ap)
+        self.assertEqual(self.ask(cmd="hotspot", pin=P, on=False), {"ok": True})
+        self.until(lambda: not hot()["on"] and self.nm()["active"] == "preconfigured")
+        # a radio that won't be an access point: said so, and back on the Wi-Fi
+        self.put("nm-noap", "1")
+        self.ask(cmd="hotspot", pin=P, on=True)
+        self.until(lambda: "didn't start" in (self.ask(cmd="status")["last"] or {}).get("why", ""))
+        self.put("nm-noap", None)
+        self.assertEqual((hot()["on"], self.nm()["active"], list(self.nm()["cons"])), (False, "preconfigured", ["preconfigured"]))
+        # by itself: no known Wi-Fi for a while brings it up; it steps aside to look, and a known one ends it
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, auto=True), {"ok": True})
+        time.sleep(1.2)
+        self.assertFalse(ap())                                                                        # there is Wi-Fi: no hotspot
+        self.put("nm-air", "[]")
+        self.until(ap)
+        self.assertEqual(hot()["by"], "itself")
+        self.put("nm-clients", "XX:XX:XX:XX:XX:01")
+        self.put("nm-air", json.dumps(["Home Net"]))
+        time.sleep(1.8)
+        self.assertTrue(ap())                                                                         # somebody is on it: it stays
+        self.put("nm-air", "[]")
+        self.put("nm-clients", "")
+        self.until(lambda: not ap())                                                                  # looks for a Wi-Fi it knows
+        self.until(ap)                                                                                # none: back up
+        self.put("nm-air", json.dumps(["Home Net"]))
+        self.until(lambda: self.nm()["active"] == "preconfigured" and not hot()["on"])
+        self.assertEqual(self.ask(cmd="hotspot_set", pin=P, auto=False), {"ok": True})
+        for text in (open(os.path.join(self.dir, "helper.log")).read(), "\n".join(self.calls())):
+            self.assertNotIn(key, text)
+
+    def test_n4_bluetooth_without_an_attach_tool(self):
+        P = "4711"
+        soft = os.path.join(self.dir, "rfkill", "rfkill1", "soft")
+        self.assertEqual(self.ask(cmd="status")["bt"], {"tool": True, "attached": True, "on": False, "powered": False})
+        self.assertEqual(self.ask(cmd="bt", pin=P, on=True), {"ok": True})
+        self.assertEqual(self.ask(cmd="status")["bt"], {"tool": True, "attached": True, "on": True, "powered": True})
+        self.assertEqual(open(soft).read(), "0")
+        self.assertIn("bluetoothctl power on", self.calls())
+        self.assertEqual(self.ask(cmd="bt", pin=P, on=False), {"ok": True})
+        self.assertEqual((open(soft).read(), self.ask(cmd="status")["bt"]["on"]), ("1", False))
+        self.assertFalse([c for c in self.calls() if "ghettorack-bluetooth" in c or "stop bluetooth" in c])   # the T95's attach service is never touched
 
 
 class CardTest(unittest.TestCase):

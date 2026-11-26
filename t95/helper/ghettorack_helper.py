@@ -1038,8 +1038,337 @@ class Helper:
             return {"error": "the helper tripped over that (%s)" % type(e).__name__}
 
 
+class NmHelper(Helper):
+    """The same commands on a box whose network is NetworkManager's and whose Bluetooth
+    needs no attach tool: a Raspberry Pi with Raspberry Pi OS. Seen from a page it is the
+    same helper: a join is a trial that goes back by itself, the hotspot returns to the
+    Wi-Fi when nobody joins.
+
+    A network is a connection profile, written as a keyfile (mode 600) and loaded, so a
+    password is never on a command line. The profiles this helper made are named
+    "ghettorack <ssid>"; only those can be forgotten here."""
+    TRIAL, HOT, MINE = "ghettorack-trial", "ghettorack-hotspot", "ghettorack "
+
+    def nm(self, *args, timeout=40):
+        return self.run(self.a.nmcli, *args, timeout=timeout)
+
+    @staticmethod
+    def fields(line):
+        """nmcli -t: fields split at ':', with '\\:' and '\\\\' inside one"""
+        out, cur, i = [], "", 0
+        while i < len(line):
+            c = line[i]
+            if c == "\\" and i + 1 < len(line):
+                cur += line[i + 1]
+                i += 2
+                continue
+            if c == ":":
+                out.append(cur)
+                cur = ""
+            else:
+                cur += c
+            i += 1
+        return out + [cur]
+
+    def keyfile(self, name, ssid, psk, extra=""):
+        """write a profile and have NetworkManager read it; None, or why it didn't"""
+        path = os.path.join(self.a.nm_dir, name + ".nmconnection")
+        body = ("[connection]\nid=%s\ntype=wifi\ninterface-name=%s\nautoconnect=false\n\n[wifi]\nssid=%s\n%s\n"
+                % (name, self.a.iface, ";".join(str(b) for b in ssid.encode()) + ";", extra))
+        if psk:                               # a keyfile reads "\" as an escape and drops spaces at the ends
+            esc = psk.replace("\\", "\\\\")
+            esc = ("\\s" + esc[1:]) if esc.startswith(" ") else esc
+            esc = (esc[:-1] + "\\s") if esc.endswith(" ") else esc
+            body += "[wifi-security]\nkey-mgmt=wpa-psk\n%s=%s\n\n" % ("psk", esc)
+        body += "[ipv6]\nmethod=auto\n"
+        try:
+            with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+                f.write(body)
+        except OSError as e:
+            return "the profile couldn't be written (%s)" % type(e).__name__
+        rc, out = self.nm("connection", "load", path)
+        return None if rc == 0 else "NetworkManager didn't take the profile"
+
+    def drop(self, name):
+        self.nm("connection", "delete", "id", name)
+        path = os.path.join(self.a.nm_dir, name + ".nmconnection")
+        try:                                  # a file NetworkManager didn't know yet; never one it kept under another name
+            if ("\nid=%s\n" % name) in open(path).read():
+                os.unlink(path)
+        except OSError:
+            pass
+
+    def profiles(self):
+        """names of the Wi-Fi profiles NetworkManager has"""
+        return [f[0] for f in (self.fields(l) for l in self.nm("-t", "-f", "NAME,TYPE", "connection", "show")[1].splitlines())
+                if len(f) >= 2 and f[1] == "802-11-wireless"]
+
+    def saved(self):
+        return {n[len(self.MINE):]: {} for n in self.profiles() if n.startswith(self.MINE)}
+
+    def active(self):
+        """the profile wlan0 is on now, or '' """
+        for l in self.nm("-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "device", "show", self.a.iface)[1].splitlines():
+            f = self.fields(l)
+            if f[0] == "GENERAL.CONNECTION":
+                return f[1] if len(f) > 1 and f[1] != "--" else ""
+        return ""
+
+    def wifi_now(self):
+        st, con, ip = "", "", ""
+        for l in self.nm("-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION,IP4.ADDRESS", "device", "show", self.a.iface)[1].splitlines():
+            f = self.fields(l)
+            if f[0] == "GENERAL.STATE":
+                st = f[1] if len(f) > 1 else ""
+            elif f[0] == "GENERAL.CONNECTION":
+                con = f[1] if len(f) > 1 and f[1] != "--" else ""
+            elif f[0].startswith("IP4.ADDRESS") and not ip:
+                ip = (f[1] if len(f) > 1 else "").split("/")[0]
+        up = st.startswith("100") and con and con != self.HOT
+        ssid = ""
+        if up:
+            for l in self.nm("-t", "-f", "IN-USE,SSID", "device", "wifi", "list", "ifname", self.a.iface, "--rescan", "no")[1].splitlines():
+                f = self.fields(l)
+                if len(f) >= 2 and f[0] == "*":
+                    ssid = f[1]
+        # the words wpa_supplicant uses, as the pages know them
+        return ssid or (con if up else ""), "COMPLETED" if up else "SCANNING" if st[:2] in ("40", "50", "60", "70") else "DISCONNECTED", ip if up else ""
+
+    def cmd_scan(self, d):
+        rc, out = self.nm("-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "ifname", self.a.iface, "--rescan", "yes", timeout=30)
+        if rc:
+            return {"error": "the Wi-Fi isn't answering (nmcli: %s)" % (out.strip().splitlines() or ["no output"])[-1][:120]}
+        saved, best = self.saved(), {}
+        for l in out.splitlines():
+            f = self.fields(l)
+            if len(f) < 4 or not f[1].strip():
+                continue                                    # hidden networks
+            try:
+                pct = max(0, min(100, int(f[2])))
+            except ValueError:
+                continue
+            ssid = f[1]
+            if ssid not in best or pct > best[ssid]["signal"] or f[0] == "*":
+                best[ssid] = {"ssid": ssid, "signal": pct, "secure": f[3].strip() not in ("", "--"),
+                              "saved": ssid in saved, "current": f[0] == "*" or (ssid in best and best[ssid]["current"])}
+        return {"ok": True, "networks": sorted(best.values(), key=lambda n: (-n["current"], -n["signal"]))[:24]}
+
+    def cmd_join(self, d):
+        ssid, psk = d.get("ssid"), d.get("psk", "")
+        if not isinstance(ssid, str) or not 0 < len(ssid.encode()) <= 32 or any(ord(c) < 32 for c in ssid):
+            return {"error": "that network name can't be used"}
+        if not isinstance(psk, str) or (psk and not 8 <= len(psk) <= 63) or any(ord(c) < 32 or ord(c) > 126 for c in psk):
+            return {"error": "a Wi-Fi password is 8 to 63 characters (none for an open network)"}
+        with self.lock:
+            if self.trial:
+                return {"error": "another network is being tried: wait for it"}
+            self.drop(self.TRIAL)
+            why = self.keyfile(self.TRIAL, ssid, psk)
+            if why:
+                return {"error": why}
+            self.last = None
+            self.trial = {"id": self.TRIAL, "ssid": ssid, "psk": psk, "phase": "connecting", "selected": False,
+                          "before": self.active(), "deadline": time.monotonic() + self.a.select_s + self.a.connect_s}
+        threading.Thread(target=self.trial_watch, daemon=True).start()
+        log.info("trying a Wi-Fi network")                              # no name, no password
+        return {"ok": True, "trial_s": self.a.trial_s, "connect_s": self.a.connect_s}
+
+    def back_locked(self, t):
+        """drop the tried network; back onto what the box was on (or whatever it knows)"""
+        self.drop(self.TRIAL)
+        if self.hot:
+            self.nm("connection", "up", "id", self.HOT, timeout=30)
+        elif t.get("before") and t["before"] != self.TRIAL:
+            if self.nm("connection", "up", "id", t["before"], timeout=40)[0]:
+                self.nm("device", "connect", self.a.iface, timeout=40)
+        else:
+            self.nm("device", "connect", self.a.iface, timeout=40)
+
+    def fail_locked(self, why):
+        t, self.trial = self.trial, None
+        self.back_locked(t)
+        self.last = {"ssid": t["ssid"], "ok": False, "why": why}
+        log.warning("the new Wi-Fi wasn't kept (%s): back to the one before", why)
+
+    def trial_watch(self):
+        time.sleep(self.a.select_s)             # the answer to "join" first: the box leaves its network for the try
+        with self.lock:
+            t = self.trial
+            if not t:
+                return
+            t["selected"] = True
+        # outside the lock: the pages go on asking for the state while it connects
+        rc, out = self.nm("--wait", str(int(max(5, self.a.connect_s))), "connection", "up", "id", self.TRIAL, timeout=self.a.connect_s + 15)
+        with self.lock:
+            if self.trial is not t:
+                return
+            if rc:
+                low = out.lower()
+                self.fail_locked("wrong password" if ("secret" in low or "password" in low or "802-11-wireless-security" in low)
+                                 else "no connection: wrong password, or the network is too weak here")
+                return
+            t["phase"], t["deadline"] = "connected", time.monotonic() + self.a.trial_s
+        while True:
+            time.sleep(self.a.watch_s)
+            with self.lock:
+                if self.trial is not t:
+                    return
+                if time.monotonic() >= t["deadline"]:
+                    self.fail_locked("nobody confirmed it: this device has to reach the box on the new network")
+                    return
+
+    def cmd_confirm(self, d):
+        with self.lock:
+            t = self.trial
+            if not t or t["phase"] != "connected":
+                return {"ok": True, "kept": False}
+            name = self.MINE + t["ssid"]
+            if name in self.profiles():
+                self.nm("connection", "delete", "id", name)
+            rc, out = self.nm("connection", "modify", "id", self.TRIAL, "connection.id", name, "connection.autoconnect", "yes")
+            if rc:
+                self.fail_locked("it connected but couldn't be saved")
+                return {"error": "NetworkManager didn't keep it: " + out.strip()[-160:]}
+            if self.hot:
+                self.hot = None                                           # joined from the hotspot: that one is done
+                self.down_since = None
+                self.drop(self.HOT)
+            self.trial, self.last = None, {"ssid": t["ssid"], "ok": True, "why": ""}
+        log.info("new Wi-Fi confirmed: kept")
+        return {"ok": True, "kept": True}
+
+    def cmd_forget(self, d):
+        ssid = d.get("ssid")
+        with self.lock:
+            if self.trial:
+                return {"error": "a network is being tried: wait for it"}
+            if not isinstance(ssid, str) or ssid not in self.saved():
+                return {"error": "only networks added on this page can be removed here (that one came with the install, or isn't saved)"}
+            cur, state, _ = self.wifi_now()
+            if cur == ssid and state == "COMPLETED":
+                return {"error": "the box is on that network right now: join another one first"}
+            rc, out = self.nm("connection", "delete", "id", self.MINE + ssid)
+            if rc:
+                return {"error": "NetworkManager didn't remove it: " + out.strip()[-160:]}
+        return {"ok": True}
+
+    # ---- the box's own network: NetworkManager's shared mode gives the addresses itself ----
+    def hot_start_locked(self, auto):
+        why = self.hot_why_not()
+        if why:
+            return why
+        self.drop(self.HOT)
+        base = self.a.hot_addr
+        why = self.keyfile(self.HOT, socket.gethostname(), self.hot_cfg()["psk"],
+                           "mode=ap\nband=bg\nchannel=6\n\n[ipv4]\nmethod=shared\naddress1=%s/24\n" % base)
+        if why:
+            return why
+        if self.nm("--wait", "20", "connection", "up", "id", self.HOT, timeout=40)[0]:
+            self.drop(self.HOT)
+            self.nm("device", "connect", self.a.iface, timeout=40)
+            return "the Wi-Fi didn't start the hotspot"
+        now = time.monotonic()
+        self.hot = {"id": self.HOT, "auto": auto, "since": now, "seen": False, "idle": now, "scan": None, "proc": None, "clients": 0}
+        log.info("hotspot up (%s)", "by itself: no known Wi-Fi" if auto else "from Settings")
+        return None
+
+    def hot_clear_locked(self):
+        self.hot = None
+        self.down_since = None
+        self.drop(self.HOT)
+
+    def hot_stop_locked(self, why):
+        self.hot_clear_locked()
+        self.nm("device", "connect", self.a.iface, timeout=40)             # onto whatever it knows
+        log.info("hotspot down (%s)", why)
+
+    def hot_clients(self):
+        return sum(1 for l in self.run(self.a.iw, "dev", self.a.iface, "station", "dump")[1].splitlines() if l.startswith("Station "))
+
+    def hot_keep_locked(self, now):
+        h = self.hot
+        h["clients"] = self.hot_clients()
+        if h["clients"]:
+            h["seen"], h["idle"] = True, now
+            return
+        if not h["auto"] and not h["seen"] and now - h["since"] > self.a.hot_trial_s:
+            self.hot_stop_locked("nobody joined it: back to the Wi-Fi")
+            self.last = {"ssid": socket.gethostname(), "ok": False, "why": "nobody joined the hotspot"}
+            return
+        # one that came up by itself steps aside now and then: the Wi-Fi gets auto_s to find a
+        # network it knows, else the hotspot returns (the keeper)
+        if h["auto"] and now - h["idle"] > self.a.rescan_s:
+            self.hot_stop_locked("looking for a known Wi-Fi")
+
+    def keeper(self):
+        with self.lock:
+            if self.HOT in self.profiles() or self.TRIAL in self.profiles():     # left over from a helper that was restarted
+                self.drop(self.HOT)
+                self.drop(self.TRIAL)
+                self.nm("device", "connect", self.a.iface, timeout=40)
+                log.info("took down a hotspot or a trial left over from before")
+        while True:
+            time.sleep(self.a.keep_s)
+            try:
+                with self.lock:
+                    now = time.monotonic()
+                    if self.trial:
+                        self.down_since = None
+                    elif self.hot:
+                        self.hot_keep_locked(now)
+                    elif self.wifi_now()[1] == "COMPLETED" or not self.hot_cfg()["auto"] or self.hot_why_not():
+                        self.down_since = None
+                    elif self.down_since is None:
+                        self.down_since = now
+                    elif now - self.down_since > self.a.auto_s:
+                        self.down_since = None
+                        self.hot_start_locked(True)
+            except Exception as e:                             # must not die: it is the way back
+                log.error("keeper: %s", type(e).__name__)
+
+    # ---- Bluetooth: the radio is there from the start, on and off is its block switch ----
+    def bt(self):
+        attached, soft = self.bt_attached(), []
+        for p in self.bt_radios():
+            try:
+                soft.append(open(p).read().strip())
+            except OSError:
+                pass
+        on = attached and all(x == "0" for x in soft)
+        show = self.run(self.a.bluetoothctl, "show", timeout=6)[1] if on else ""
+        return {"tool": attached, "attached": attached, "on": on, "powered": "Powered: yes" in show}
+
+    def cmd_bt(self, d):
+        on = d.get("on")
+        if not isinstance(on, bool):
+            return {"error": "on: true or false"}
+        if not self.bt_attached():
+            return {"error": "this box has no Bluetooth radio"}
+        if not on:
+            self.run(self.a.bluetoothctl, "power", "off", timeout=8)
+            self.bt_block(True)
+            return {"ok": True}
+        self.bt_block(False)
+        self.run(self.a.systemctl, "start", "--no-block", "bluetooth.service", timeout=20)
+        self.run(self.a.bluetoothctl, "power", "on", timeout=8)
+        return {"ok": True}
+
+
+def net_kind(a):
+    """which of the two the box runs: NetworkManager ("nm") or wpa_supplicant with Netplan ("wpa")"""
+    if a.net != "auto":
+        return a.net
+    try:
+        r = subprocess.run([a.systemctl, "is-active", "--quiet", "NetworkManager.service"], timeout=8)
+        return "nm" if r.returncode == 0 and os.path.exists(a.nmcli) else "wpa"
+    except (OSError, subprocess.TimeoutExpired):
+        return "wpa"
+
+
 def serve(a):
-    h = Helper(a)
+    kind = net_kind(a)
+    h = (NmHelper if kind == "nm" else Helper)(a)
+    log.info("network: %s", "NetworkManager" if kind == "nm" else "wpa_supplicant and Netplan")
     threading.Thread(target=h.keeper, daemon=True).start()
     os.makedirs(a.state_dir, mode=0o700, exist_ok=True)
     try:
@@ -1112,8 +1441,11 @@ def main():
     for tool, path in (("wpa-cli", "/usr/sbin/wpa_cli"), ("netplan", "/usr/sbin/netplan"), ("hostnamectl", "/usr/bin/hostnamectl"),
                        ("systemctl", "/usr/bin/systemctl"), ("bluetoothctl", "/usr/bin/bluetoothctl"),
                        ("ip", "/usr/sbin/ip"), ("dnsmasq", "/usr/sbin/dnsmasq"),
-                       ("mount", "/usr/bin/mount")):
+                       ("mount", "/usr/bin/mount"), ("nmcli", "/usr/bin/nmcli"), ("iw", "/usr/sbin/iw")):
         ap.add_argument("--" + tool, default=path)
+    ap.add_argument("--net", choices=("auto", "wpa", "nm"), default="auto",
+                    help="who runs the box's network: wpa_supplicant with Netplan (the T95), or NetworkManager (a Raspberry Pi)")
+    ap.add_argument("--nm-dir", default="/etc/NetworkManager/system-connections", help="where NetworkManager keeps its profiles")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     serve(a)

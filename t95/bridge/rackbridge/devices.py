@@ -49,9 +49,28 @@ def mount_of(path, mounts="/proc/mounts"):
     return found
 
 
-def sd_in_slot(sysblock):
-    """True if a card sits in an SD slot, mounted or not"""
+def system_disks(mounts="/proc/mounts"):
+    """the card or chip the box itself runs from (a Raspberry Pi boots from its SD slot)"""
+    out = set()
+    try:
+        with open(mounts) as f:
+            for line in f:
+                p = line.split()
+                m = re.match(r"^/dev/(mmcblk\d+)", p[0]) if len(p) >= 2 and p[1] in ("/", "/boot", "/boot/firmware") else None
+                if m:
+                    out.add(m.group(1))
+    except OSError:
+        pass
+    return out
+
+
+def sd_in_slot(sysblock, mounts="/proc/mounts"):
+    """True if a card sits in an SD slot, mounted or not. Not the one the box runs from:
+    that is no card for samples, and "not readable" would be wrong for it"""
+    own = system_disks(mounts)
     for p in glob.glob(os.path.join(sysblock, "mmcblk*", "device", "type")):
+        if os.path.basename(os.path.dirname(os.path.dirname(p))) in own:
+            continue
         try:
             with open(p) as f:
                 if f.read().strip() == "SD":

@@ -42,8 +42,13 @@ been measured yet.**
 - `t95/wifi-prep/` and the device-tree patch: not needed.
 - `ghettorack-bluetooth.service` (the UWE5622 attach tool): T95 only. Installed
   by the bridge's installer but not enabled; leave it off.
-- Settings > Wi-Fi and the hotspot: the helper drives Netplan and
-  wpa_supplicant. They will not work here until it knows NetworkManager.
+- Settings > Wi-Fi, the hotspot and Bluetooth: from 2026-11-26 the helper drives NetworkManager
+  here (`t95/helper/README.md`, "On a box with NetworkManager"). On the Pi: status, a scan
+  (3 networks) and the NET, HOT, BT and DEV tabs on the 3.5" screen. **Not tried on the radio:**
+  a join, the hotspot, Bluetooth on. The helper's old copy is beside it as
+  `/opt/apcbox-bridge/ghettorack_helper.py.before-nm`.
+- "box SD card": the Pi runs from the card in its slot, and Settings called that "not readable".
+  The bridge now leaves out the card the system is on: "none in the slot" (seen on the Pi).
 - Two udev rules in `t95/bridge/99-apcbox.rules` could misfire on a Pi and
   have not: the "SD card in the slot" rule matches the Pi's boot partition
   (same card type, FAT) but it was not mounted at `/media/sdcard` after a

@@ -26,6 +26,19 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## The Pi's settings: NetworkManager (2026-11-26, read-only on the Pi)
+
+- The helper knows NetworkManager (`NmHelper` in `t95/helper/ghettorack_helper.py`): scan, a
+  join as a trial that goes back, confirm, forget, hotspot (by hand and by itself), Bluetooth
+  without the attach tool. 4 tests against a stand-in `nmcli`; the 12 older ones unchanged.
+- On the Pi: installed, status and scan right, Settings' tabs right on the 3.5" screen.
+- **To try with Rene at the rig, in this order:** set a PIN; Bluetooth on, pair a device; join a
+  second network with a wrong password (must come back in seconds), then the right one; hotspot
+  on with a phone, then without (must go back after 2 minutes); BY ITSELF only after those.
+- Not known: whether the Pi's radio scans while it is an access point (the step-aside covers
+  it either way), and what NetworkManager does with the trial profile's file name on rename
+  (the helper never deletes a file whose `id=` is not the trial's).
+
 ## Open from the rig, 2026-11-26
 
 - **A card put back while the Seed runs is not found** (Pi rig's Seed, v13.31): `SdPoll` in
