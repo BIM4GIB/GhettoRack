@@ -111,7 +111,7 @@ class Devices:
         a, hd = self.b.args, self.b.hdmi
         cards = []
         for c in self.cards:
-            use = ("daisy" if c["id"] == a.daisy_card else "tv" if c["id"] == a.hdmi_card
+            use = ("daisy" if c["id"] == a.daisy_card else "tv" if c["id"] == hd.card()
                    else "midi" if c["midi"] and not (c["play"] or c["rec"]) else "")
             cards.append(dict(c, use=use, busy=hd.running() and use in ("daisy", "tv")))
         return {"cards": cards, "sd": self.sd}

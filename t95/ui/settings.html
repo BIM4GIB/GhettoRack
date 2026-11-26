@@ -221,7 +221,9 @@ function small() {
       U.clear = B("CLEAR", async () => { for (const press of ["tap", "hold"]) await bpost("/ir/forget", { profile: prof, action: pick, press }); pollBridge(); });
       col.style.gridTemplateRows = "repeat(4,1fr) 40px"; col.append(U.prof, U.tap, U.hold, U.clear, U.pg.nav); body.append(U.pg.el, col);
     } else if (tab === "dev") {
-      U.kv = E("div", "g-kv tight"); U.tv = B("", async () => { await bpost("/settings", { hdmi_audio: !(bst && bst.hdmi_audio && bst.hdmi_audio.on) }); await pollBridge(); setTimeout(pollBridge, 2500); });
+      U.kv = E("div", "g-kv tight"); /* steps through the box's outputs, then off: the TV over HDMI, a headphone socket */
+      U.tv = B("", async () => { const hd = (bst && bst.hdmi_audio) || {}, cards = hd.cards || [], n = (hd.on ? cards.indexOf(hd.card) : -1) + 1;
+        await bpost("/settings", n < cards.length ? { hdmi_audio: true, sound_out: cards[n] } : { hdmi_audio: false }); await pollBridge(); setTimeout(pollBridge, 2500); });
       U.text = E("div", "g-text"); col.style.gridTemplateRows = "56px 1fr"; col.append(U.tv, U.text); body.append(U.kv, col);
     } else {
       body.className = "g-sbody wide"; const box = E("div", "g-sys"); U.kv = E("div", "g-kv tight");
@@ -286,9 +288,10 @@ function small() {
         ["BT MIDI", !br.ble_midi ? "?" : br.ble_midi.state !== "running" ? br.ble_midi.state : br.ble_midi.connected.length ? br.ble_midi.connected.map(x => x.name).join(", ") : br.ble_midi.paired ? br.ble_midi.paired + " paired, none in reach" : "none paired"],
         ["box SD card", !sd ? "?" : sd.state === "none" ? "none in the slot" : sd.state !== "ready" ? "not readable" : [sd.bytes ? gb(sd.bytes) : "", sd.free != null ? gb(sd.free) + " free" : "", sd.samples == null ? "" : sd.samples + " samples"].filter(Boolean).join(", ")]]
         .concat(cards.slice(0, 8).map(c => [c.name || c.id, c.use === "daisy" ? "the Daisy's sound" : c.use === "tv" ? "TV sound" : c.use === "midi" ? "MIDI only" : "not used"])));
-      U.tv.textContent = "TV SOUND: " + (hd.on ? "ON" : "OFF"); U.tv.classList.toggle("on", !!hd.on);
-      U.text.textContent = (!hd.on ? "" : hd.running ? "Playing on the TV. " : !hd.hdmi_card ? "No HDMI sound card. " : !hd.daisy_card ? "Waiting for the Daisy. " : hd.error ? hd.error + ". " : "Starting. ")
-        + "Passes the Daisy's output on to the TV (HDMI), about 40 ms late: for listening, not for playing.";
+      const outName = c => !c ? "?" : /^vc4hdmi/.test(c) ? "HDMI " + (+c.slice(7) + 1) : c.toUpperCase();
+      U.tv.textContent = "SOUND OUT: " + (hd.on ? outName(hd.card) : "OFF"); U.tv.classList.toggle("on", !!hd.on);
+      U.text.textContent = (!hd.on ? "" : hd.running ? "Playing. " : !hd.hdmi_card ? "The box has no sound output. " : !hd.daisy_card ? "Waiting for the Daisy. " : hd.error ? hd.error + ". " : "Starting. ")
+        + "The Daisy's sound on the box's own output (HDMI, the headphone socket), about 40 ms late: for listening, not for playing. Tap to step through the outputs.";
     } else {
       U.now.textContent = st.hostname || "?"; U.sub.textContent = w.ip || "";
       kv([["Wi-Fi", w.ssid || "?"], ["helper", h ? "running" : "not running"], ["page", secure ? "secure" : "plain http: read-only"]]);
@@ -612,7 +615,7 @@ function drawBridge() {
   list.scrollTop = top;
   drawCards();
   $("d-hdmi").textContent = "TV SOUND: " + (hd.on ? "ON" : "OFF"); $("d-hdmi").className = hd.on ? "act" : "";
-  $("d-hdmi-text").textContent = !hd.on ? "" : hd.running ? "playing on the TV" : !hd.hdmi_card ? "no HDMI sound card" : !hd.daisy_card ? "waiting for the Daisy" : hd.error ? hd.error : "starting...";
+  $("d-hdmi-text").textContent = !hd.on ? "" : hd.running ? "playing on " + (hd.card === "HDMI" || !hd.card ? "the TV" : hd.card) : !hd.hdmi_card ? "no sound output on the box" : !hd.daisy_card ? "waiting for the Daisy" : hd.error ? hd.error : "starting...";
 }
 async function bpost(path, body) { try { return await (await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: tmo(6000) })).json(); } catch (e) { return {}; } }
 async function pollBridge() { const s = await get("/state"); if (s) { bst = s; drawBridge(); } }

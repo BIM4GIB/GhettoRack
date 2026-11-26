@@ -61,6 +61,9 @@ const st = {
   sm: null,       // loop memory (SM line, report 18), in samples: { total, free, largest, claims, slot, take }
 };
 const patName = p => "ABCDEFGH"[p >> 3] + (1 + (p & 7));
+/* The Daisy is on the box's USB but has sent nothing for 3 s (or nothing at all): it has stopped, which is
+   not the same as old firmware, though both leave the control version at 0 */
+const daisySilent = () => !!(st.bridge && st.bridge.daisy && (st.bridge.data_age_s == null || st.bridge.data_age_s > 3));
 /* overload: how many 303 voices the Daisy is leaving out, in words */
 const ovOut = t => (st.ov.mask >> t & 1) === 1;
 function ovText() { let out = 0, all = 0; for (let t = 0; t < 16; t++) { out += st.ov.mask >> t & 1; all += st.synth >> t & 1; }
@@ -397,7 +400,8 @@ function topStatus() {
   if (!T.leds) return;
   if (SMALL) return smStatus();
   const br = st.bridge, parts = [
-    ["Daisy", st.daisy ? (st.ctl >= 4 ? "ok" : "warn") : "bad", st.daisy ? (st.ctl >= 4 ? "" : "firmware too old for this page: flash v13.9") : "not connected"],
+    ["Daisy", st.daisy ? (daisySilent() ? "bad" : st.ctl >= 4 ? "ok" : "warn") : "bad",
+      st.daisy ? (daisySilent() ? "plugged in but silent: press its RESET" : st.ctl >= 4 ? "" : "firmware too old for this page: flash v13.9") : "not connected"],
     ["APC40", st.apc ? "ok" : "off", ""],
   ].concat(st.ext ? [["ext clock", "warn", ""]] : []).concat([
     ["cpu " + Math.round(st.cpu / 10) + "%", "ok", ""],
@@ -1485,7 +1489,7 @@ function smTop() {
 }
 function smTopS() { if (T.pg) { const x = st.sel < 8 ? "1-8" : "9-16"; if (T.pg.textContent !== x) T.pg.textContent = x; } }
 function smStatus() {
-  const p = sendErr ? [sendErr, "bad"] : !st.daisy ? ["no Daisy", "bad"] : st.ctl < 4 ? ["old firmware", "bad"] : (st.ver && st.ver !== REPORT_VERSION) ? ["page and firmware differ", "bad"]
+  const p = sendErr ? [sendErr, "bad"] : !st.daisy ? ["no Daisy", "bad"] : daisySilent() ? ["Daisy silent: RESET it", "bad"] : st.ctl < 4 ? ["old firmware", "bad"] : (st.ver && st.ver !== REPORT_VERSION) ? ["page and firmware differ", "bad"]
     : (st.ov.mask || st.ov.rev) ? [ovText(), "bad"] : ["cpu " + Math.round(st.cpu / 10) + "%", "ok"];
   const key = p.join("|");
   if (key === statusKey) return;

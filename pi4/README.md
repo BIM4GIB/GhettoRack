@@ -48,7 +48,11 @@ been measured yet.**
   (same card type, FAT) but it was not mounted at `/media/sdcard` after a
   reboot; the "set remotes to NEC" rule left the CEC devices at `cec`. Both
   should become board-specific.
-- TV sound: the HDMI cards are `vc4hdmi0` and `vc4hdmi1`, not `HDMI`.
+- Sound out of the box: there is no card called `HDMI` (they are `vc4hdmi0`, `vc4hdmi1` and
+  `Headphones`, the AV socket), so with TV SOUND on nothing played. From 2026-11-25 the bridge
+  takes the card picked in Settings > DEV (SOUND OUT steps through them), else the first there
+  is: on the Pi the AV socket. Seen: `alsaloop` running to `Headphones` with the Seed playing;
+  Rene heard the demo set through it.
 
 ## The screen on the Pi's header
 

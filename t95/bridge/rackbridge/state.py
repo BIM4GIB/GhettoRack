@@ -9,7 +9,7 @@ class State:
 
     def __init__(self, path):
         self.path = path
-        self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False,
+        self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False, "sound_out": None,
                      "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": [], "clock": {}}
         try:
             with open(path) as f:
@@ -19,6 +19,7 @@ class State:
                 a = d.get("autostart_s", 5)
                 self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
                 self.data["hdmi_audio"] = d.get("hdmi_audio") is True
+                self.data["sound_out"] = d["sound_out"] if isinstance(d.get("sound_out"), str) else None
                 if isinstance(d.get("clock"), dict):
                     self.data["clock"] = d["clock"]      # Clock checks each field
                 nv = d.get("net_never")

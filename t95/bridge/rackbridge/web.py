@@ -123,8 +123,12 @@ class WebMixin:
                 if not isinstance(d["hdmi_audio"], bool):
                     return 400, {"error": "hdmi_audio: true/false"}
                 self.state.data["hdmi_audio"] = d["hdmi_audio"]
-            if not ({"autostart_s", "hdmi_audio"} & d.keys()):
-                return 400, {"error": "autostart_s or hdmi_audio"}
+            if "sound_out" in d:           # which of the box's outputs the Daisy's sound goes to; None: its own choice
+                if d["sound_out"] is not None and d["sound_out"] not in self.hdmi.outputs():
+                    return 400, {"error": "sound_out: one of " + ", ".join(self.hdmi.outputs())}
+                self.state.data["sound_out"] = d["sound_out"]
+            if not ({"autostart_s", "hdmi_audio", "sound_out"} & d.keys()):
+                return 400, {"error": "autostart_s, hdmi_audio or sound_out"}
             self.state.save()
             return 200, {"ok": True}
         if path in ("/ir/learn", "/ir/forget"):
