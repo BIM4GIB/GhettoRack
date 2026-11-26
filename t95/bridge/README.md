@@ -128,6 +128,7 @@ Pi, recognised by the kernel with nothing installed.
 |---|---|
 | D-pad, X, O, triangle, PS | the remote's `up` `down` `left` `right`, `ok`, `back`, `menu`, `home`, sent as `ir` events to the pages on the box's own screen (to every open page only if the box shows none, or with `--pad-everywhere`): a page needs nothing new. A held arrow repeats |
 | L1 / R1 | `prev` / `next`: the view before / after |
+| D-pad on the ApcBox page | left / right: the track before / after; up / down: the same strip on the other page of tracks (1-8, 9-16) |
 | start / select | `play` / `stop`, to the Daisy itself, once (two open pages would each toggle) |
 | left stick X | the master filter: low-pass left, high-pass right, off in the middle |
 | right stick X | the crossfader |

@@ -1974,14 +1974,17 @@ function connect() {
   es.onmessage = e => line(e.data);
   es.addEventListener("bridge", e => { try { const b = JSON.parse(e.data); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (err) { } });
   es.addEventListener("xfer", e => { try { st.xfer = JSON.parse(e.data); call("X"); } catch (err) { } });
-  es.addEventListener("ir", e => { try { remote(JSON.parse(e.data).action); } catch (err) { } });
+  es.addEventListener("ir", e => { try { const d = JSON.parse(e.data); remote(d.action, d.pad); } catch (err) { } });
   es.onerror = () => { st.daisy = false; sendErr = "the box is not answering"; topStatus(); };
   es.onopen = () => { sendErr = ""; topStatus(); };
 }
 setInterval(async () => { try { const b = await (await fetch("/health")).json(); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (e) { } }, 2000);
 
 /* ---------- remote and keyboard ---------- */
-function remote(a) {
+function remote(a, pad) {
+  /* a game controller's D-pad: up and down go to the same strip on the other page of tracks (1-8 / 9-16),
+     which shows; a remote's up and down stay the volume */
+  if (pad && (a === "up" || a === "down")) return sel((st.sel + 8) % 16);
   if (/^[1-8]$/.test(a)) { if (TABS[+a - 1]) show(TABS[+a - 1][0]); }
   else if (a === "left" || a === "right") sel((st.sel + (a === "right" ? 1 : 15)) % 16);
   else if (a === "up" || a === "down") { const f = document.activeElement; if (f && f.classList.contains("pot")) f.dispatchEvent(new KeyboardEvent("keydown", { key: a === "up" ? "ArrowUp" : "ArrowDown", bubbles: true })); else knobStep(a === "up" ? 3 : -3); }
