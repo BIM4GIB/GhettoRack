@@ -93,7 +93,7 @@ input[type=number],input[type=text],select{background:#0b0c0d;border:1px solid #
   <p class="hint">Rows send, columns receive. Tap a square to connect and open its settings
     (channel, message types); tap it again to remove it.</p>
   <div class="wrap"><table class="matrix" id="matrix"></table></div>
-  <div id="none" class="hint" style="display:none">No MIDI devices yet: plug one into the T95, or connect one over the network.</div>
+  <div id="none" class="hint" style="display:none">No MIDI devices yet: plug one into the box, or connect one over the network.</div>
   <div id="edit" class="panel" style="display:none">
     <div class="row"><b id="e-title"></b></div>
     <div class="row" style="margin-top:8px">
@@ -385,8 +385,8 @@ function renderNet() {
     return;
   }
   chip("c-net", "network: " + n.name + (n.sessions.length ? " (" + n.sessions.length + ")" : ""), n.sessions.length ? "ok" : "");
-  $("net-hint").textContent = "Other devices see the T95 as \"" + n.name + "\" (port " + n.port + "). Everything found on the network is "
-    + "connected automatically" + (n.avahi === false ? ", but avahi-browse is missing here, so nothing is found: only devices that connect to the T95 appear." : ".");
+  $("net-hint").textContent = "Other devices see the box as \"" + n.name + "\" (port " + n.port + "). Everything found on the network is "
+    + "connected automatically" + (n.avahi === false ? ", but avahi-browse is missing here, so nothing is found: only devices that connect to the box appear." : ".");
   const rows = new Map();
   for (const s of n.seen) rows.set(s.name, { name: s.name, where: s.host + ":" + s.port, st: "found" });
   for (const s of n.inviting) { const r = rows.get(s) || { name: s, where: "" }; r.st = "connecting"; rows.set(s, r); }

@@ -104,7 +104,7 @@ class Listen:
         if self.proc is not None and self.proc.returncode is None:
             return True
         if not os.path.exists(os.path.join(self.b.args.asound, self.b.args.daisy_card)):
-            self.error = "the Daisy's audio isn't on the T95 (USB)"
+            self.error = "the Daisy's audio isn't on the box (USB)"
             return False
         if not self.shared and self.b.hdmi.running():
             self.error = "the TV sound is using the Daisy's audio: turn it off to listen here"

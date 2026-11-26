@@ -14,6 +14,13 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   report lines, no answer to a state dump. Cleared by a power cycle, which also cleared the
   record of where it was. Not reproduced in 260 sample loads. Press RESET, not the plug, if
   it happens again: the firmware then says the stage.
+- **The T95 left the Wi-Fi during `t95/bridge/install.sh`** (2026-11-26, after flashing its
+  Seed to v13.31). The installers finished and the TV kept showing the pages; no ping, no
+  name on the network, nothing announced. Rene rebooted it and it was back. Its journal is in
+  memory, so the reason went with the reboot. Suspect, without evidence: the installer's
+  restart of `ghettorack-helper`; or that Wi-Fi chip. Next time, before a reboot: on the TV,
+  Settings > Network and Hotspot, and `journalctl -u ghettorack-helper` over the TV or a
+  cable. Worth a persistent journal on that box.
 - **Saving a set from a page writes over the slot without asking the box** (the small page
   asks SURE? only for a slot it knows is taken; `set save n` from anywhere else does not).
   A set was lost this way.

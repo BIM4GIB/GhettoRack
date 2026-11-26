@@ -130,8 +130,8 @@ body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
   <button id="demo">Demo</button>
   <button id="modules" class="hidden">Modules</button>
   <span id="c-link" class="chip">Daisy: not connected</span>
-  <span id="c-bridge" class="chip hidden">T95 bridge: ?</span>
-  <span id="c-ctl" class="chip hidden">T95 controllers: ?</span>
+  <span id="c-bridge" class="chip hidden">box bridge: ?</span>
+  <span id="c-ctl" class="chip hidden">box controllers: ?</span>
   <span id="c-apc" class="chip">APC40: ?</span>
   <span id="c-sd" class="chip">SD: ?</span>
   <div class="stat"><span class="lbl">Transport</span><span id="transport" class="big">■</span></div>
@@ -169,7 +169,7 @@ body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
       </div>
     </section>
     <section id="samples" class="hidden">
-      <h2><span>Samples (T95)</span><span id="smp-hint">send to the selected track</span></h2>
+      <h2><span>Samples (box)</span><span id="smp-hint">send to the selected track</span></h2>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <span class="smp-tabs"><button data-src="lib" class="sel">library</button> <button data-src="sd">SD card</button></span>
         <span id="smp-path" class="lbl"></span>
@@ -401,7 +401,7 @@ function logKeys(rest) {
   const b = (hex || "").match(/../g)?.map(h => parseInt(h, 16)) || [];
   const t = b[0] >> 4, nn = pitchName;
   const what = t === 9 && b[2] ? `note ${nn(b[1])} vel ${b[2]}` : (t === 8 || t === 9) ? `note off ${nn(b[1])}` : t === 11 ? `cc ${b[1]} = ${b[2]}` : hex;
-  log(`keys (T95 port ${port}): ${what}`);
+  log(`keys (box port ${port}): ${what}`);
 }
 function logMidi(a) {
   const [type, ch, d0, d1] = a;
@@ -523,10 +523,10 @@ function render() {
     if (t9) {
       const parts = [t9.apc ? `APC40 ${ports(t9.apc)}${t9.active > 0 ? " (driving)" : t9.active === 0 ? " (USB-A wins)" : ""}` : "",
                      t9.keys ? `keys ${ports(t9.keys)}` : ""].filter(Boolean);
-      chip("c-ctl", "T95 controllers: " + (!t9.att ? "none" : parts.length ? parts.join(" · ") : `identifying ${ports(t9.att)}`), t9.att ? "ok" : "");
+      chip("c-ctl", "box controllers: " + (!t9.att ? "none" : parts.length ? parts.join(" · ") : `identifying ${ports(t9.att)}`), t9.att ? "ok" : "");
     }
-    chip("c-bridge", st.bridge.up ? "T95 bridge: connected" : "T95 bridge: lost, retrying", st.bridge.up ? "ok" : "bad");
-    chip("c-link", !st.bridge.up ? "Daisy: unknown" : !st.bridge.daisy ? "Daisy: not on the T95" : fresh ? "Daisy: connected" : "Daisy: no data",
+    chip("c-bridge", st.bridge.up ? "box bridge: connected" : "box bridge: lost, retrying", st.bridge.up ? "ok" : "bad");
+    chip("c-link", !st.bridge.up ? "Daisy: unknown" : !st.bridge.daisy ? "Daisy: not on the box" : fresh ? "Daisy: connected" : "Daisy: no data",
          !st.bridge.up ? "warn" : !st.bridge.daisy ? "bad" : fresh ? "ok" : "warn");
   } else
   chip("c-link", st.demo ? "Demo data" : st.link ? (st.gotData ? who + ": connected" : who + ": waiting for data") : who + ": not connected",
@@ -757,14 +757,14 @@ function connectBridge(caps) {
     else if (a === "up") window.scrollBy({ top: -240, behavior: "smooth" });
     else if (a === "down") window.scrollBy({ top: 240, behavior: "smooth" });
   });
-  es.onopen = () => { st.bridge.up = true; st.link = true; st.gotData = false; dirty = true; log("connected to the T95 bridge"); };
+  es.onopen = () => { st.bridge.up = true; st.link = true; st.gotData = false; dirty = true; log("connected to the box's bridge"); };
   es.onmessage = e => handleLine(e.data);
   /* The Daisy's encoder from the page: v13.7 firmware has the UI command.
      The screen preview itself is Mac-only, so only the buttons show */
   const ui = a => fetch("/ui?a=" + a).catch(() => {});
   document.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => ui(b.dataset.ui));
   $("tft").classList.add("hidden");
-  $("tftpanel").querySelector("h2 span").textContent = "Daisy encoder (via the T95)";
+  $("tftpanel").querySelector("h2 span").textContent = "Daisy encoder (via the box)";
   document.addEventListener("keydown", e => {
     if (!st.bridge.ui || e.target.tagName === "INPUT") return;
     if (e.key === "ArrowLeft") ui("turn&d=-1");
@@ -779,11 +779,11 @@ function connectBridge(caps) {
       const b = JSON.parse(e.data);
       st.bridge.ui = b.daisy && (b.control || 0) >= 2;
       $("tftpanel").classList.toggle("hidden", !st.bridge.ui);
-      if (b.daisy !== st.bridge.daisy) log(b.daisy ? `bridge: Daisy on ${b.port}` : "bridge: Daisy not connected to the T95", b.daisy ? "" : "w");
+      if (b.daisy !== st.bridge.daisy) log(b.daisy ? `bridge: Daisy on ${b.port}` : "bridge: Daisy not connected to the box", b.daisy ? "" : "w");
       st.bridge.daisy = !!b.daisy; dirty = true;
     } catch (err) {}
   });
-  es.onerror = () => { if (st.bridge.up) log("lost the T95 bridge, retrying", "w"); st.bridge.up = false; st.link = false; dirty = true; };
+  es.onerror = () => { if (st.bridge.up) log("lost the box's bridge, retrying", "w"); st.bridge.up = false; st.link = false; dirty = true; };
   setInterval(() => { dirty = true; }, 1000); // data freshness
   if (caps.samples) setupSamples(es, caps);
 }

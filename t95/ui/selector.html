@@ -251,7 +251,7 @@ const es = new EventSource("/events?view=selector");
 es.addEventListener("bridge", e => {
   try {
     const b = JSON.parse(e.data);
-    chip("c-daisy", b.daisy ? "Daisy: connected" : "Daisy: not on the T95", b.daisy ? "ok" : "bad");
+    chip("c-daisy", b.daisy ? "Daisy: connected" : "Daisy: not on the box", b.daisy ? "ok" : "bad");
     const n = (b.controllers || []).map(c => c.name).join(", ");
     chip("c-ctl", n ? "controllers: " + n : "controllers: none", n ? "ok" : "");
     jamLamp(b.jam);

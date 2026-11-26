@@ -229,7 +229,7 @@ class SamplesMixin:
         root = self.roots(src)
         p = safe_join(root, rel)
         if p is None or not os.path.isdir(p):
-            return 400, {"error": "no such folder" if root else "no SD card in the T95"}
+            return 400, {"error": "no such folder" if root else "no SD card in the box"}
         dirs, files, hidden = [], [], 0
         try:
             for e in sorted(os.scandir(p), key=lambda e: e.name.lower()):

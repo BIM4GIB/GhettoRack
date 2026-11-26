@@ -829,7 +829,7 @@ class Helper:
     def card_why_not(self, m):
         """None if what is mounted there is a FAT / exFAT card in the SD slot"""
         if m is None:
-            return "no SD card in the T95"
+            return "no SD card in the box"
         disk = re.match(r"^(mmcblk\d+)(p\d+)?$", os.path.basename(m[0]))
         kind = ""
         try:

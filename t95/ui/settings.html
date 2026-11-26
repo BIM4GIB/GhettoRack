@@ -540,7 +540,7 @@ function draw() {
   $("b-now").textContent = !h ? "?" : !b.tool ? "not set up" : b.on ? (b.powered ? "on" : "on, radio starting") : "off";
   $("b-toggle").textContent = b.on ? "TURN OFF" : "TURN ON"; $("b-toggle").disabled = !h || !b.tool;
   $("b-text").innerHTML = !h ? "" : b.tool ? "The box's own Bluetooth radio. On: it starts with the box. SCAN and PAIR are for keyboards and adapters. VISIBLE is for an iPad, phone or Mac: for 3 minutes the box shows up as a Bluetooth MIDI device in the app there; no pairing." :
-    "The radio needs a small vendor tool that isn't on the box yet. On the T95: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
+    "The radio needs a small vendor tool that isn't on the box yet. On the box: <code>sudo t95/helper/get-bt-tool.sh</code>, then reload this page.";
   $("b-scan").disabled = !b.on || !b.powered || !!btbusy; drawBt();
   const bx = (br0.ble_midi || {}).box || {}, vs = bx.visible_s || 0;
   $("b-vis").textContent = vs ? "VISIBLE " + Math.floor(vs / 60) + ":" + String(vs % 60).padStart(2, "0") : "VISIBLE"; $("b-vis").className = vs ? "act" : "";
@@ -552,7 +552,7 @@ function draw() {
   $("h-auto").textContent = hs.auto ? "BY ITSELF: ON" : "BY ITSELF: OFF"; $("h-auto").className = hs.auto ? "act" : ""; $("h-auto").disabled = !h;
   $("h-auto-text").textContent = "starts when the box finds no known Wi-Fi for half a minute";
   if (document.activeElement !== $("h-psk")) $("h-psk").placeholder = hs.set ? "set (type a new one to change it)" : "8 to 63 characters";
-  $("h-text").innerHTML = !h ? "" : !hs.tool ? "The hotspot needs one small package on the box. On the T95, online: <code>sudo apt install dnsmasq-base</code>, then reload this page." :
+  $("h-text").innerHTML = !h ? "" : !hs.tool ? "The hotspot needs one small package on the box. On the box, online: <code>sudo apt install dnsmasq-base</code>, then reload this page." :
     !hs.set ? "The box's own Wi-Fi network, for where there is none. Set a password first: the box never opens a network without one." :
     "The box's own Wi-Fi network, for where there is none. On a phone or laptop: join <b>" + esc(hs.ssid) + "</b>, then open <code>https://" + hs.addr + ":8443</code>. No internet over it: a phone keeps its own."
     + (hs.on ? "" : " Turned on here, the box leaves the Wi-Fi it is on, so this page loses it: join the hotspot to get back. If nobody joins within two minutes the box returns to the Wi-Fi.");

@@ -92,7 +92,7 @@ setInterval(async () => {
     const r = await fetch("/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a }) });
     const j = await r.json();
     sendErr = j.error || "";
-  } catch (e) { sendErr = "T95 bridge not answering"; }
+  } catch (e) { sendErr = "the box is not answering"; }
   topStatus();
 }, 40);
 
@@ -307,13 +307,13 @@ const Listen = {
       this.node.connect(this.ctx.destination);
       this.abort = new AbortController();
       const resp = await fetch("/audio.pcm", { signal: this.abort.signal, cache: "no-store" });
-      if (!resp.ok) throw new Error((await resp.text()).trim() || "no audio from the T95");
+      if (!resp.ok) throw new Error((await resp.text()).trim() || "no audio from the box");
       this.state = "on"; listenBtn();
       const rd = resp.body.getReader();
       let carry = new Uint8Array(0);
       for (;;) {
         const { done, value } = await rd.read();
-        if (done) throw new Error("the T95 stopped sending audio");
+        if (done) throw new Error("the box stopped sending audio");
         let buf = value;
         if (carry.length) { buf = new Uint8Array(carry.length + value.length); buf.set(carry); buf.set(value, carry.length); }
         const frames = buf.length >> 2, dv = new DataView(buf.buffer, buf.byteOffset, frames * 4);
@@ -901,7 +901,7 @@ V.samples = {
       if (d.error) { if (smpPath[src]) { smpPath[src] = ""; return this.load(); } this.items = []; this.say(d.error); }
       else { this.items = (smpPath[src] ? [{ up: true }] : []).concat(d.dirs.map(n => ({ dir: n })), d.files.map(f => ({ file: f.name, size: f.size })));
         this.say(d.live_only ? d.live_only + (d.live_only === 1 ? " file" : " files") + " not shown: Ableton pack format, only Live reads it" : ""); }
-    } catch (e) { this.items = []; this.say("T95 bridge not answering"); }
+    } catch (e) { this.items = []; this.say("the box is not answering"); }
     if (curName === "samples" && smpMode === src) this.render();
   },
   say(t, bad) { if (this.msg) { this.msg.textContent = t || ""; this.msg.classList.toggle("bad", !!bad); } },
@@ -951,7 +951,7 @@ V.samples = {
       drawPeaks(w.cv, p.pk);
     }
   },
-  async post(path, body) { try { const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return await r.json(); } catch (e) { return { error: "T95 bridge not answering" }; } },
+  async post(path, body) { try { const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); return await r.json(); } catch (e) { return { error: "the box is not answering" }; } },
   async send(src, path) { const r = await this.post("/samples/send", { src, path, track: st.sel + 1 }); this.say(r.error || "queued for track " + (st.sel + 1), !!r.error); },
   async imp(path) { this.say("copying to the library…"); const r = await this.post("/samples/import", { path }); this.say(r.error || "in the library: " + (r.copied !== undefined ? r.copied + " files" : "done"), !!r.error); },
   async del(path) { const r = await this.post("/samples/delete", { path }); this.say(r.error || "deleted", !!r.error); this.load(); },
@@ -1013,7 +1013,7 @@ V.samples = {
     this.X = this.X2; this.say("drag the markers");
     (async () => {
       const key = e.src + ":" + e.path; let p = peakCache.get(key);
-      if (!p) { try { p = await (await fetch("/samples/peaks?src=" + e.src + "&path=" + encodeURIComponent(e.path))).json(); } catch (x) { p = { error: "T95 bridge not answering" }; }
+      if (!p) { try { p = await (await fetch("/samples/peaks?src=" + e.src + "&path=" + encodeURIComponent(e.path))).json(); } catch (x) { p = { error: "the box is not answering" }; }
         if (!p.error) { p.pk = p.peaks ? p.peaks.match(/../g).map(h => parseInt(h, 16)) : null; peakCache.set(key, p); } }
       if (smpEdit !== e || curName !== "samples") return;
       if (p.error) return this.say(p.error, true);
@@ -1868,7 +1868,7 @@ function connect() {
   es.addEventListener("bridge", e => { try { const b = JSON.parse(e.data); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (err) { } });
   es.addEventListener("xfer", e => { try { st.xfer = JSON.parse(e.data); call("X"); } catch (err) { } });
   es.addEventListener("ir", e => { try { remote(JSON.parse(e.data).action); } catch (err) { } });
-  es.onerror = () => { st.daisy = false; sendErr = "T95 bridge not answering"; topStatus(); };
+  es.onerror = () => { st.daisy = false; sendErr = "the box is not answering"; topStatus(); };
   es.onopen = () => { sendErr = ""; topStatus(); };
 }
 setInterval(async () => { try { const b = await (await fetch("/health")).json(); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (e) { } }, 2000);

@@ -192,7 +192,7 @@ class WebMixin:
             out = json.loads(buf.decode())
             return out if isinstance(out, dict) else {"error": "the settings helper answered nonsense"}
         except (OSError, ValueError):
-            return {"error": "the settings helper isn't running on the T95 (sudo t95/bridge/install.sh)", "helper": False}
+            return {"error": "the settings helper isn't running on the box (sudo t95/bridge/install.sh)", "helper": False}
 
     async def sys_do(self, body, secure):
         try:
@@ -247,7 +247,7 @@ class WebMixin:
                     except (ValueError, AttributeError):
                         rel = None
                     if rel is None or not self.sd_ready():
-                        code, out = 400, {"error": "no SD card in the T95" if rel is not None else "JSON expected"}
+                        code, out = 400, {"error": "no SD card in the box" if rel is not None else "JSON expected"}
                     else:
                         cnt = await asyncio.get_running_loop().run_in_executor(None, self.import_sd, rel)
                         code, out = 200, {"ok": True, "copied": cnt}

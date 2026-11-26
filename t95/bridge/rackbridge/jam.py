@@ -210,7 +210,7 @@ class Jam:
             if self.recording():
                 return 400, {"error": "already recording"}
             if not os.path.exists(os.path.join(self.b.args.asound, self.b.args.daisy_card)):
-                return 503, {"error": "the Daisy's audio isn't on the T95 (USB)"}
+                return 503, {"error": "the Daisy's audio isn't on the box (USB)"}
             if not self.b.listen.shared and (self.b.hdmi.running() or self.b.listen.clients):
                 return 503, {"error": "the Daisy's audio is in use (TV sound or listening) and can't be shared on this box"}
             try:
@@ -219,7 +219,7 @@ class Jam:
                 return 503, {"error": "no folder for takes: %s" % e}
             free = self.free()
             if free is not None and free < self.min_free + 60 * JAM_BPS:
-                return 503, {"error": "not enough room on the T95 (%d MB free, %d MB are kept)" % (free >> 20, self.min_free >> 20)}
+                return 503, {"error": "not enough room on the box (%d MB free, %d MB are kept)" % (free >> 20, self.min_free >> 20)}
             base = time.strftime("jam %Y-%m-%d %H.%M.%S")
             take, n = base, 1
             while os.path.exists(os.path.join(self.dir, take)):
@@ -311,7 +311,7 @@ class Jam:
                 continue
             free = self.free()
             if free is not None and free < self.min_free:
-                await self.stop("stopped: the T95 is nearly full")
+                await self.stop("stopped: the box is nearly full")
                 self.tell()
                 continue
             self.tell()

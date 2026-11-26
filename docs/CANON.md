@@ -170,6 +170,10 @@ one rectangle around everything that changed.
   `TO TRACK 3`, `LEARN TAP`. Status and messages in plain lower case.
 - A label says what the thing is called on the box, not how it is built: "box
   SD card", not "mmcblk0".
+- **The companion is "the box"**, on every page and in every message the bridge
+  or the helper sends to one. Never "the T95" or "the Pi": the same pages run
+  on both, and a Pi that says "no SD card in the T95" is wrong twice. The
+  Seed is "the Daisy". A model's name belongs in docs and in comments.
 - No "please", no "successfully", no exclamation marks.
 - Name the thing a button will act on when it is not obvious (`TO TRACK 3`,
   `HEAR TRACK 3`, "opening ApcBox in 4 s").

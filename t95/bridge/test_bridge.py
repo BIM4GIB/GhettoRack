@@ -1679,9 +1679,9 @@ class EndToEndTest(unittest.TestCase):
             ui_status = resp.value.status
             b.close()
         self.assertEqual(errors, [], "script errors on the page")
-        self.assertIn("T95 bridge: connected", chips)
+        self.assertIn("box bridge: connected", chips)
         self.assertIn("Daisy: connected", chips)
-        self.assertTrue(any(c.startswith("T95 controllers: APC40 1 (driving)") and "keys 2" in c for c in chips), chips)
+        self.assertTrue(any(c.startswith("box controllers: APC40 1 (driving)") and "keys 2" in c for c in chips), chips)
         self.assertTrue(hidden_tft, "the screen preview is Mac-only")
         self.assertFalse(panel_hidden, "encoder buttons should show with v13.7")
         self.assertEqual(ui_status, 200)
@@ -4174,7 +4174,7 @@ class ListenTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as e:
             BridgeTest.get("/audio.pcm")
         self.assertEqual(e.exception.code, 503)
-        self.assertIn(b"Daisy's audio isn't on the T95", e.exception.read())
+        self.assertIn(b"Daisy's audio isn't on the box", e.exception.read())
 
     def test_l2_stream_is_the_daisys_audio_and_stops_with_the_last_listener(self):
         os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
@@ -4469,7 +4469,7 @@ class JamTest(unittest.TestCase):
     def test_j1_no_daisy_audio_says_so(self):
         code, out = self.post("/jam/start", {})
         self.assertEqual(code, 503)
-        self.assertIn("Daisy's audio isn't on the T95", out["error"])
+        self.assertIn("Daisy's audio isn't on the box", out["error"])
         self.assertEqual(self.post("/jam/stop", {})[0], 400)
         self.assertEqual(self.jams()["takes"], [])
         self.assertIn(b"JAM", BridgeTest.get("/jam")[2])          # the page
