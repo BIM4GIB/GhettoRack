@@ -93,8 +93,8 @@ const $ = id => document.getElementById(id);
 const tv = new URLSearchParams(location.search).has("tv");
 
 /* The 480x320 touch screen (?small): REC with time, levels and room on one tab, the takes in
-   pages on the other. No playing (the box has no speaker) and no renaming yet (no keyboard on
-   the screen). Frame and parts: small.js. */
+   pages on the other, with RENAME on the screen's keyboard. No playing (the box has no speaker).
+   Frame and parts: small.js. */
 function small() {
   const el = Small.el;
   const clock = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, "0"); return h ? h + ":" + String(m).padStart(2, "0") + ":" + x : m + ":" + x; };
@@ -130,7 +130,9 @@ function small() {
       U.lib = Small.btn("TO LIBRARY", async () => { const r = await post("/jam/library", { take: pick }); if (!r.error) say(r.files.length ? "in the sample library, folder jams" : "already in the sample library"); });
       U.tocard = Small.btn("TO CARD", async () => { const r = await post("/jam/card", { take: pick }); if (!r.error) load(); });
       U.del = Small.btn("DELETE", async () => { if (sure !== pick) { sure = pick; return show(); } sure = ""; await post("/jam/delete", { take: pick }); pick = ""; load(); });
-      side.append(U.lib, U.tocard, U.del, U.pg.nav);
+      U.ren = Small.btn("RENAME", async () => { const from = pick, to = await Small.keyboard({ title: "take name", value: from, max: 48 });
+        if (to === null || !to.trim() || to.trim() === from) return; if (!(await post("/jam/rename", { take: from, to: to.trim() })).error) { pick = to.trim(); load(); } });
+      side.append(U.lib, U.tocard, U.ren, U.del, U.pg.nav);
       root.append(U.pg.el, side, msg); F.view.appendChild(root);
     }
     show();
@@ -153,7 +155,7 @@ function small() {
       if (pick && !takes.some(t => t.take === pick)) pick = "";
       U.pg.set(takes);
       const t = takes.find(x => x.take === pick), busy = !t || t.recording;
-      U.lib.disabled = busy; U.tocard.disabled = busy || !cardOk() || copying(); U.del.disabled = busy;
+      U.lib.disabled = busy; U.tocard.disabled = busy || !cardOk() || copying(); U.del.disabled = busy; U.ren.disabled = busy || copying();
       U.del.textContent = sure && sure === pick ? "SURE?" : "DELETE"; U.del.classList.toggle("warn", !!sure && sure === pick);
       if (!takes.length && !note) say("no takes yet");
     }

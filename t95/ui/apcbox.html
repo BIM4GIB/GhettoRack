@@ -2312,7 +2312,7 @@ V.sm_loop = {
     view.className = "sm sm-loop";
     const tabs = el("div", "s-lt2");
     [["loop", "LOOPER"], ["quant", "QUANTISE"]].forEach(([k, n]) => { const b = el("button", "b s-tg" + (smLoopTab === k ? " on" : ""), n); b.onclick = () => { smLoopTab = k; show(curName); }; tabs.appendChild(b); });
-    this.msg = el("div", "s-msg"); this.q = null; this.L = null;
+    this.msg = el("div", "s-msg"); this.q = null; this.ui = null;
     /* a row of choices: [[value, label]...], get() says which is on, pick(value) on a tap */
     const pick = (opts, get, set) => { const row = el("div", "s-opts"), bs = opts.map(([v, n]) => { const b = el("button", "b s-tg", n); b.onclick = () => { set(v); upd(); }; row.appendChild(b); return [v, b]; });
       const upd = () => { const c = get(); for (const [v, b] of bs) b.classList.toggle("on", v === c); }; upd(); return { el: row, upd }; };
@@ -2323,7 +2323,7 @@ V.sm_loop = {
         const p = pick(opts, () => st.lp[key], v => lpAct(key, v, cmd + v)); box.append(el("span", "s-d", label), p.el); this.q.push(p); }
       view.append(tabs, box, this.msg); return;
     }
-    const L = this.L = {}, T = () => st.sel + 1, box = el("div", "s-lp");
+    const L = this.ui = {}, T = () => st.sel + 1, box = el("div", "s-lp");
     const head = el("div", "s-lph"); L.name = el("span", "s-nm"); L.meter = el("i"); const mb = el("div", "s-in"); mb.appendChild(L.meter); head.append(L.name, el("span", "s-d", "input"), mb);
     L.len = pick(LEN_OPTS.map(([v, n]) => [v, n === "free" ? "FREE" : n + (v === 1 ? " BAR" : " BARS")]), () => st.lp.len, v => lpAct("len", v, "lrec len " + v));
     const r2 = el("div", "s-lp2"); L.gain = el("span");
@@ -2345,7 +2345,7 @@ V.sm_loop = {
   S() {
     smTopS();
     if (this.q) { for (const p of this.q) p.upd(); return; }
-    const L = this.L; if (!L) return;
+    const L = this.ui; if (!L) return;
     const t = st.sel, ty = typeOf(t), rec = st.lrec && st.lrecT === t, m = st.lp.mode, full = st.lrec ? "" : loopNoRoom(t);
     const nm = (t + 1) + " " + trackName(t) + "   " + ty; if (L.name.textContent !== nm) L.name.textContent = nm;
     const txt = lrecText(t) || (st.lrec ? "busy on track " + (st.lrecT + 1) : full ? full : ty === "loop" ? "a loop is on this track: OVERDUB adds to it, REC LOOP replaces it" : ty === "303" ? "a 303 track: recording makes it a sample track" : "records the Daisy's own input into this track");

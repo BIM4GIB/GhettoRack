@@ -2094,7 +2094,8 @@ class PageControlTest(unittest.TestCase):
             pg.locator(".g-tab", has_text="TAKES").click()
             pg.wait_for_selector(".g-rows")
             self.assertEqual(pg.evaluate(inside), [[], [500, 320], 0], "jam, TAKES")
-            self.assertEqual(pg.locator(".g-side .g-b:disabled").count(), 5, "no take picked: nothing to act on, one page")
+            self.assertEqual(pg.locator(".g-side .g-b:disabled").count(), 6, "no take picked: nothing to act on, one page")
+            self.assertEqual(pg.locator(".g-side .g-b").all_text_contents()[:4], ["TO LIBRARY", "TO CARD", "RENAME", "DELETE"])
             pg.locator(".g-tab", has_text="HOME").click()
             pg.wait_for_url("**/?small=1")
             pg.wait_for_selector("button.g-tile")
@@ -4631,6 +4632,34 @@ class JamTest(unittest.TestCase):
         self.assertEqual((code, out.get("take")), (200, "Friday jam 1"))
         self.assertEqual(self.post("/jam/rename", {"take": take, "to": "y"})[0], 400)     # the old name is gone
         self.assertEqual([t["take"] for t in self.jams()["takes"]], ["Friday jam 1"])
+        try:                                                                    # the same on the 3.5" screen, typed on its keyboard
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            sync_playwright = None
+        if sync_playwright:
+            with sync_playwright() as pw:
+                b = pw.chromium.launch()
+                pg = b.new_page(viewport={"width": 500, "height": 320})
+                pg.goto("http://127.0.0.1:%d/jam?small=1" % self.http)
+                pg.locator(".g-tab", has_text="TAKES").click()
+                pg.locator(".g-li", has_text="Friday jam 1").click()
+                pg.locator(".g-side .g-b", has_text="RENAME").click()
+                pg.wait_for_selector(".g-kb")
+                self.assertEqual(pg.locator(".g-kval").text_content(), "Friday jam 1\u258f")
+                r = pg.evaluate("(() => { const r = document.querySelector('.g-kb').getBoundingClientRect(); return [r.width, r.height]; })()")
+                self.assertEqual(r, [480, 320])
+                pg.locator(".g-kfoot .g-b", has_text="DEL").click()
+                pg.locator(".g-keys .g-b", has_text="2").click()
+                pg.locator(".g-kfoot .g-b", has_text="CANCEL").click()
+                self.assertEqual([t["take"] for t in self.jams()["takes"]], ["Friday jam 1"])     # CANCEL: nothing
+                pg.locator(".g-side .g-b", has_text="RENAME").click()
+                pg.locator(".g-kfoot .g-b", has_text="DEL").click()
+                pg.locator(".g-keys .g-b", has_text="2").click()
+                pg.locator(".g-kfoot .g-b", has_text="OK").click()
+                pg.wait_for_selector(".g-li.on:has-text('Friday jam 2')")                       # renamed and still the picked one
+                b.close()
+            self.assertEqual([t["take"] for t in self.jams()["takes"]], ["Friday jam 2"])
+            self.assertEqual(self.post("/jam/rename", {"take": "Friday jam 2", "to": "Friday jam 1"})[0], 200)
         code, out = self.post("/jam/library", {"take": "Friday jam 1"})
         self.assertEqual(code, 200, out)
         self.assertEqual(len(out["files"]), out["parts"])

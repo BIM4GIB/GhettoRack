@@ -62,7 +62,7 @@ button{font:inherit;color:inherit;appearance:none;margin:0;-webkit-tap-highlight
 .g-jam .g-msg,.g-takes .g-msg{grid-column:1 / -1}
 .g-takes{display:grid;grid-template-columns:1fr 118px;grid-template-rows:1fr 18px;gap:4px;padding:4px;height:100%}
 .g-rows{display:grid;grid-template-rows:repeat(5,1fr);gap:4px;min-height:0}
-.g-side{display:grid;grid-template-rows:repeat(3,1fr) 40px;gap:4px;min-height:0}
+.g-side{display:grid;grid-template-rows:repeat(4,1fr) 40px;gap:4px;min-height:0}
 /* clock */
 .g-clock{display:grid;grid-template-rows:64px 52px 52px 52px 18px;gap:8px;padding:8px;height:100%}
 .g-chead{display:flex;align-items:center;justify-content:space-between;min-width:0}
