@@ -1469,7 +1469,7 @@ V.system = {
    16 tracks, all 64 patterns on one page); ZOOM shows the 8 tracks of the selected
    track's page, or one bank, with targets for a finger. Plain elements, not a canvas:
    the screen is on a slow SPI link and only what changed is sent to it. */
-const SM_TABS = [["sm_steps", "STEP"], ["sm_track", "TRK"], ["sm_mix", "MIX"], ["sm_pat", "PAT"], ["sm_lib", "LIB"], ["sm_sys", "SYS"]];
+const SM_TABS = [["sm_steps", "STEP"], ["sm_track", "TRK"], ["sm_mix", "MIX"], ["sm_pat", "PAT"], ["sm_loop", "LOOP"], ["sm_lib", "LIB"], ["sm_sys", "SYS"]];
 let smZoom = false; try { smZoom = localStorage.getItem("apcbox-small-zoom") === "1"; } catch (e) { }
 const smTracks = () => smZoom ? [...Array(8).keys()].map(i => i + (st.sel >> 3) * 8) : [...Array(16).keys()];
 function smTop() {
@@ -1794,6 +1794,66 @@ V.sm_lib = {
     const pct = x.chunks ? Math.round(x.acked / x.chunks * 100) : 0;
     this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track + (x.cut ? " (cut to fit)" : "") + (x.kb_per_s ? " · " + x.kb_per_s + " kB/s" : "")
       : x.name + " → track " + x.track + ": " + x.state + (x.state === "sending" ? " " + pct + "%" : ""), x.state === "failed"); },
+};
+
+/* LOOP: the Daisy's own input into the selected track (REC LOOP in time, OVERDUB, SAMPLE as a one-shot),
+   and on its second tab what snaps to the beat: pattern switches, mutes, takes, held FX. The same
+   commands as the big layout's looper and its System view. */
+let smLoopTab = "loop";
+V.sm_loop = {
+  build() {
+    view.className = "sm sm-loop";
+    const tabs = el("div", "s-lt2");
+    [["loop", "LOOPER"], ["quant", "QUANTISE"]].forEach(([k, n]) => { const b = el("button", "b s-tg" + (smLoopTab === k ? " on" : ""), n); b.onclick = () => { smLoopTab = k; show(curName); }; tabs.appendChild(b); });
+    this.msg = el("div", "s-msg"); this.q = null; this.L = null;
+    /* a row of choices: [[value, label]...], get() says which is on, pick(value) on a tap */
+    const pick = (opts, get, set) => { const row = el("div", "s-opts"), bs = opts.map(([v, n]) => { const b = el("button", "b s-tg", n); b.onclick = () => { set(v); upd(); }; row.appendChild(b); return [v, b]; });
+      const upd = () => { const c = get(); for (const [v, b] of bs) b.classList.toggle("on", v === c); }; upd(); return { el: row, upd }; };
+    if (smLoopTab === "quant") {
+      const box = el("div", "s-q"); this.q = [];
+      for (const [label, key, cmd, opts] of [["patterns switch on the", "qpat", "quant pat ", [[0, "BAR"], [1, "BEAT"], [2, "STEP"]]], ["mute and solo", "qmute", "quant mute ", [[0, "AT ONCE"], [1, "BEAT"], [2, "BAR"]]],
+        ["takes start on the", "qrec", "quant rec ", [[0, "BAR"], [1, "BEAT"]]], ["held FX", "qfx", "quant fx ", [[0, "AT ONCE"], [1, "STEP"], [2, "BEAT"]]]]) {
+        const p = pick(opts, () => st.lp[key], v => lpAct(key, v, cmd + v)); box.append(el("span", "s-d", label), p.el); this.q.push(p); }
+      view.append(tabs, box, this.msg); return;
+    }
+    const L = this.L = {}, T = () => st.sel + 1, box = el("div", "s-lp");
+    const head = el("div", "s-lph"); L.name = el("span", "s-nm"); L.meter = el("i"); const mb = el("div", "s-in"); mb.appendChild(L.meter); head.append(L.name, el("span", "s-d", "input"), mb);
+    L.len = pick(LEN_OPTS.map(([v, n]) => [v, n === "free" ? "FREE" : n + (v === 1 ? " BAR" : " BARS")]), () => st.lp.len, v => lpAct("len", v, "lrec len " + v));
+    const r2 = el("div", "s-lp2"); L.gain = el("span");
+    const gain = d => { const v = Math.max(0, Math.min(127, st.lp.gain + d)); lpAct("gain", v, "ingain " + v); this.S(); };
+    const gm = el("button", "b", "‹"), gp = el("button", "b", "›"); gm.onclick = () => gain(-8); gp.onclick = () => gain(8);
+    L.cnt = el("button", "b s-tg", "COUNT-IN"); L.cnt.onclick = () => { lpAct("count", st.lp.count ? 0 : 1, "lrec count " + (st.lp.count ? 0 : 1)); this.S(); };
+    L.mon = el("button", "b s-tg", "MONITOR"); L.mon.onclick = () => act("mon 2");
+    r2.append(el("span", "s-d", "input level"), gm, L.gain, gp, L.cnt, L.mon);
+    const pads = el("div", "s-lp3"), pad = (n, f) => { const b = el("button", "b", n); b.onclick = f; pads.appendChild(b); return b; };
+    L.rec = pad("REC LOOP", () => act(st.lrec ? "lrec stop" : "lrec arm " + T()));
+    L.over = pad("OVERDUB", () => act(st.lrec ? "lrec stop" : "lrec over " + T()));
+    L.shot = pad("SAMPLE", () => act(st.lrec ? "lrec stop" : "lrec shot " + T()));
+    L.stop = pad("STOP", () => act("lrec stop"));
+    L.undo = pad("UNDO TAKE", () => act(st.lrec ? "lrec cancel" : st.lp.undo !== T() && st.lp.redo === T() ? "lrec redo" : "lrec undo"));
+    L.clear = pad("CLEAR", () => act(`type ${T()} sample`));
+    box.append(head, L.len.el, r2, pads);
+    view.append(tabs, box, this.msg);
+  },
+  S() {
+    smTopS();
+    if (this.q) { for (const p of this.q) p.upd(); return; }
+    const L = this.L; if (!L) return;
+    const t = st.sel, ty = typeOf(t), rec = st.lrec && st.lrecT === t, m = st.lp.mode, full = st.lrec ? "" : loopNoRoom(t);
+    const nm = (t + 1) + " " + trackName(t) + "   " + ty; if (L.name.textContent !== nm) L.name.textContent = nm;
+    const txt = lrecText(t) || (st.lrec ? "busy on track " + (st.lrecT + 1) : full ? full : ty === "loop" ? "a loop is on this track: OVERDUB adds to it, REC LOOP replaces it" : ty === "303" ? "a 303 track: recording makes it a sample track" : "records the Daisy's own input into this track");
+    if (this.msg.textContent !== txt) this.msg.textContent = txt; this.msg.classList.toggle("bad", !!((st.lrec === 2 && rec) || full));
+    L.len.upd(); L.cnt.classList.toggle("on", !!st.lp.count); L.mon.classList.toggle("on", !!st.mon);
+    const g = st.lp.gain === 64 ? "x1" : "x" + ((st.lp.gain * 2 / 127) ** 2).toFixed(1); if (L.gain.textContent !== g) L.gain.textContent = g;
+    const cls = (b, on, dis) => { b.classList.toggle("rec", !!on); b.disabled = !!dis; };
+    cls(L.rec, rec && m === 0, (st.lrec && !(rec && m === 0)) || !!full);
+    cls(L.over, rec && m === 1, (st.lrec && !(rec && m === 1)) || (!st.lrec && ty !== "loop"));
+    cls(L.shot, rec && m === 2, st.lrec && !(rec && m === 2));
+    L.stop.disabled = !st.lrec; L.undo.disabled = !st.lrec && st.lp.undo !== t + 1 && st.lp.redo !== t + 1;
+    const u = st.lrec ? "CANCEL" : st.lp.undo !== t + 1 && st.lp.redo === t + 1 ? "REDO TAKE" : "UNDO TAKE"; if (L.undo.textContent !== u) L.undo.textContent = u;
+    const lv = Math.round(Math.min(100, st.inPeak) / 5) * 5; if (lv !== L.lv) { L.lv = lv; L.meter.style.width = lv + "%"; L.meter.className = lv >= 90 ? "r" : ""; }
+  },
+  N() { this.S(); }, P() { this.S(); },
 };
 
 V.sm_sys = {

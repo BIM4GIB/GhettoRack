@@ -1916,7 +1916,7 @@ class PageControlTest(unittest.TestCase):
                 pg.on("pageerror", lambda e: errors.append(str(e)))
                 pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
                 for zoom in (0, 1):
-                    for v in ("sm_steps", "sm_track", "sm_mix", "sm_pat", "sm_lib", "sm_sys"):
+                    for v in ("sm_steps", "sm_track", "sm_mix", "sm_pat", "sm_loop", "sm_lib", "sm_sys"):
                         pg.goto(url + "&v=" + v)
                         pg.wait_for_selector(".tab.on")
                         pg.evaluate("z => { if (smZoom !== !!z) T.zoom.click(); }", zoom)
@@ -1926,7 +1926,7 @@ class PageControlTest(unittest.TestCase):
                                 const r = e.getBoundingClientRect();
                                 if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
                             return [document.body.className, document.querySelectorAll('.tab').length, document.querySelector('.tab.on').textContent, bad]; }""")
-                        self.assertEqual(out[1:], [6, {"sm_steps": "STEP", "sm_track": "TRK", "sm_mix": "MIX", "sm_pat": "PAT", "sm_lib": "LIB", "sm_sys": "SYS"}[v], []],
+                        self.assertEqual(out[1:], [7, {"sm_steps": "STEP", "sm_track": "TRK", "sm_mix": "MIX", "sm_pat": "PAT", "sm_loop": "LOOP", "sm_lib": "LIB", "sm_sys": "SYS"}[v], []],
                                          "%s %s zoom %d: something is off the panel" % (name, v, zoom))
                         self.assertEqual(out[0], "small")
                         n = pg.evaluate("[document.querySelectorAll('.sm-steps .s-c').length, document.querySelectorAll('.sm-mix .s-st').length, document.querySelectorAll('.sm-pat .s-pp').length]")
@@ -1964,6 +1964,28 @@ class PageControlTest(unittest.TestCase):
             pg.locator(".tab", has_text="PAT").click()
             pg.locator(".sm-pat .s-pp").nth(2).click()
             self.assertTrue(self.box.wait_for(lambda c: self.s(2) == 2 or self.s(3) == 2))
+            # LOOP: the take length and the count-in reach the firmware (the LP line); QUANTISE on its second tab
+            pg.locator(".tab", has_text="LOOP").click()
+            pg.wait_for_selector(".sm-loop .s-lp")
+            lp = lambda: [int(x) for x in self.last("LP ").split()[1:]]
+            pg.locator(".sm-loop .s-opts .b", has_text="4 BARS").click()
+            self.assertTrue(self.box.wait_for(lambda c: lp()[0] == 4))
+            pg.locator(".sm-loop .s-lp2 .b", has_text="COUNT-IN").click()
+            self.assertTrue(self.box.wait_for(lambda c: lp()[1] == 1))
+            pg.wait_for_function("document.querySelector('.sm-loop .s-opts .b.on').textContent === '4 BARS'")
+            self.assertTrue(pg.locator(".sm-loop .s-lp3 .b", has_text="OVERDUB").is_disabled(), "no loop on the track yet")
+            self.assertTrue(pg.locator(".sm-loop .s-lp3 .b", has_text="STOP").is_disabled())
+            pg.locator(".sm-loop .s-lp3 .b", has_text="REC LOOP").click()                  # armed: waits for the bar
+            self.assertTrue(self.box.wait_for(lambda c: self.s(47) != 0))
+            pg.wait_for_function("document.querySelector('.sm-loop .s-lp3 .b').classList.contains('rec')")
+            pg.locator(".sm-loop .s-lp3 .b", has_text=re.compile("CANCEL")).click()
+            self.assertTrue(self.box.wait_for(lambda c: self.s(47) == 0))
+            pg.locator(".sm-loop .s-lt2 .b", has_text="QUANTISE").click()
+            pg.wait_for_selector(".sm-loop .s-q")
+            pg.locator(".sm-loop .s-q .s-opts").nth(0).locator(".b", has_text="BEAT").click()
+            self.assertTrue(self.box.wait_for(lambda c: lp()[3] == 1))
+            pg.locator(".sm-loop .s-q .s-opts").nth(3).locator(".b", has_text="STEP").click()
+            self.assertTrue(self.box.wait_for(lambda c: len(lp()) > 9 and lp()[9] == 1))
             # the mixer: a fader drag reaches the firmware
             pg.locator(".tab", has_text="MIX").click()
             box = pg.locator(".sm-mix .s-st").nth(1).locator(".s-sf").bounding_box()
@@ -1972,7 +1994,7 @@ class PageControlTest(unittest.TestCase):
             pg.close()
             b.close()
         self.assertEqual(errors, [])
-        self.do("mute 3 2", "track 1", "pat 1")
+        self.do("mute 3 2", "track 1", "pat 1", "lrec len 0", "lrec count 0", "quant pat 0", "quant fx 1")
 
     def test_p56_the_small_start_screen(self):
         """?small on the start page: the shared frame (small.css, small.js), tiles inside 480x320, the countdown as a bar"""

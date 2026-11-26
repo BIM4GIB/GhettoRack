@@ -139,7 +139,7 @@ their pots in Perform and the Mixer keeps three small ones).
 ## Small: 480x320 (`?small`)
 
 The 3.5" touch screen on a Pi's header (`pi4/README.md`); the kiosk opens
-`/apcbox?small=1`. Its own six views on a rail on the left, a 24 px top bar
+`/apcbox?small=1`. Its own seven views on a rail on the left, a 24 px top bar
 (play, record, BPM, pattern, one status, the track page, ZOOM), drawn 1:1.
 The APC40 does the playing; this screen shows names and values and picks
 things by name.
@@ -150,6 +150,7 @@ things by name.
 | TRK | the selected track: 16 big steps (303: with notes), waveform, 4 pots at a time (SOUND 1, SOUND 2, MIX), HEAR, mute, solo | the same |
 | MIX | 16 strips: pan and two sends as bars, fader with a meter, mute, solo, crossfader side; master | 8 strips with pan and reverb pots; master |
 | PAT | all 64 patterns, the 8 FX as hold pads, copy / clear / undo | one bank of 8 with a bank row, big FX pads |
+| LOOP | LOOPER: the Daisy's own input into the selected track. Take length (free, 1, 2, 4, 8 bars), input level, COUNT-IN, MONITOR, an input meter; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE (CANCEL while armed), CLEAR. QUANTISE: what snaps to the beat, as on the big System view (pattern switch, mute and solo, takes, held FX) | the same |
 | LIB | LIBRARY and BOX CARD (files on the box and on the card in its slot: a waveform each, TO TRACK), DAISY CARD (the samples on the Daisy's own card: a folder and a file stepped with ‹ ›, each step loads into the selected track, UNDO; says so when the Daisy has no card), KITS (load on 1-8 / 9-16, undo), SETS (load, save here) | the same |
 | SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, RELOAD | the same |
 
@@ -182,7 +183,7 @@ file) and is the model for the rest.
 | MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (named "preset N": no keyboard on the screen yet), DELETE (asks) |
 | Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, SOUND OUT (steps through the box's outputs: HDMI, the headphone socket; then off). SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
 
-Not there: editing 303 notes, the looper, recording from a microphone, the
+Not there: editing 303 notes, recording from a microphone (the box has none), the
 APC40 map, sets rename and delete, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
 Every page of the box has a small layout now.
