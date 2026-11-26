@@ -126,7 +126,7 @@ Pi, recognised by the kernel with nothing installed.
 
 | On the pad | Does |
 |---|---|
-| D-pad, X, O, triangle, PS | the remote's `up` `down` `left` `right`, `ok`, `back`, `menu`, `home`, sent to every open page as `ir` events: a page needs nothing new. A held arrow repeats |
+| D-pad, X, O, triangle, PS | the remote's `up` `down` `left` `right`, `ok`, `back`, `menu`, `home`, sent as `ir` events to the pages on the box's own screen (to every open page only if the box shows none, or with `--pad-everywhere`): a page needs nothing new. A held arrow repeats |
 | L1 / R1 | `prev` / `next`: the view before / after |
 | start / select | `play` / `stop`, to the Daisy itself, once (two open pages would each toggle) |
 | left stick X | the master filter: low-pass left, high-pass right, off in the middle |

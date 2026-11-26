@@ -1,8 +1,8 @@
 """A game controller on the box's USB (seen: a Sony PlayStation 3 pad, 2026-11-26):
 its buttons are the remote's actions for the pages, its sticks sweep the Daisy.
 
-Buttons go to every open page as the same "ir" events a remote makes, so a page
-needs nothing new. Play and stop go to the Daisy once, not through the pages:
+Buttons go to the pages on the box's own screen as the same "ir" events a remote
+makes, so a page needs nothing new (to every open page only when the box shows none). Play and stop go to the Daisy once, not through the pages:
 two open pages would each toggle. The sticks spring back, so they only get
 controls that have a middle to spring back to, or put back what was there:
 
@@ -77,7 +77,12 @@ class Gamepad:
         if action in GP_DAISY:
             self.send(GP_DAISY[action])
             return
-        for c in list(self.b.clients):
+        # The pad is plugged into the box, so it drives the box's own screen. Only with no page
+        # open there does it go to the others: a phone left on the jam recorder started a take
+        # at every X while the screen was on ApcBox (rig, 2026-11-26)
+        clients = list(self.b.clients)
+        own = [c for c in clients if c.peer and c.peer[0] in ("127.0.0.1", "::1")]
+        for c in (own if self.b.args.pad_local and own else clients):
             c.push(sse_event("ir", {"action": action, "phase": "down", "pad": True}))
 
     def repeat(self, code):

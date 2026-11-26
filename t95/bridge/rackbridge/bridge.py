@@ -211,6 +211,8 @@ def main(argv=None):
                     "state.json"), help="where the last module and IR bindings are kept")
     ap.add_argument("--ir", metavar="PATH", help="IR input event device instead of finding it under /sys")
     ap.add_argument("--pad", metavar="PATH", help="game controller's input event device instead of finding it under /sys (tests)")
+    ap.add_argument("--pad-everywhere", dest="pad_local", action="store_false",
+                    help="a game controller's buttons go to every open page, not only to the ones on the box's own screen")
     ap.add_argument("--ir-lirc", metavar="PATH", help="IR lirc device instead of finding it under /sys")
     ap.add_argument("--library", help="sample library folder (default: next to the state file)")
     ap.add_argument("--alsaloop", default="/usr/bin/alsaloop", help="for the HDMI audio setting")

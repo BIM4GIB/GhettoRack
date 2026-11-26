@@ -2228,6 +2228,17 @@ class PageControlTest(unittest.TestCase):
         time.sleep(0.4)
         self.assertEqual(len(irs()[n:]), len(got))
         ev(1, 999, 1)                                                   # a button with no job
+        # the pad drives the box's own screen: a page open elsewhere gets nothing while the box shows one
+        from rackbridge.gamepad import Gamepad
+        from types import SimpleNamespace as NS
+        got = {"own": [], "far": []}
+        cl = lambda who, ip: NS(peer=(ip, 1), push=lambda d: got[who].append(d))
+        g = Gamepad(NS(clients=[cl("own", "127.0.0.1"), cl("far", "198.51.100.9")], args=NS(pad_local=True)))
+        g.act("ok")
+        self.assertEqual((len(got["own"]), len(got["far"])), (1, 0))
+        g.b.clients = g.b.clients[1:]                                   # nothing on the box's screen: the others get it
+        g.act("ok")
+        self.assertEqual((len(got["own"]), len(got["far"])), (1, 1))
         # start and select: to the Daisy, once, and not through the pages
         self.do("stop")
         self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0, 5))
