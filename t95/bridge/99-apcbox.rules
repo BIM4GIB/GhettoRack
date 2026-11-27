@@ -6,7 +6,8 @@ SUBSYSTEM=="tty", ATTRS{idVendor}=="1209", ATTRS{idProduct}=="0001", SYMLINK+="a
 # IR receiver: NEC decoding only (the T95 remote is extended NEC, address
 # 0x2fe; "nec" covers NEC, NECX and NEC32). Only: the imon decoder, on by
 # default, turned noise into fake 0x7fffffff presses on the T95.
-ACTION=="add", SUBSYSTEM=="rc", RUN+="/bin/sh -c 'echo nec > /sys/class/rc/%k/protocols'"
+# Only for a receiver that knows NEC: an HDMI port's CEC device is an "rc" device too (a Pi has two).
+ACTION=="add", SUBSYSTEM=="rc", ATTR{protocols}=="*nec*", RUN+="/bin/sh -c 'echo nec > /sys/class/rc/%k/protocols'"
 # The bridge reads decoded scancodes from lirc (it marks repeats)
 SUBSYSTEM=="lirc", GROUP="input", MODE="0660"
 
@@ -15,8 +16,9 @@ SUBSYSTEM=="lirc", GROUP="input", MODE="0660"
 # tools/flash-seed.sh sees no bootloader (happened on the T95, 2026-11-22).
 SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", GROUP="dialout", MODE="0660"
 
-# The T95's SD slot: FAT/exFAT cards are mounted read-only at /media/sdcard
+# The box's SD slot: FAT/exFAT cards are mounted read-only at /media/sdcard
 # for the sample library (import, send). Matches only cards whose MMC type
 # is "SD"; the internal eMMC reports "MMC", and ext4 cards (the Armbian
 # recovery card) are left alone. Taking the card out unmounts it.
-ACTION=="add", SUBSYSTEM=="block", KERNEL=="mmcblk*", ATTRS{type}=="SD", ENV{ID_FS_TYPE}=="vfat|exfat", RUN+="/usr/bin/systemd-mount --no-block --collect --options=ro,nosuid,nodev,noexec,umask=022 $devnode /media/sdcard"
+# The script leaves out the card the box itself runs from (a Raspberry Pi's boot partition is FAT on an SD card).
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="mmcblk*", ATTRS{type}=="SD", ENV{ID_FS_TYPE}=="vfat|exfat", RUN+="/opt/apcbox-bridge/sdcard-mount.sh $devnode"

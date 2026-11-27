@@ -49,11 +49,10 @@ been measured yet.**
   `/opt/apcbox-bridge/ghettorack_helper.py.before-nm`.
 - "box SD card": the Pi runs from the card in its slot, and Settings called that "not readable".
   The bridge now leaves out the card the system is on: "none in the slot" (seen on the Pi).
-- Two udev rules in `t95/bridge/99-apcbox.rules` could misfire on a Pi and
-  have not: the "SD card in the slot" rule matches the Pi's boot partition
-  (same card type, FAT) but it was not mounted at `/media/sdcard` after a
-  reboot; the "set remotes to NEC" rule left the CEC devices at `cec`. Both
-  should become board-specific.
+- Two udev rules in `t95/bridge/99-apcbox.rules` could misfire on a Pi: the "SD card in the
+  slot" rule matched the Pi's boot partition (same card type, FAT), the "set remotes to NEC" rule
+  the HDMI ports' CEC devices. From 2026-11-27 the first goes through `sdcard-mount.sh`, which
+  leaves out the card the box runs from, and the second only acts on a receiver that knows NEC.
 - Sound out of the box: there is no card called `HDMI` (they are `vc4hdmi0`, `vc4hdmi1` and
   `Headphones`, the AV socket), so with TV SOUND on nothing played. From 2026-11-25 the bridge
   takes the card picked in Settings > DEV (SOUND OUT steps through them), else the first there
@@ -64,8 +63,7 @@ been measured yet.**
   (Rene). On the Pi `/etc/default/apcbox-bridge` holds
   `APCBOX_ARGS=--loop-latency-us 10000 --loop-sync 4`: 24 to 36 ms over 70 s, 17 ms after the
   restart. The headphone output's own delay comes on top and can't be read. Keys reach the Daisy in
-  0.7 ms on average: for playing, wire a jack to the Daisy's own audio out. That file is written by
-  hand, no installer makes it yet.
+  0.7 ms on average: for playing, wire a jack to the Daisy's own audio out. `t95/bridge/install.sh` makes that file on a Raspberry Pi when there is none, and never writes over one.
 
 ## The screen on the Pi's header
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install or update the ApcBox telemetry bridge on the T95.
+# Install or update the ApcBox bridge on the box (the T95, or a Raspberry Pi: pi4/README.md).
 # Run from a clone of the repo:  sudo t95/bridge/install.sh
 # Copies the bridge and its pages to /opt/apcbox-bridge, installs a udev rule,
 # a systemd service and an avahi (Bonjour) service for network MIDI, starts it. Touches no disks or partitions. Undo: --remove
@@ -59,6 +59,14 @@ grep -q '^apcbox-bridge:' /etc/passwd || { systemctl stop apcbox-bridge.service 
   useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin apcbox-bridge; }
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
 install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
+install -m 755 "$HERE/sdcard-mount.sh" "$DEST/sdcard-mount.sh"
+# This box's own arguments for the bridge (the unit reads the file). Never written over: it is the
+# box's to change. Made only where a board is known to need some: on a Raspberry Pi the sound
+# passed on to its own output ran up to 150 ms late with the defaults (pi4/README.md).
+if [ ! -e /etc/default/apcbox-bridge ] && grep -qs "Raspberry Pi" /proc/device-tree/model; then
+  echo 'APCBOX_ARGS=--loop-latency-us 10000 --loop-sync 4' > /etc/default/apcbox-bridge
+  echo "made /etc/default/apcbox-bridge for a Raspberry Pi"
+fi
 # The box's own hotspot hands out addresses with dnsmasq (the program only: dnsmasq-base
 # installs no service). Without it Settings says what is missing.
 [ -x /usr/sbin/dnsmasq ] || apt-get install -y --no-install-recommends dnsmasq-base || echo "note: no dnsmasq; the hotspot stays off until 'sudo apt install dnsmasq-base' works"
@@ -96,6 +104,11 @@ systemctl enable apcbox-bridge.service
 systemctl restart apcbox-bridge.service
 sleep 2
 systemctl --no-pager --lines=5 status apcbox-bridge.service || true
+# what is installed, so "is this box on the repo's version" has an answer
+# (git as root in somebody's clone: told that the folder is fine)
+G="git -c safe.directory=$REPO -C $REPO"
+{ $G rev-parse --short HEAD 2>/dev/null || echo unknown; [ -z "$($G status --porcelain 2>/dev/null)" ] || echo "with uncommitted changes"; } > "$DEST/VERSION" 2>/dev/null || true
+echo "installed: $(tr '\n' ' ' < "$DEST/VERSION")"
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo
-echo "open http://${IP:-<t95-ip>}:8040/   health: curl -s localhost:8040/health"
+echo "open http://${IP:-<the box>}:8040/   health: curl -s localhost:8040/health"

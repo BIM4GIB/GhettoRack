@@ -27,7 +27,8 @@ Python 3 standard library only (Bluetooth MIDI and Link each need one package an
 | `test_bridge.py` | Tests against a fake Daisy on a pseudo-terminal |
 | `apcbox-bridge.service` | systemd unit: own throwaway user in `dialout`, no RT priority |
 | `99-apcbox.rules` | udev: `/dev/apcbox` link, `dialout` access, ModemManager keeps off it |
-| `install.sh` | Copies to `/opt/apcbox-bridge`, installs the rule and unit, starts it. `--remove` undoes it |
+| `install.sh` | Copies to `/opt/apcbox-bridge`, installs the rule and unit, starts it; writes the repo's commit into `/opt/apcbox-bridge/VERSION`. `/etc/default/apcbox-bridge` (this box's own arguments) is made on a Raspberry Pi when missing and never written over. `--remove` undoes it |
+| `sdcard-mount.sh` | What the udev rule runs for a FAT card in the box's SD slot: mounts it read-only at `/media/sdcard`, unless it is the card the box runs from |
 
 ## Install on the T95
 
