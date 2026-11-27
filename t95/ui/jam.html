@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GhettoRack">
+<meta name="theme-color" content="#0b0c0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>Jam recorder</title>
 <style>
 /* Same look as selector.html, clock.html and midihub.html */
@@ -167,6 +174,8 @@ function small() {
   let was = false;
   const es = new EventSource("/events?view=jam");
   es.addEventListener("jam", e => { try { const d = JSON.parse(e.data); J = Object.assign(J || {}, d); at = performance.now(); show(); if (d.recording !== was) { was = d.recording; load(); } } catch (err) {} });
+  /* a remote or a controller: PLAY starts a take, STOP ends one, the rest walks the buttons */
+  Small.remote(es, { act: a => { if (a === "play") { if (J && !J.recording) toggle(); return true; } if (a === "stop") { if (J && J.recording) toggle(); return true; } return false; } });
   F.tab("rec");
   load();
   setInterval(() => { if (!J || !J.recording) load(); }, 5000);

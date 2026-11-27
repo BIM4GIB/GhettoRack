@@ -36,7 +36,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 2 Steps | 303 | `acid` | note grid (piano roll), accent, slide, big steps with note names | built |
 | 3 Mixer | Mixer | `mixer` | per track: pan, reverb, delay, send C, fader, meters, mute/solo, crossfader side; master strip | built |
 | 4 Sound | Sample track | `sound` | waveform with start and playhead; 8 device pots, 8 track pots | built |
-| 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff, reso, env mod, decay, accent, tune, slide, wave | built |
+| 4 Sound | 303 | `sound303` | filter curve, envelope; cutoff (in Hz: where the filter rests, 150 Hz to 4.8 kHz), reso, env mod, decay, accent, tune, slide, wave | built |
 | 4 Sound | Live loop | `loop` | loop waveform with bar lines, re-record, overdub, stop, undo take | built (v13.12) |
 | 5 Samples | Library / SD | `samples` | pages of files with a waveform each, hear it on this device, send to the selected track, upload, import from the SD card, delete. Tap a file: trim view (two markers on a big waveform, normalise, hear the result, send) | built |
 | 5 Samples | Looper | - | the Daisy's own input into the selected track: input meter, level pot, monitor, count-in, take length (free/1/2/4/8 bars), start on bar or beat; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE, CLEAR; the track's waveform | built (v13.13) |
@@ -185,13 +185,19 @@ file) and is the model for the rest.
 | Start (`/`) | built | the modules, the jam recorder and Settings as tiles, three across; "last used" in green; at boot the countdown as a bar with STAY HERE |
 | Jam recorder (`/jam`) | built | REC: the button, time, levels, room left, the box's SD card and EJECT. TAKES: five to a page, TO LIBRARY, TO CARD, RENAME (the screen's keyboard), DELETE (asks). No playing (the box has no speaker) |
 | Clock (`/clock`) | built | CLOCK: tempo, position, beat lamps, START / CONTINUE, -1 -0.1 +0.1 +1 TAP, clock on, send when stopped, share on Link. FROM: where the tempo comes from. OUT: who gets the clock. STATS: timing |
-| MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (the name typed on the screen's keyboard, "preset N" offered), DELETE (asks) |
+| MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (the name typed on the screen's keyboard, "preset N" offered), RENAME, DELETE (asks) |
 | Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, SOUND OUT (steps through the box's outputs: HDMI, the headphone socket; then off). SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
 
 Not there: editing 303 notes, recording from a microphone (the box has none), the
-APC40 map, changing the game controller's jobs, renaming a hub preset, hearing a file before it is sent (the box
+APC40 map, changing the game controller's jobs, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
 Every page of the box has a small layout now.
+
+A remote or a game controller works on all of them (2026-11-27, `Small.remote` in `small.js`):
+the arrows move a white outline from button to button, OK taps, BACK cancels the keyboard or
+goes back, HOME goes to the start screen. PLAY and STOP start and stop the clock on the clock
+page and a take on the jam recorder. The ApcBox page keeps its own (arrows: track and volume).
+Browser-tested with arrow keys; not tried with the pad on the panel.
 
 ## Phone
 

@@ -180,6 +180,9 @@ button.tab{background:none;border:1px solid transparent}
 .led.warn::before{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .led.bad::before{background:var(--red);box-shadow:0 0 8px var(--red)}
 .led.bad,.led.warn{color:var(--text)}
+/* the jam recorder's button in the top bar: red while a take runs, yellow when it asks */
+.jamb{font:12px var(--mono);color:var(--dim);background:none;border:1px solid var(--line);border-radius:6px;padding:3px 8px;cursor:pointer}
+.jamb.rec{color:var(--red);border-color:var(--red)}.jamb.sure{color:#0b0c0d;background:var(--yellow);border-color:var(--yellow)}.jamb:disabled{opacity:.4;cursor:default}
 .pot{outline:none;border-radius:50%;cursor:ns-resize}
 .pot:focus-visible{outline:2px solid var(--yellow);outline-offset:1px}
 button:focus-visible{outline:2px solid var(--yellow);outline-offset:1px}

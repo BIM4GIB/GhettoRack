@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GhettoRack">
+<meta name="theme-color" content="#0b0c0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>Clock</title>
 <style>
 /* Same palette as selector.html and midihub.html */
@@ -212,6 +219,9 @@ function small() {
     if (b !== beatAt || U.beat !== U.beatFor) { beatAt = b; U.beatFor = U.beat; U.beat.forEach((e, i) => e.classList.toggle("on", i === b)); } }, 60);
   async function load() { try { C = await (await fetch("/clock?json=1")).json(); lastAt = performance.now(); show(); } catch (e) { F.status("the box isn't answering", "bad"); } }
   setInterval(load, 500);
+  /* a remote or a controller: PLAY starts or stops the clock, STOP stops it, the rest walks the buttons */
+  Small.remote(new EventSource("/events?view=clock"), { act: a => { if (a !== "play" && a !== "stop") return false;
+    post("/clock/transport", { cmd: a === "stop" ? "stop" : "toggle" }).then(load); return true; } });
   F.tab("clock");
   load();
 }

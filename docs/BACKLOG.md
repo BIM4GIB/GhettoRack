@@ -1,7 +1,7 @@
 # GhettoRack backlog
 
 Everything agreed, mentioned or left open that isn't built yet, so it doesn't
-get lost. Newest state: 2026-11-23. Move a line out when it's done (the
+get lost. Newest state: 2026-11-27. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
 ## v13.32: the Daisy's card from a page (on the Pi rig's Seed, 2026-11-26)
@@ -26,6 +26,26 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## Small things from the list (2026-11-27, browser-tested, nothing tried on a panel or a phone)
+
+- **A remote or a game controller on every small page**: `Small.remote` in `t95/ui/small.js`, one
+  piece for the start screen, jam recorder, clock, hub and Settings. Arrows move a white outline to
+  the nearest button, OK taps, BACK cancels the keyboard or goes back, HOME goes home; PLAY and
+  STOP belong to the clock and the jam recorder there. Tested with arrow keys in a browser
+  (`test_p57`). **Not tried: the pad or a remote on the 3.5" screen.**
+- **A hub preset can be renamed**: `POST /presets/rename`, RENAME on the small SAVED tab, "rename"
+  on the big page.
+- **The 303's cutoff reads in Hz** on the Sound view (150 Hz to 4.8 kHz: where the filter rests,
+  from `daisy/acid.h`; the envelope opens it from there). The page's arithmetic, not a report.
+- **The jam recorder in ApcBox's top bar** (TV, Mac, iPad): JAM REC starts a take, the button is
+  red while one runs, a tap asks STOP TAKE? and the second ends it (the question goes after 4 s).
+  A phone has no room: there only the red lamp of a running take. The 3.5" screen: "jam rec"
+  with the CPU figure. Tested against a made-up `arecord` (`test_j55`).
+- **Add to home screen**: every page names a manifest and an icon (drawn by the bridge, no image
+  file). **Not tried on a phone**: whether Safari and Chrome then open it full screen, and
+  whether a page change stays inside it.
+- Was done already: the start screen and Settings at 480 px (`pi4/README.md` said otherwise).
+
 ## Names on the 3.5" screen (2026-11-27, browser-tested)
 
 - ApcBox LIB > SETS: SAVE AS NEW (a name typed, or none for one made by itself), RENAME, DELETE
@@ -34,7 +54,6 @@ protocol 11). No report line changed.
   MIDI hub > SAVED: SAVE AS NEW asks for the name. Jam recorder: RENAME (2026-11-26).
 - The ApcBox page has a keyboard of its own (`smKeyboard`, the keys a name on the Daisy's card
   may have); the other pages use the one in `small.js`.
-- Still not on the small screen: renaming a hub preset (the bridge has no call for it).
 
 ## A game controller on the box (2026-11-26, on the Pi, real presses NOT watched yet)
 
@@ -48,10 +67,8 @@ protocol 11). No report line changed.
   pressed, and gives a control another job (`GET` / `POST /pad`, kept in `state.json`); SYS > PAD
   MAP on the 3.5" screen reads it and resets. Browser-tested with a stand-in pad. Rene at the
   rig with the real pad: the drawing matches the buttons.
-- Known gap: only the ApcBox page and the big layouts of the others act on remote actions. The
-  small layouts of the start screen, jam recorder, clock, hub and Settings do not: the D-pad does
-  nothing there yet. That wants one shared piece in `t95/ui/small.js` (move between buttons,
-  OK taps), per the canon, not five copies.
+- The small layouts of the start screen, jam recorder, clock, hub and Settings take the D-pad
+  from 2026-11-27 (`Small.remote`, above).
 - Next: the pad by Bluetooth (pairs over the cable once; delay to be measured), triggers as
   notes with velocity (needs a keyboard port to the Daisy), tilt.
 
@@ -117,9 +134,6 @@ protocol 11). No report line changed.
   restart of `ghettorack-helper`; or that Wi-Fi chip. Next time, before a reboot: on the TV,
   Settings > Network and Hotspot, and `journalctl -u ghettorack-helper` over the TV or a
   cable. Worth a persistent journal on that box.
-- **Saving a set from a page writes over the slot without asking the box** (the small page
-  asks SURE? only for a slot it knows is taken; `set save n` from anywhere else does not).
-  A set was lost this way.
 
 ## v13.31: the box starts with a demo set (on the Pi rig's Seed, 2026-11-25)
 
@@ -617,7 +631,7 @@ them one on the map (REC still arms a loop).
   mid-copy, a full card, FAT32, the card physically taken out and put back after EJECT.
   Open: after EJECT, Settings > Devices says "in the slot, not readable" (true, but it reads as a
   fault); no EJECT on the Settings page itself; nothing lists or deletes what is on the card.
-  Later: a record lamp and button in the ApcBox page's top bar, a job for
+  Later: a job for
   an APC40 button, takes over 3.5 minutes get no waveform in the Samples view (40 MB limit),
   set and kit backups and the library on the card.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
@@ -634,7 +648,6 @@ them one on the map (REC still arms a loop).
 - Per-step velocity and probability (a step is off / on / accent today).
 - The Daisy's own SD card browsed from the T95; sets copied to and from the
   T95 (backup); a whole kit sent from the T95 library in one go.
-- 303 cutoff shown in Hz (a percentage today).
 - Undo for a sample sent from the T95.
 - Kit names from a page are 16 characters, lower case (the command line to
   the Daisy is 31 characters).
@@ -703,6 +716,5 @@ them one on the map (REC still arms a loop).
 
 - LISTEN: measure the real delay; a lighter format than raw PCM if Wi-Fi
   needs it.
-- Add-to-home-screen for the phone (full screen, no Safari bars).
 - T95-to-Daisy audio over USB (the Daisy as the T95's sound card).
 - Countdown on the start screen: 5 s today, his call to keep it.

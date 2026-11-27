@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GhettoRack">
+<meta name="theme-color" content="#0b0c0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>MIDI hub</title>
 <style>
 /* Same palette as selector.html and daisy/ui/apcbox-ui.html */
@@ -204,14 +211,16 @@ function small() {
       const root = el("div", "g-takes");
       const pg = Small.pager(5, p => { const b = el("button", "g-li" + (p === pick ? " on" : "")); b.appendChild(el("span", "g-nm", p)); b.onclick = () => { pick = p; sure = ""; build(); }; return b; });
       pg.el.className = "g-rows"; pg.set(R.presets);
-      const has = R.presets.includes(pick), side = el("div", "g-side"); side.style.gridTemplateRows = "repeat(3,1fr) 40px";
+      const has = R.presets.includes(pick), side = el("div", "g-side");
       const ld = Small.btn("LOAD", async () => { const r = await post("/presets/load", { name: pick }); sel = null; if (!r.error) say(pick + " loaded"); load(); }, has ? "go" : ""); ld.disabled = !has;
       const dl = Small.btn(sure === pick && has ? "SURE?" : "DELETE", async () => { if (sure !== pick) { sure = pick; return build(); } sure = ""; await post("/presets/delete", { name: pick }); pick = ""; load(); }, sure === pick && has ? "warn" : ""); dl.disabled = !has;
       const sv = Small.btn("SAVE AS NEW", async () => { let k = 1; while (R.presets.includes("preset " + k)) k++;
         const name = await Small.keyboard({ title: "preset name", value: "preset " + k, max: 24 }); if (name === null || !name.trim()) return;
         if (R.presets.includes(name.trim())) return say("there is a preset called " + name.trim() + " already", true);
         const r = await post("/presets/save", { name: name.trim() }); if (!r.error) { pick = name.trim(); say("saved as " + pick); } load(); });
-      side.append(ld, sv, dl, pg.nav);
+      const rn = Small.btn("RENAME", async () => { const old = pick, name = await Small.keyboard({ title: "preset name", value: old, max: 24 }); if (name === null || !name.trim() || name.trim() === old) return;
+        const r = await post("/presets/rename", { name: old, to: name.trim() }); if (!r.error) { pick = name.trim(); say(old + " is now " + pick); } load(); }); rn.disabled = !has;
+      side.append(ld, sv, rn, dl, pg.nav);
       if (!note) U.msg.textContent = R.presets.length ? "" : "no presets yet: SAVE AS NEW keeps the routing as it is now";
       root.append(pg.el, side, U.msg); F.view.appendChild(root);
     }
@@ -233,6 +242,7 @@ function small() {
   setInterval(() => { if (!editing) load(); }, 4000);
   const es = new EventSource("/events?view=midihub");
   es.addEventListener("bridge", () => { if (!editing) load(); });
+  Small.remote(es, { back: () => { if (!editing) return false; editing = false; build(); return true; } });      /* BACK: out of a route's editor first */
   F.tab("route");
   load();
 }
@@ -433,6 +443,10 @@ function renderPresets() {
       b.onclick = async () => { const r = await post("/presets/" + op, { name: p }); if (r.error) alertLine(r.error); sel = null; load().then(openEdit); };
       c.appendChild(b);
     }
+    const rn = document.createElement("button"); rn.textContent = "rename"; rn.style.marginLeft = "6px";
+    rn.onclick = async () => { const to = (prompt("New name for " + p, p) || "").trim(); if (!to || to === p) return;
+      const r = await post("/presets/rename", { name: p, to }); if (r.error) alertLine(r.error); load().then(openEdit); };
+    c.appendChild(rn);
   }
 }
 $("p-save").onclick = async () => {

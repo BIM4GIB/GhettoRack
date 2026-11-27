@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GhettoRack">
+<meta name="theme-color" content="#0b0c0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>GhettoRack</title>
 <style>
 /* Same palette as daisy/ui/apcbox-ui.html */
@@ -156,6 +163,7 @@ function small() {
   es.addEventListener("bridge", e => { try { bridge = JSON.parse(e.data); if (bridge.jam) jam = bridge.jam; status(); draw(); } catch (err) {} });
   es.addEventListener("jam", e => { try { jam = JSON.parse(e.data); draw(); } catch (err) {} });
   es.addEventListener("irraw", () => stop());
+  Small.remote(es, { home: false, act: () => { stop(); return false; } });      /* the start screen is where HOME goes */
   fetch("/state").then(r => r.json()).then(s => { st = s; draw(); countdown(); }).catch(() => { bar.textContent = "the bridge is not answering"; });
 }
 

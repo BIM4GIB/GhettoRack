@@ -125,8 +125,8 @@ only where there is none; `calibrate.py` makes one for the screen at hand.
   calibration, the frame rate with the mixer's meters moving, LIBRARY with
   files in it.
 - Chromium will not make a window narrower than 500 px. The small layout is
-  drawn in the left 480, so nothing is cut off; the start screen and Settings
-  are still the TV pages.
+  drawn in the left 480, so nothing is cut off. Every page has the small layout
+  now, the start screen and Settings too.
 - Done in v13.29: the firmware no longer draws when no screen answers.
 - The A/B itself: both Seeds on one firmware version with the same things
   attached, then the T95's measurements repeated here (ping under load,

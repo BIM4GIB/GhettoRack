@@ -105,6 +105,7 @@ const fmt = {
   decay: v => v >= 127 ? "full" : Math.round(10 * Math.pow(400, v / 127)) + " ms",
   filter: v => { const p = v / 127; return Math.abs(p - 0.5) < 0.02 ? "off" : p < 0.5 ? "LP " + Math.round((0.5 - p) * 200) : "HP " + Math.round((p - 0.5) * 200); },
   rev: v => v >= 64 ? "rev" : "fwd",
+  acut: v => { const hz = 150 * Math.pow(2, v / 127 * 5); return hz < 1000 ? Math.round(hz) + " Hz" : (hz / 1000).toFixed(1) + " kHz"; },   /* daisy/acid.h: where the filter rests; the envelope opens it from there */
   adecay: v => Math.round(30 * Math.pow(80, v / 127)) + " ms",
   tune: v => { const s = (v === 63 || v === 64) ? 0 : (v / 127 - 0.5) * 24; return (s > 0 ? "+" : "") + s.toFixed(1) + " st"; },
   slide: v => Math.round(12 * Math.pow(25, v / 127)) + " ms",
@@ -409,11 +410,25 @@ function topStatus() {
   if (st.ov.mask || st.ov.rev) parts.unshift([ovText(), "bad", "lighten the pattern"]);
   if (sendErr) parts.unshift([sendErr, "bad", ""]);
   if (st.ver && st.ver !== REPORT_VERSION) parts.unshift(["page and firmware don't match: reload", "bad", ""]);
-  const key = JSON.stringify(parts);
+  const jam = br && br.jam && (!(PHONE || SHORT) || br.jam.recording) ? br.jam : null;      /* a phone has no room for the button: there only the lamp of a running take */
+  const key = JSON.stringify([parts, jam && [jam.recording, jam.daisy_audio, jamSure]]);
   if (key === statusKey) return;
   statusKey = key;
   T.leds.textContent = "";
   for (const [t, c, tip] of parts) { const l = el("span", "led " + c, tip && !PHONE && !SHORT ? t + ": " + tip : t); l.title = tip; T.leds.appendChild(l); }
+  if (jam) { const b = el("button", "jamb" + (jam.recording ? jamSure ? " sure" : " rec" : ""), jam.recording ? jamSure ? "STOP TAKE?" : "\u25cf JAM" : "JAM REC");
+    b.title = jam.recording ? "the jam recorder is recording the master: tap twice to end the take" : "record the master on the box (the jam recorder)"; b.disabled = !jam.recording && !jam.daisy_audio;
+    b.onclick = jamTap; T.leds.appendChild(b); }
+}
+/* The jam recorder from here: a tap starts a take; while one runs the lamp is red, a tap asks, the second ends it. */
+let jamSure = false, jamSureT = 0;
+async function jamTap() {
+  const j = st.bridge && st.bridge.jam; if (!j) return;
+  if (j.recording && !jamSure) { jamSure = true; clearTimeout(jamSureT); jamSureT = setTimeout(() => { jamSure = false; topStatus(); }, 4000); return topStatus(); }
+  jamSure = false; clearTimeout(jamSureT);
+  try { const r = await (await fetch(j.recording ? "/jam/stop" : "/jam/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json();
+    sendErr = r.error ? "jam recorder: " + r.error : ""; if (!r.error) j.recording = !j.recording; } catch (e) { sendErr = "the box is not answering"; }
+  topStatus();
 }
 
 /* ---------- views ---------- */
@@ -656,7 +671,7 @@ V.steps = {
 
 /* Sound: the selected track's editor, by type */
 const SAMPLE_POTS = [["pitch", 4, "pan", fmt.pitch], ["decay", 5, "vol", fmt.decay], ["filter", 6, "pan", fmt.filter], ["reso", 7, "vol", fmt.pct], ["start", 8, "vol", fmt.pct], ["reverse", 9, "vol", fmt.rev], ["drive", 10, "vol", fmt.pct], ["prob", 11, "vol", fmt.pct]];
-const ACID_POTS = [["cutoff", 0, fmt.pct], ["reso", 1, fmt.pct], ["env mod", 2, fmt.pct], ["decay", 3, fmt.adecay], ["accent", 4, fmt.pct], ["tune", 5, fmt.tune], ["slide", 6, fmt.slide], ["wave", 7, fmt.wave]];
+const ACID_POTS = [["cutoff", 0, fmt.acut], ["reso", 1, fmt.pct], ["env mod", 2, fmt.pct], ["decay", 3, fmt.adecay], ["accent", 4, fmt.pct], ["tune", 5, fmt.tune], ["slide", 6, fmt.slide], ["wave", 7, fmt.wave]];
 const TRACK_POTS = [["volume", 0, "vol", fmt.pct], ["pan", 1, "pan", fmt.pan], ["reverb", 2, "vol", fmt.pct], ["delay", 3, "vol", fmt.pct]];
 function trackHdr(t, ty) {
   const hdr = el("div", "hdr"), sub = el("div", "sub");
@@ -1605,7 +1620,8 @@ function smTop() {
 function smTopS() { if (T.pg) { const x = st.sel < 8 ? "1-8" : "9-16"; if (T.pg.textContent !== x) T.pg.textContent = x; } }
 function smStatus() {
   const p = sendErr ? [sendErr, "bad"] : !st.daisy ? ["no Daisy", "bad"] : daisySilent() ? ["Daisy silent: RESET it", "bad"] : st.ctl < 4 ? ["old firmware", "bad"] : (st.ver && st.ver !== REPORT_VERSION) ? ["page and firmware differ", "bad"]
-    : (st.ov.mask || st.ov.rev) ? [ovText(), "bad"] : ["cpu " + Math.round(st.cpu / 10) + "%", "ok"];
+    : (st.ov.mask || st.ov.rev) ? [ovText(), "bad"]
+    : st.bridge && st.bridge.jam && st.bridge.jam.recording ? ["jam rec  cpu " + Math.round(st.cpu / 10) + "%", "bad"] : ["cpu " + Math.round(st.cpu / 10) + "%", "ok"];
   const key = p.join("|");
   if (key === statusKey) return;
   statusKey = key; T.leds.textContent = ""; T.leds.appendChild(el("span", "led " + p[1], p[0]));
@@ -2152,6 +2168,7 @@ function connect() {
   es.addEventListener("ir", e => { try { const d = JSON.parse(e.data); remote(d.action, d.pad); } catch (err) { } });
   es.addEventListener("pad", e => { try { const d = JSON.parse(e.data); if (d.b != null) Pad.live["b" + d.b] = d.on ? 1 : 0; else Pad.live["a" + d.a] = d.d; call("PL"); } catch (err) { } });
   es.addEventListener("padmap", e => { try { if (Pad.d) Pad.d.map = JSON.parse(e.data); call("PM"); } catch (err) { } });
+  es.addEventListener("jam", e => { try { if (st.bridge) { st.bridge.jam = JSON.parse(e.data); topStatus(); } } catch (err) { } });
   es.onerror = () => { st.daisy = false; sendErr = "the box is not answering"; topStatus(); };
   es.onopen = () => { sendErr = ""; topStatus(); };
 }

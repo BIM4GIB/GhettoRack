@@ -29,6 +29,9 @@ button{font:inherit;color:inherit;appearance:none;margin:0;-webkit-tap-highlight
 .g-b.warn{color:#0b0c0d;background:var(--yellow);border-color:var(--yellow)}
 .g-b.rec{color:#0b0c0d;background:var(--red);border-color:var(--red)}
 .g-b:disabled{opacity:.35}
+button:focus,button:focus-visible{outline:none}
+/* the cursor of a remote or a game controller (Small.remote) */
+.g-cur{outline:2px solid var(--text);outline-offset:-2px}
 .g-li{display:flex;align-items:center;gap:6px;border:1px solid var(--line);background:none;color:var(--dim);font-size:12px;border-radius:3px;padding:0 6px;min-width:0;text-align:left}
 .g-li.on{background:var(--off);border-color:var(--yellow);color:var(--text)}
 .g-li .g-nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.g-li .g-d{font-size:10px;color:var(--dim);white-space:nowrap}

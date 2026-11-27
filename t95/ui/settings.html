@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="GhettoRack">
+<meta name="theme-color" content="#0b0c0d">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <title>GhettoRack settings</title>
 <style>
 :root{--bg:#0d0f11;--panel:#16191c;--line:#2a2e33;--txt:#e8eaed;--dim:#8b929b;--amber:#ffb833;--green:#35d05a;--red:#ff4b3e;
@@ -362,7 +369,7 @@ function small() {
   async function poll() { if (tab === "ir" || tab === "dev" || !bst) pollBridge(); st = await get("/sys/state"); show(); await trialTick(); }
   try { const es = new EventSource("/events?view=settings");
     es.addEventListener("irraw", e => { try { lastScan = String(JSON.parse(e.data).scan); if (tab === "ir") show(); } catch (err) {} });
-    es.addEventListener("irlearned", () => pollBridge()); } catch (e) {}
+    es.addEventListener("irlearned", () => pollBridge()); Small.remote(es); } catch (e) {}
   F.tab(["net", "hot", "bt", "ir", "dev", "sys"].includes(tab) ? tab : "net");
   setInterval(poll, 2500);
 }

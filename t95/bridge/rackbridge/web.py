@@ -2,6 +2,38 @@
 from .common import *
 from .util import *
 from .samples import safe_join, edit_args
+import functools
+import zlib
+
+# "Add to home screen" on a phone: the pages open full screen, without the browser's bars
+MANIFEST = {"name": "GhettoRack", "short_name": "GhettoRack", "start_url": "/", "scope": "/", "display": "standalone",
+            "background_color": "#0b0c0d", "theme_color": "#0b0c0d",
+            "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
+                      {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}]}
+
+
+@functools.lru_cache(maxsize=4)
+def icon_png(size):
+    """The home screen icon, drawn here so no image file is needed: a 4 x 4 grid of pads, some lit"""
+    bg, off = (0x0b, 0x0c, 0x0d), (0x23, 0x26, 0x2a)
+    lit = {0: (0x35, 0xd0, 0x5a), 5: (0xff, 0xb8, 0x33), 6: (0x35, 0xd0, 0x5a), 10: (0xff, 0x4b, 0x3e), 12: (0x35, 0xd0, 0x5a), 15: (0xff, 0x9a, 0x1f)}
+    edge, gap = size * 0.14, size * 0.04
+    cell = (size - 2 * edge - 3 * gap) / 4
+    def at(v):                       # which pad a pixel is in along one side, or -1
+        v -= edge
+        k = int(v // (cell + gap)) if v >= 0 else -1
+        return k if 0 <= k < 4 and v - k * (cell + gap) < cell else -1
+    cols = [at(x + 0.5) for x in range(size)]
+    raw = bytearray()
+    for y in range(size):
+        r = at(y + 0.5)
+        raw.append(0)
+        for c in cols:
+            raw += bytes(bg if r < 0 or c < 0 else lit.get(r * 4 + c, off))
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b""))
 
 
 class Client:
@@ -170,8 +202,8 @@ class WebMixin:
             return self.clock.transport(d.get("cmd"))
         if path == "/net/never":
             return self.net_set_never(d.get("name"), d.get("never"))
-        if path in ("/presets/save", "/presets/load", "/presets/delete"):
-            return self.preset(path.rsplit("/", 1)[1], d.get("name"))
+        if path in ("/presets/save", "/presets/load", "/presets/delete", "/presets/rename"):
+            return self.preset(path.rsplit("/", 1)[1], d.get("name"), d.get("to"))
         if path == "/samples/send":
             return self.queue_send(d.get("src", "lib"), d.get("path", ""), d.get("track"),
                                    d.get("start"), d.get("end"), d.get("norm", False))
@@ -299,6 +331,10 @@ class WebMixin:
                     await self.reply(writer, 404, "text/plain", b"not installed\n")
                 else:
                     await self.reply(writer, 200, "text/css; charset=utf-8" if path.endswith(".css") else "text/javascript; charset=utf-8", body)
+            elif path == "/manifest.json":     # "add to home screen" on a phone: the pages full screen, no browser bars
+                await self.reply(writer, 200, "application/manifest+json", json.dumps(MANIFEST).encode() + b"\n")
+            elif path in ("/icon-180.png", "/icon-192.png", "/icon-512.png"):
+                await self.reply(writer, 200, "image/png", icon_png(int(path[6:9])))
             elif path == "/pad":               # the game controller: what it is, what each control does and could do
                 await self.reply(writer, 200, "application/json", json.dumps(self.pad.describe()).encode() + b"\n")
             elif path == "/ca.crt":            # the owner's authority (tools/boxcert.py), for a phone to install; public by nature

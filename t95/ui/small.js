@@ -112,6 +112,48 @@ const Small = (() => {
     });
   }
 
+  /* A remote or a game controller on a small page: Small.remote(es, { act(a), back() }), es the
+     page's own event stream. Arrows move a cursor to the nearest button that way, OK taps it,
+     BACK cancels a keyboard or number pad, else asks the page (back() true: it went back a step),
+     else goes to the start screen, as HOME and MENU do. act(a) sees every action first (true: it
+     was the page's own, a PLAY or STOP). The cursor shows from the first press, follows a redraw
+     to the button now in its place, and goes with the next touch. Arrow keys, Enter and Escape
+     on a keyboard do the same. */
+  let cur = null, at = null, hooks = null, watch = null;
+  function buttons() { const sh = [...document.querySelectorAll(".g-sheet")].pop(), root = sh || document.querySelector(".g-app");
+    return root ? [...root.querySelectorAll("button:not(:disabled)")].filter(b => b.offsetParent) : []; }
+  const mid = e => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+  function mark(e) { if (cur) cur.classList.remove("g-cur"); cur = e || null; if (cur) { cur.classList.add("g-cur"); at = mid(cur); } }
+  function nearest(f) { let best = null, bd = 1e9; for (const e of f) { const m = mid(e), d = Math.hypot(m[0] - at[0], m[1] - at[1]); if (d < bd) { bd = d; best = e; } } return best; }
+  function step(dir) {
+    const f = buttons(); if (!f.length) return mark(null);
+    if (!cur || !f.includes(cur)) return mark(at ? nearest(f) : f.find(b => !b.classList.contains("g-tab")) || f[0]);
+    const a = mid(cur); let best = null, bd = 1e9;
+    for (const e of f) { if (e === cur) continue; const m = mid(e), dx = m[0] - a[0], dy = m[1] - a[1];
+      const along = { left: -dx, right: dx, up: -dy, down: dy }[dir], across = dir === "left" || dir === "right" ? Math.abs(dy) : Math.abs(dx);
+      if (along <= 2) continue; const d = along + across * 3; if (d < bd) { bd = d; best = e; } }
+    if (best) mark(best);
+  }
+  function act(a) {
+    if (!hooks) return;
+    if (!watch) { watch = new MutationObserver(() => { if (cur && !buttons().includes(cur)) { const f = buttons(); mark(f.length ? nearest(f) : null); } });
+      watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["disabled"] }); }
+    const sh = [...document.querySelectorAll(".g-sheet")].pop();
+    if (!sh && hooks.act && hooks.act(a)) return;
+    if (["up", "down", "left", "right"].includes(a)) step(a);
+    else if (a === "ok") { if (cur && buttons().includes(cur)) cur.click(); else step("down"); }
+    else if (a === "back") { if (sh) { const c = [...sh.querySelectorAll("button")].find(b => b.textContent === "CANCEL"); if (c) c.click(); }
+      else if (!(hooks.back && hooks.back()) && hooks.home !== false) location.href = url("/"); }
+    else if ((a === "home" || a === "menu") && hooks.home !== false) location.href = url("/");
+  }
+  function remote(es, h) {
+    hooks = h || {};
+    if (es) es.addEventListener("ir", e => { try { act(JSON.parse(e.data).action); } catch (err) {} });
+    document.addEventListener("keydown", e => { const k = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Enter: "ok", Escape: "back" }[e.key];
+      if (k && !e.metaKey && !e.ctrlKey) { act(k); e.preventDefault(); } });
+    document.addEventListener("pointerdown", e => { if (e.isTrusted) { mark(null); at = null; } }, true);
+  }
+
   if (on) {
     /* A touch acts when the finger lands, not when it lifts: a press on this resistive panel
        lasts 0.2 to 0.3 s and a click only comes at its end. The click that follows is swallowed. */
@@ -126,5 +168,5 @@ const Small = (() => {
     document.addEventListener("pointermove", mouse); document.addEventListener("pointerdown", mouse);
     document.addEventListener("DOMContentLoaded", wake);
   }
-  return { on, W, H, el, url, frame, btn, pager, keyboard, numpad };
+  return { on, W, H, el, url, frame, btn, pager, keyboard, numpad, remote, act };
 })();

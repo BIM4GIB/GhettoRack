@@ -769,6 +769,14 @@ class RouterTest(unittest.TestCase):
         self.assertEqual(self.routes()["routes"], mine)
         self.assertEqual(self.routes()["presets"], ["keys to synth"])
         self.assertEqual(self.post("/presets/load", {"name": "nope"})[0], 400)
+        # a new name: the routes stay with it; not onto another preset's name, not from one that isn't there
+        self.assertEqual(self.post("/presets/save", {"name": "other"})[0], 200)
+        self.assertEqual(self.post("/presets/rename", {"name": "other", "to": "keys to synth"})[0], 400)
+        self.assertEqual(self.post("/presets/rename", {"name": "nope", "to": "x"})[0], 400)
+        self.assertEqual(self.post("/presets/rename", {"name": "other", "to": ""})[0], 400)
+        self.assertEqual(self.post("/presets/rename", {"name": "other", "to": "second"})[0], 200)
+        self.assertEqual(self.routes()["presets"], ["keys to synth", "second"])
+        self.assertEqual(self.post("/presets/delete", {"name": "second"})[0], 200)
         type(self).tearDownClass()
         type(self).start()
         type(self).speak()
@@ -860,12 +868,23 @@ class RouterTest(unittest.TestCase):
             self.post("/routes", {"routes": []})
             pg.locator(".g-b", has_text="LOAD").click()
             routes_are([{"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10, "types": ["note"]}])
+            # RENAME: the keyboard opens on the name, the preset keeps its routes under the new one
+            pg.locator(".g-b", has_text="RENAME").click()
+            pg.wait_for_selector(".g-kb")
+            self.assertEqual(pg.locator(".g-kval").text_content(), "live\u258f")
+            pg.locator(".g-keys .g-b", has_text=re.compile("^2$")).click()
+            pg.locator(".g-kfoot .g-b", has_text="OK").click()
+            pg.wait_for_function("document.querySelector('.g-li.on .g-nm') && document.querySelector('.g-li.on .g-nm').textContent === 'live2'")
+            self.assertIn("live2", self.routes()["presets"])
+            self.assertNotIn("live", self.routes()["presets"])
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "small-hub-saved.png"))
             pg.locator(".g-b", has_text="DELETE").click()
             pg.wait_for_selector(".g-b.warn")
-            self.assertIn("live", self.routes()["presets"])
+            self.assertIn("live2", self.routes()["presets"])
             pg.locator(".g-b", has_text="SURE?").click()
-            pg.wait_for_function("![...document.querySelectorAll('.g-li .g-nm')].some(e => e.textContent === 'live')")    # (other tests leave presets of their own)
-            self.assertNotIn("live", self.routes()["presets"])
+            pg.wait_for_function("![...document.querySelectorAll('.g-li .g-nm')].some(e => e.textContent === 'live2')")    # (other tests leave presets of their own)
+            self.assertNotIn("live2", self.routes()["presets"])
             # the network list
             pg.locator(".g-tab", has_text="NET").click()
             pg.wait_for_selector(".g-hint")
@@ -2088,6 +2107,7 @@ class PageControlTest(unittest.TestCase):
             from playwright.sync_api import sync_playwright
         except ImportError:
             self.skipTest("playwright not installed")
+        shots = os.environ.get("APCBOX_SHOTS")
         base = "http://127.0.0.1:%d" % self.http
         inside = """() => { const bad = [];
             for (const e of document.querySelectorAll('.g-top, .g-tab, .g-b, .g-li, .g-time, .g-meter, .g-msg, .g-kv, .g-hint')) { const r = e.getBoundingClientRect();
@@ -2129,6 +2149,72 @@ class PageControlTest(unittest.TestCase):
             self.assertTrue(json.loads(BridgeTest.get("/clock?json=1")[2])["playing"])
             pg.locator(".g-row2 .g-b").first.click()
             pg.wait_for_function("document.querySelector('.g-row2 .g-b').textContent === 'START'")
+            # a remote or a controller (Small.remote; arrow keys do the same): the first press shows a cursor on the content,
+            # arrows walk the buttons, OK taps, PLAY and STOP are the clock's own, and the cursor outlives the page's redraws
+            cur = lambda: pg.evaluate("[...document.querySelectorAll('.g-cur')].map(e => [e.className.includes('g-tab'), e.textContent, !!e.closest('.g-sheet')])")
+            self.assertEqual(cur(), [])
+            pg.keyboard.press("ArrowDown")
+            self.assertEqual([c[0] for c in cur()], [False])
+            for _ in range(12):
+                if cur()[0][1] == "+1":
+                    break
+                pg.keyboard.press("ArrowRight" if cur()[0][1] in ("-1", "-0.1", "+0.1") else "ArrowDown")
+            self.assertEqual(cur()[0][1], "+1", "the cursor never reached +1")
+            pg.keyboard.press("Enter")
+            pg.wait_for_function("document.querySelector('.g-time').textContent === '122.0'")
+            time.sleep(1.2)                                                             # two polls redraw the tab
+            self.assertEqual([c[1] for c in cur()], ["+1"])
+            pg.evaluate("Small.act('play')")
+            pg.wait_for_function("document.querySelector('.g-row2 .g-b').textContent === 'STOP'")
+            pg.evaluate("Small.act('stop')")
+            pg.wait_for_function("document.querySelector('.g-row2 .g-b').textContent === 'START'")
+            for _ in range(8):
+                pg.keyboard.press("ArrowLeft")
+            self.assertTrue(cur()[0][0], "left never reached the rail: %r" % cur())
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "small-clock-cursor.png"))
+            for _ in range(6):
+                pg.keyboard.press("ArrowDown")
+            self.assertEqual(cur()[0][1], "HOME")
+            pg.keyboard.press("ArrowUp")
+            pg.keyboard.press("Enter")                                                  # STATS: the tab changes, the cursor stays on the rail
+            pg.wait_for_selector(".g-kv span")
+            self.assertEqual(cur(), [[True, "STATS", False]])
+            pg.mouse.click(300, 150)                                                    # a touch: the cursor goes
+            self.assertEqual(cur(), [])
+            pg.evaluate("Small.act('back')")                                            # BACK with nothing to go back from: the start screen
+            pg.wait_for_url("**/?small=1")
+            pg.wait_for_selector("button.g-tile")
+            pg.keyboard.press("ArrowDown")
+            self.assertEqual(pg.locator(".g-tile.g-cur").count(), 1)
+            pg.evaluate("Small.act('home')")                                            # the start screen is home already
+            time.sleep(0.2)
+            self.assertTrue(pg.url.endswith("/?small=1"))
+            # typing with it: on the hub's SAVED tab OK on SAVE AS NEW opens the keyboard, the cursor stays on its keys, BACK cancels
+            pg.goto(base + "/midihub")
+            pg.wait_for_selector(".g-matrix, .g-none")
+            pg.locator(".g-tab", has_text="SAVED").click()
+            pg.wait_for_selector(".g-side")
+            pg.keyboard.press("ArrowDown")
+            for _ in range(8):
+                if cur()[0][1] == "SAVE AS NEW":
+                    break
+                pg.keyboard.press("ArrowRight" if cur()[0][0] or cur()[0][1] != "LOAD" and not cur()[0][1].isupper() else "ArrowDown")
+            self.assertEqual(cur()[0][1], "SAVE AS NEW")
+            before = json.loads(BridgeTest.get("/routes")[2])["presets"]
+            pg.keyboard.press("Enter")
+            pg.wait_for_selector(".g-kb")
+            for k in ("ArrowUp", "ArrowLeft", "ArrowUp", "ArrowUp", "ArrowUp", "ArrowUp", "ArrowRight"):
+                pg.keyboard.press(k)
+                self.assertEqual([c[2] for c in cur()], [True], "the cursor left the keyboard on " + k)
+            pg.keyboard.press("Enter")                                                  # a key: typed
+            self.assertNotEqual(pg.locator(".g-kval").text_content(), "preset 1\u258f")
+            pg.keyboard.press("Escape")
+            pg.wait_for_selector(".g-kb", state="detached")
+            self.assertEqual([c[2] for c in cur()], [False])
+            self.assertEqual(json.loads(BridgeTest.get("/routes")[2])["presets"], before)
+            pg.goto(base + "/clock")
+            pg.wait_for_selector(".g-clock")
             for tab, sel in (("FROM", ".g-rows .g-li.on"), ("OUT", ".g-rows"), ("STATS", ".g-kv span")):
                 pg.locator(".g-tab", has_text=tab).click()
                 pg.wait_for_selector(sel)
@@ -5225,6 +5311,67 @@ class JamTest(unittest.TestCase):
             self.assertEqual(self.post("/jam/stop", {})[0], 200)
         self.assertTrue(c.wait_for(lambda c: any(e[0] == "jam" for e in c.named) and not [e for e in c.named if e[0] == "jam"][-1][1]["recording"], 5))
         self.assertEqual(self.post("/jam/delete", {"take": self.jams()["takes"][0]["take"]})[0], 200)
+
+    def test_j55_the_button_on_the_apcbox_page(self):
+        """The ApcBox page's top bar: JAM REC starts a take, the lamp is red while it runs, a tap asks and the second ends it;
+        a phone only gets the lamp of a running take; and what a phone needs for its home screen is served"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        os.makedirs(os.path.join(self.asound, "ApcBox"), exist_ok=True)
+        base = "http://127.0.0.1:%d" % self.http
+        jam = lambda: json.loads(BridgeTest.get("/health")[2])["jam"]
+        n = len(self.jams()["takes"])
+        shots = os.environ.get("APCBOX_SHOTS")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 1440, "height": 800})
+            pg.goto(base + "/apcbox")
+            pg.wait_for_selector(".jamb")
+            self.assertEqual((pg.locator(".jamb").text_content(), pg.locator(".jamb").is_enabled()), ("JAM REC", True))
+            ph = b.new_page(viewport={"width": 390, "height": 664})
+            ph.goto(base + "/apcbox")
+            ph.wait_for_selector(".top .led")
+            self.assertEqual(ph.locator(".jamb").count(), 0)
+            pg.locator(".jamb").click()
+            pg.wait_for_selector(".jamb.rec")
+            self.assertTrue(jam()["recording"])
+            ph.wait_for_selector(".jamb.rec")                                 # the other screen sees it
+            self.assertEqual(ph.evaluate("[document.documentElement.scrollWidth, document.documentElement.scrollHeight]"), [390, 664])
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "mac-jam-rec.png"))
+                ph.screenshot(path=os.path.join(shots, "phone-jam-rec.png"))
+            time.sleep(0.5)
+            pg.locator(".jamb").click()                                       # asks
+            pg.wait_for_selector(".jamb.sure")
+            self.assertEqual(pg.locator(".jamb").text_content(), "STOP TAKE?")
+            time.sleep(0.3)
+            self.assertTrue(jam()["recording"])
+            pg.locator(".jamb").click()
+            pg.wait_for_function("document.querySelector('.jamb').textContent === 'JAM REC'")
+            self.assertFalse(jam()["recording"])
+            ph.wait_for_function("document.querySelector('.jamb') === null")
+            # the question goes away by itself: a tap, 4 s, and the take still runs
+            pg.locator(".jamb").click()
+            pg.wait_for_selector(".jamb.rec")
+            pg.locator(".jamb").click()
+            pg.wait_for_selector(".jamb.sure")
+            pg.wait_for_selector(".jamb.rec", timeout=6000)
+            self.assertTrue(jam()["recording"])
+            self.post("/jam/stop", {})
+            # home screen: every page names the manifest and the icon, and both are there
+            for path in ("/", "/apcbox", "/jam", "/clock", "/midihub", "/settings"):
+                pg.goto(base + path)
+                self.assertEqual(pg.evaluate("[document.querySelector('link[rel=manifest]').getAttribute('href'), document.querySelector('link[rel=apple-touch-icon]').getAttribute('href'),"
+                                             " document.querySelector('meta[name=apple-mobile-web-app-capable]').content]"), ["/manifest.json", "/icon-180.png", "yes"], path)
+            self.assertEqual(pg.evaluate("""async () => { const m = await (await fetch('/manifest.json')).json(), out = [m.display, m.start_url];
+                for (const i of m.icons.map(x => x.src).concat(['/icon-180.png'])) { const im = new Image(); im.src = i; await im.decode(); out.push(im.naturalWidth + 'x' + im.naturalHeight); }
+                return out; }"""), ["standalone", "/", "192x192", "512x512", "180x180"])
+            b.close()
+        self.assertEqual(len(self.jams()["takes"]), n + 2)
+        with self.assertRaises(urllib.error.HTTPError):
+            BridgeTest.get("/icon-999.png")
 
     def test_j6_a_part_cut_off_gets_its_header_back(self):
         sys.path.insert(0, HERE)

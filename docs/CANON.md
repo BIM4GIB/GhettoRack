@@ -18,7 +18,7 @@ a time. It is the whole of this list, not just a page:
 | Entry | `MODULES` in `t95/bridge/rackbridge/common.py` | `id`, `name`, `about` (one line, what it is for), `url`, `ready`, `needs` (what must be plugged in), `profile` (its remote profile), `routes` (the MIDI routing it starts with) |
 | Page | `t95/ui/<id>.html`, served by the bridge at `url` | one self-contained file; three layouts and the small one (section 2) |
 | Routing | `routes` in the entry | applied when the module is selected. A module never grabs devices by another way |
-| Remote | a name in `IR_PROFILES`, handled in the page's `action()` | arrows walk the controls, ok presses, back and home leave to the start screen |
+| Remote | a name in `IR_PROFILES`, handled in the page's `action()`; in the small layout by `Small.remote` (section 3) | arrows walk the controls, ok presses, back and home leave to the start screen |
 | Tile | the start screen builds it from the entry | nothing to add by hand |
 | State | the bridge's state file, or the Daisy | never only in the browser, except view choices (which tab, zoom) |
 | Tests | `t95/bridge/test_bridge.py` | section 9 |
@@ -97,6 +97,7 @@ exactly that.
 | A number to nudge | a stepper, `‹ value ›`, applied at each tap | a field and a SAVE |
 | One of a few | a row of buttons, the chosen one `on` | a dropdown: `<select>` does not work by touch here |
 | On or off | one button that says the state (`BY ITSELF: ON`) and is `on` when on | a checkbox |
+| A remote or a game controller | `Small.remote(es, { act, back })`, once, with the page's own event stream: arrows move a cursor to the nearest button that way, OK taps it, BACK cancels the keyboard or number pad, then goes one step back in the page (`back()`), then to the start screen; HOME and MENU go there. `act(a)` is for what belongs to the page alone (PLAY and STOP on the clock and the jam recorder) | a walk of its own in a page. A control must be a `button` with an `onclick` to be reached |
 
 A part that is missing goes into `small.js` and `small.css`, with a line
 here, before a second page needs it. Class names start with `g-`.
@@ -144,6 +145,7 @@ One meaning each. A new meaning needs a line here, not a new shade.
 | Amber | `--amber` | muted, a default the module brought, a folder |
 | Blue | `--blue` | solo, a value (a waveform, a pot's ring) |
 | Grey | `--dim`, `--off` | a label, an empty cell, something off |
+| White outline | `--text`, `.g-cur` | where a remote's or a controller's cursor is. Gone at the next touch |
 
 No glows, shadows or gradients in the small layout (section 7). The TV and
 phone layouts have them; that is the one visual difference allowed.

@@ -327,6 +327,8 @@ The clock module (`/clock`): one tempo for everything.
 | `GET /routes` | active module, its defaults and routes, sources, destinations, presets, types, `net` |
 | `POST /routes` | `{"routes": [{"from", "to", "ch"?, "remap"?, "types"?}]}` for the active module (max 64) |
 | `POST /presets/save\|load\|delete` | `{"name"}`, per module |
+| `POST /presets/rename` | `{"name", "to"}`: the preset under another name; not onto a name that is taken |
+| `GET /manifest.json`, `/icon-180.png`, `/icon-192.png`, `/icon-512.png` | for a phone's "add to home screen": the pages full screen, without the browser's bars. The icon is drawn by the bridge, there is no image file |
 | `GET /clock?json=1`, `POST /clock` | clock state; set `on`, `source`, `bpm`, `outputs`, `send_stopped`, `link` |
 | `POST /clock/transport` | `{"cmd": "start"\|"stop"\|"continue"\|"toggle"}` (internal and Link sources) |
 | `POST /net/never` | `{"name", "never": true/false}`: don't invite or accept that network device |

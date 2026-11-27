@@ -140,7 +140,7 @@ class RouterMixin:
         self.refresh_daisy_ports()
         return 200, {"ok": True}
 
-    def preset(self, op, name):
+    def preset(self, op, name, to=None):
         if not isinstance(name, str) or not 0 < len(name) <= 32:
             return 400, {"error": "name: 1-32 characters"}
         mid = self.module()["id"]
@@ -156,5 +156,14 @@ class RouterMixin:
             self.refresh_daisy_ports()
         elif op == "delete":
             ps.pop(name, None)
+        elif op == "rename":
+            if name not in ps:
+                return 400, {"error": "no preset %s" % name}
+            if not isinstance(to, str) or not 0 < len(to) <= 32:
+                return 400, {"error": "name: 1-32 characters"}
+            if to != name and to in ps:
+                return 400, {"error": "there is a preset called %s already" % to}
+            # its place in the order kept: the list is by name anyway
+            self.state.data["presets"][mid] = {(to if k == name else k): v for k, v in ps.items()}
         self.state.save()
         return 200, {"ok": True}
