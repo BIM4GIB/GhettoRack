@@ -27,6 +27,9 @@ of the wider project; do not narrow the architecture to any one controller.
 daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: the APC40 button map), desktop tests, mac/ (same engine on macOS
             with the APC40 on the Mac), ui/ (monitor page, Chrome Web Serial),
             release/ApcBox.bin (latest built firmware)
+decks/      the deck engine for the Numark DJ module (deckd: two decks, mixer, the
+            Numark Mixtrack Pro FX's map in numark.h; build.sh, engine_test.cpp;
+            its README says what is built and measured). No page or bridge part yet
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers, a game controller,
             remote, router, network MIDI), ui/ (selector, MIDI hub, clock, the
             ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen;
@@ -60,7 +63,7 @@ tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
 touch, T95 controller routing, looper/quantise/keyboard controls), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
-`acid_engine_test.cpp`, `host_test.cpp`, `reverb_test.cpp` (`daisy/reverb.h` against the library's reverb, sample for sample), `t95/bridge/test_bridge.py` (its end-to-end part
+`acid_engine_test.cpp`, `host_test.cpp`, `decks/engine_test.cpp` (the deck engine and the Numark map; `decks/build.sh` builds and names it), `reverb_test.cpp` (`daisy/reverb.h` against the library's reverb, sample for sample), `t95/bridge/test_bridge.py` (its end-to-end part
 runs the firmware control code via `daisy/hostbuild/t95sim`, built by `build_host.sh`); build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
 
@@ -77,6 +80,9 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   scheduling must not become the per-step timing source. Planned external MIDI /
   network clock leader and follower modes must explicitly translate and track
   tempo/phase on the Daisy. Do not confuse musical sync with the audio sample clock.
+  The decks (`decks/`) are a second sound engine, on the box, on the Numark's card
+  and its clock (44.1 kHz): the same rule inside it (one audio thread keeps its time;
+  the bridge and pages only ask), and no shared sample clock with the Daisy.
 - **Daisy works standalone.** With nothing but the APC40 on its USB host port.
 - **APC40 input and lights go through the button map** (`daisy/apcmap.h`).
   A new button function goes into `OnButton` under the button that has it in
@@ -91,6 +97,10 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   hot-swap, sync set switching on the real card). Say so.
 - `box.cpp` is shared by the firmware and the Mac build: no Daisy-only calls
   there; Daisy specifics go in `main.cpp`, `tft.h`, `usbdev.cpp`.
+- From v13.36 two watchdogs reset a Seed whose main loop stops (`daisy/main.cpp`, "the
+  watchdogs"): 8 s without a pass, 33 s inside a card call. A new card call in `main.cpp`
+  goes inside a `CardCall`; main-loop work that can take seconds without touching the card
+  needs a look at those limits first.
 - SDRAM is ~96% used from v13.16 (16 slots of 16 s, 262 s of spare memory for
   long loops, staging pool, one slot of looper undo). From v13.20 the spare
   memory is one region handed out as claims by size (`Spare...` in

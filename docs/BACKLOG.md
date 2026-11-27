@@ -4,6 +4,44 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-27. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.36: watchdogs for a main loop that stopped (on the Pi rig's Seed, 2026-11-27)
+
+`daisy/release/ApcBox.bin` is v13.36. `daisy/main.cpp`, `daisy/diag.h` only: no protocol or
+report change, no new buffer. A Seed whose main loop stops restarts by itself; the write-up
+is the comment "the watchdogs" in `daisy/main.cpp`.
+
+- **Two watchdogs.** The audio callback counts the milliseconds since the main loop's last
+  pass and resets the board after 8 s. The chip's own watchdog (33 s, the longest it goes)
+  is fed by every pass and around every card call, and is what is left when a card call never
+  returns or the interrupts are dead too. 33 s because libDaisy's card driver may wait 30 s in
+  one call: a card that stalls gets to fail by itself instead of taking the box down. While a
+  card call runs, only the 33 s one counts.
+- **Afterwards** ApcBox starts as after any restart (the last saved set; what was not saved is
+  gone) and says where the loop had stopped, every 10 s for a minute: `watchdog: the main loop
+  had stopped in '...' (8 s), restarted, 1 in a row`. Three in a row with no run lasting a
+  minute: report mode (LED three blinks, `STOP REPORT`), so a box that hangs on the same thing
+  every time does not restart for ever. Report mode now takes `ESC BOOT`: another firmware goes
+  on with `tools/flash-seed.sh`, no hand on the buttons.
+- **A card call in the firmware's platform code goes inside a `CardCall`** (`daisy/main.cpp`).
+  One that does not is not covered by the 33 s and can be cut off at 8.
+- **Measured before** (v13.35, same Seed): the slowest main-loop pass was 0.52 s (undo of a
+  sample), 0.30 s in a set save.
+- **Tried on the Seed** with a build that hangs on `restart` (`make -C daisy WD_TEST=1`, never
+  a release): main loop stopped with the interrupts running, gone from the USB 8.1 s later;
+  with the interrupts off, 33.7 s; the log line after each; the third in a row into report
+  mode; out of report mode by flashing over USB. Then the release build: `restart` (no watchdog
+  line), a 14 s sample sent, a set with it saved (1280 KB), loaded, deleted, six folders
+  stepped and a file loaded from each: no reset, slowest pass 0.54 s (the default set coming
+  in), 0 bad lines.
+- **Not tried**: a hang that is real rather than made; a card pulled in the middle of a read
+  (how long the driver then waits is read from its source, not seen); a long run; the T95
+  rig's Seed (v13.31, untouched). The sound keeps playing while only the main loop is stopped
+  and stops at the reset: not listened to. If the bootloader ever clears the chip's reset
+  flags, a 33 s reset would look like a plain restart (on this Seed, bootloader version 3, the
+  flag was there).
+- **Still open: a start-up that stops** is not restarted by a watchdog (they start with the main
+  loop); the next start goes to report mode as before.
+
 ## v13.35: a folder's files by name, undo for a sent sample, the Daisy restarted from a page (2026-11-27)
 
 `daisy/release/ApcBox.bin` is v13.35: control protocol 14, report version 20. No new buffer
@@ -22,10 +60,7 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 - **RESTART DAISY**: `restart` in `ESC U` and the firmware resets itself (`NVIC_SystemReset`
   in `daisy/main.cpp`), as the RESET button does. On ApcBox's SYS view (small page) and in
   Settings > System (every layout); the first tap asks. It needs a firmware that still answers:
-  a Seed that hangs is not reached by it. **Not built: a watchdog** for that case (`diag.h` has
-  one of 8 s that nothing starts; only trial builds run one, 20 s). Before it is on, the longest
-  main-loop pass has to be measured with a card load and a set switch running, or it resets a
-  working box. **Not built: a wire** from a Pi header pin to the Seed's reset, for a Seed that
+  a Seed that hangs is not reached by it. The watchdogs of v13.36 (above) are for that case. **Not built: a wire** from a Pi header pin to the Seed's reset, for a Seed that
   no software reaches; whether the Seed has its reset on a pin is not checked.
 - **On the Pi rig's Seed (2026-11-27, through the bridge's `/do`, not by touch):** `restart`:
   the Seed left the USB and was back 5.0 s later on v13.35, on the default set (nothing was
@@ -669,7 +704,8 @@ them one on the map (REC still arms a loop).
   set and kit backups and the library on the card.
 - **Cubase sync**: a VST3 plugin in Cubase that reads its transport and
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
-- **Numark DJ**: likely Mixxx on the T95 in the kiosk; which Numark?
+- **Numark DJ**: a Mixtrack Pro FX, on an engine of our own (`decks/README.md`: what is built,
+  measured and next). Not Mixxx: its window cannot be one of our pages.
 - Chaining: two modules at once (hub + ApcBox, clock + anything) with
   routes between them. The data model allows it; one is active today.
 - More Seeds: three exist; other bodies doing other things later.

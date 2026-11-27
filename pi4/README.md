@@ -13,7 +13,7 @@ commit. On 2026-11-26 it ran on files copied over by hand; the install of 2026-1
 own clone ended that: every installed file matched the repo afterwards, its
 `/etc/default/apcbox-bridge` was kept, nothing was mounted from its own card, and the Daisy,
 the game controller, the helper and HTTPS answered. A second Seed on its USB runs ApcBox
-(v13.35, flashed from the Pi with `tools/flash-seed.sh`, the bridge stopped for it). The screen shows the kiosk and takes touch, with a layout of its own (480x320).
+(v13.36, flashed from the Pi with `tools/flash-seed.sh`, the bridge stopped for it). The screen shows the kiosk and takes touch, with a layout of its own (480x320).
 **No comparison with the T95 has been measured yet.**
 
 ## Hardware and evidence

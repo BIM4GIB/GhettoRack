@@ -527,6 +527,15 @@ bool     sd_mounted   = false;
 int      sd_last_code = -1;
 uint32_t sd_check_time = 0;
 void     SdPoll(uint32_t now);
+/* The watchdogs and the card. Every card call is wrapped in one of these: going in and coming
+   out counts as a sign of life for both watchdogs (a set saving or a card being read through
+   is a long pass made of many short calls), and while inside, only the chip's own 33 s
+   watchdog is counting. Defined after Guard. */
+struct CardCall
+{
+    CardCall();
+    ~CardCall();
+};
 
 /* 3.5" screen: frame in SDRAM, one band at a time through D2 SRAM */
 DSY_SDRAM_BSS uint16_t tft_fb[Tft::W * Tft::H];
@@ -543,10 +552,12 @@ class DaisyPlatform : public Platform
 
     bool FileOpen(const char* path) override
     {
+        CardCall cc;
         return f_open(&load_file, Full(path), FA_READ) == FR_OK;
     }
     int32_t FileRead(void* dst, uint32_t n) override
     {
+        CardCall cc;
         UINT br = 0;
         if(f_read(&load_file, dst, n, &br) != FR_OK)
             return -1;
@@ -554,10 +565,15 @@ class DaisyPlatform : public Platform
     }
     bool FileSkip(uint32_t n) override
     {
+        CardCall cc;
         return f_lseek(&load_file, f_tell(&load_file) + n) == FR_OK;
     }
     uint32_t FileTell() override { return f_tell(&load_file); }
-    void     FileClose() override { f_close(&load_file); }
+    void     FileClose() override
+    {
+        CardCall cc;
+        f_close(&load_file);
+    }
     uint8_t* Scratch(uint32_t* size) override
     {
         *size = sizeof(sd_scratch);
@@ -566,10 +582,12 @@ class DaisyPlatform : public Platform
 
     bool DirOpen(const char* path) override
     {
+        CardCall cc;
         return f_opendir(&dir, Full(path)) == FR_OK;
     }
     bool DirNext(char* name, size_t cap, bool* is_dir) override
     {
+        CardCall cc;
         if(f_readdir(&dir, &fno) != FR_OK || fno.fname[0] == 0)
             return false;
         if(strlen(fno.fname) < cap)
@@ -579,10 +597,15 @@ class DaisyPlatform : public Platform
         *is_dir = (fno.fattrib & AM_DIR) != 0;
         return true;
     }
-    void DirClose() override { f_closedir(&dir); }
+    void DirClose() override
+    {
+        CardCall cc;
+        f_closedir(&dir);
+    }
 
     bool WriteFile(const char* d, const char* path, const void* data, uint32_t n) override
     {
+        CardCall cc;
         f_mkdir(Full(d));
         UINT bw = 0;
         if(f_open(&proj_file, Full(path), FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
@@ -594,6 +617,7 @@ class DaisyPlatform : public Platform
     }
     int32_t ReadFile(const char* path, void* data, uint32_t cap) override
     {
+        CardCall cc;
         UINT br = 0;
         if(f_open(&proj_file, Full(path), FA_READ) != FR_OK)
             return -1;
@@ -604,6 +628,7 @@ class DaisyPlatform : public Platform
 
     bool FileCreate(const char* d, const char* path) override
     {
+        CardCall cc;
         /* every folder on the way: "sets", then "sets/03" */
         char sub[96];
         for(int i = 0; d[i] && i < (int)sizeof(sub) - 1; i++)
@@ -622,6 +647,7 @@ class DaisyPlatform : public Platform
     }
     int32_t FileWrite(const void* src, uint32_t n) override
     {
+        CardCall cc;
         UINT bw = 0;
         if(!save_open_ || f_write(&save_file, src, n, &bw) != FR_OK)
             return -1;
@@ -629,14 +655,20 @@ class DaisyPlatform : public Platform
     }
     bool FileWriteClose() override
     {
+        CardCall cc;
         if(!save_open_)
             return false;
         save_open_ = false;
         return f_close(&save_file) == FR_OK;
     }
-    bool Remove(const char* path) override { return f_unlink(Full(path)) == FR_OK; }
+    bool Remove(const char* path) override
+    {
+        CardCall cc;
+        return f_unlink(Full(path)) == FR_OK;
+    }
     bool Rename(const char* from, const char* to) override
     {
+        CardCall cc;
         char a[256];
         snprintf(a, sizeof(a), "%s", Full(from));
         return f_rename(a, Full(to)) == FR_OK;
@@ -724,6 +756,7 @@ void SdPoll(uint32_t now)
         return;
     sd_check_time = now;
     FATFS* fs     = &fsi.GetSDFileSystem();
+    CardCall cc; // BoxStorageReady below makes its own calls inside this one: they nest
     if(!sd_mounted)
     {
         f_mount(nullptr, fsi.GetSDPath(), 0);
@@ -767,11 +800,14 @@ void SdPoll(uint32_t now)
    0.1 s, while a block takes over 93 % of its time, or over 80 % with the
    main loop not having come round for 0.2 s; they come back one every 2 s once it is under 65 %.
    The voices are dropped in the engine (Engine::shed), the sequencer runs on. */
+constexpr uint32_t kHangBlocks = 8000;
 struct Guard
 {
     volatile uint32_t beat = 0; // the main loop counts its passes here
     volatile uint32_t ups  = 0; // times a voice was left out since power-up
     volatile float    load = 0.f;
+    volatile bool     armed   = false; // the main loop runs: the callback's watchdog is on
+    volatile uint32_t in_card = 0;     // the main loop is inside a card call
     uint32_t          last_beat_ = 0, starve_ = 0, hold_ = 0;
     bool              rev_out_   = false; // the guard itself took the reverb out
     float             per_tick_  = 0.f;
@@ -788,6 +824,14 @@ struct Guard
         }
         else
             starve_++;
+        /* The watchdog for a main loop that stopped (blocks are 1 ms): 8 s without a pass and
+           the board resets, the way `restart` does it. Not while a card call is running: the
+           driver may wait 30 s for a card, and the chip's own watchdog (33 s) covers that. */
+        if(armed && starve_ > kHangBlocks && !in_card)
+        {
+            DIAG_REC.hang = diag::kMagicHang;
+            NVIC_SystemReset();
+        }
         /* 303 tracks that were left out can stop being 303s (the type changed,
            a kit or a set came in). The count goes down with them at once, or
            it would run over onto the reverb, which nobody asked to drop. */
@@ -827,6 +871,18 @@ struct Guard
     }
 };
 Guard guard;
+CardCall::CardCall()
+{
+    guard.beat    = guard.beat + 1;
+    guard.in_card = guard.in_card + 1;
+    diag::Kick();
+}
+CardCall::~CardCall()
+{
+    diag::Kick();
+    guard.beat    = guard.beat + 1;
+    guard.in_card = guard.in_card - 1;
+}
 
 void AudioCallback(AudioHandle::InputBuffer  in,
                    AudioHandle::OutputBuffer out,
@@ -901,6 +957,22 @@ const char* diag::StageName(uint32_t s)
     }
 }
 
+/* ---- the watchdogs ------------------------------------------------------------------------
+   For a main loop that stopped while nobody can reach the RESET button. Two, because one
+   cannot do both jobs:
+   - the audio callback counts the blocks since the main loop's last pass (Guard::Block) and
+     resets the board after 8 s. It knows a card call from a hang, and it leaves a mark.
+   - the chip's own (IWDG, 33 s, diag::StartWatchdog), fed by every pass and around every card
+     call (CardCall). It is what is left when a card call never returns or the interrupts
+     are dead as well.
+   Both start with the main loop: a start-up that stops is told by its stage, as before.
+   After a watchdog reset ApcBox starts normally (the last saved set, as after any restart) and
+   says in the log where the loop stopped. Three in a row, none of the runs lasting a minute:
+   report mode, or a box that hangs on the same thing every time would restart for ever.
+   Measured on the Pi rig's Seed (v13.35): the slowest pass was 0.52 s (undo of a sample). */
+static uint32_t dog_strikes = 0;   // watchdog resets in a row, this one included
+static char     dog_note[96] = ""; // what the last one was, for the log
+
 /** Previous boot crashed or hung: say so and stay put */
 void ReportMode(const diag::Record& p)
 {
@@ -929,11 +1001,21 @@ void ReportMode(const diag::Record& p)
             {
                 ui_link.Printf("L STOP REPORT #%lu (press RESET to retry)", (unsigned long)n);
                 ui_link.Printf("L last run stopped after stage %lu: %s", (unsigned long)p.stage, diag::StageName(p.stage));
+                if(dog_strikes)
+                    ui_link.Printf("L the watchdog restarted it %lu times in a row", (unsigned long)dog_strikes);
             }
             ui_link.Printf("L boots since power-up: %lu, bootloader version %d",
                            (unsigned long)p.boots, (int)System::GetBootloaderVersion());
         }
         ui_link.Flush();
+        /* the flash script gets through here too: no hand on the buttons to put another firmware on */
+        ui_link.Poll();
+        if(ui_link.BootRequested())
+        {
+            hw.SetLed(false);
+            System::Delay(50);
+            System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
+        }
     }
 }
 
@@ -1032,14 +1114,26 @@ int main(void)
        cleared them; startup hangs are caught by the stage anyway */
     bool wdg = (RCC->RSR & RCC_RSR_IWDG1RSTF) != 0;
     RCC->RSR |= RCC_RSR_RMVF;
-    if(prev.magic == diag::kMagicFault
-       || (prev.magic == diag::kMagicBoot && (prev.stage < 100 || wdg)))
-    {
-#ifdef ITCM_TRIAL
-        if(!(prev.magic == diag::kMagicBoot && prev.stage >= 100)) // a trial's watchdog reset: just start again
+    /* a watchdog reset out of the main loop: start again, unless it is the third in a row */
+    bool hung = known && DIAG_REC.hang == diag::kMagicHang;
+    DIAG_REC.hang = 0;
+    uint32_t dw   = DIAG_REC.dog;
+    dog_strikes   = (known && (dw & 0xFFFFFF00u) == diag::kDogCount) ? (dw & 0xFF) : 0;
+    bool by_dog   = prev.magic == diag::kMagicBoot && prev.stage >= 100 && (wdg || hung);
+    dog_strikes   = by_dog ? dog_strikes + 1 : 0;
+    bool stay     = prev.magic == diag::kMagicFault || (prev.magic == diag::kMagicBoot && prev.stage < 100);
+#ifndef ITCM_TRIAL // a trial build starts again every time, so the T95 can put the good firmware back
+    stay = stay || dog_strikes >= 3;
 #endif
-            ReportMode(prev);
+    if(stay)
+    {
+        DIAG_REC.dog = 0;
+        ReportMode(prev);
     }
+    DIAG_REC.dog = diag::kDogCount | (dog_strikes & 0xFF);
+    if(by_dog)
+        snprintf(dog_note, sizeof(dog_note), "watchdog: the main loop had stopped in '%s' (%s), restarted, %lu in a row",
+                 diag::StageName(prev.stage), hung ? "8 s" : "33 s", (unsigned long)dog_strikes);
 
     DIAG_REC.magic = diag::kMagicBoot;
     diag::Stage(1);
@@ -1204,10 +1298,32 @@ int main(void)
     uint32_t blink_time = 0;
     bool     led_state  = false;
 
+#ifndef ITCM_TRIAL // a trial build runs its own, shorter one
+    diag::StartWatchdog();
+#endif
+    const uint32_t loop_since = System::GetNow();
+    guard.armed               = true;
+
     while(1)
     {
         uint32_t now = System::GetNow();
         diag::Stage(100);
+        diag::Kick();
+        /* said every 10 s for that minute: what is said in the first seconds after a start is
+           lost, the host has not opened the port yet */
+        static uint32_t dog_said = 0;
+        if(dog_note[0] && now - dog_said >= 10000)
+        {
+            dog_said = now;
+            Log("%s", dog_note);
+        }
+        /* a minute of running: whatever the watchdog restarted it for is over */
+        if(dog_strikes && now - loop_since > 60000)
+        {
+            dog_strikes  = 0;
+            dog_note[0]  = 0;
+            DIAG_REC.dog = diag::kDogCount;
+        }
         
 
         /* Onboard LED: fast = no USB device, slow = device present */
@@ -1260,6 +1376,19 @@ int main(void)
             System::Delay(50);
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
+#ifdef WD_TEST
+        /* A build to try the watchdogs with, never a release: `restart` stops the main loop
+           instead. The first time with the interrupts running (the callback's watchdog, 8 s),
+           after one watchdog reset with them off (the chip's own, 33 s), then as the first again. */
+        if(BoxTakeRestart())
+        {
+            Log("WD_TEST: stopping the main loop%s", dog_strikes == 1 ? ", interrupts off" : "");
+            System::Delay(100);
+            if(dog_strikes == 1)
+                __disable_irq();
+            while(1) {}
+        }
+#endif
         if(BoxTakeRestart())
         {
             /* a page asked: start again as the RESET button does. The bootloader waits its

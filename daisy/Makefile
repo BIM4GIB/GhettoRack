@@ -22,6 +22,10 @@ LDSCRIPT = ApcBox_qspi.lds
 ifdef ITCM_TRIAL
 C_DEFS += -DITCM_TRIAL
 endif
+# make WD_TEST=1: `restart` hangs the main loop instead, to try the watchdogs. Never a release
+ifdef WD_TEST
+C_DEFS += -DWD_TEST
+endif
 
 # Library Locations
 LIBDAISY_DIR = ../lib/libDaisy/

@@ -31,6 +31,13 @@ one does not change the active module or its routing.
 The Daisy keeps time and makes sound. A page shows and asks; it never
 schedules a step, and it works with no APC40 plugged in.
 
+A module may bring a sound engine of its own on the box, with its own sound
+card and its own clock: the decks (`decks/`, through the Numark's card at
+44.1 kHz). The same split holds there: the engine keeps its time and makes
+its sound in one audio thread, the bridge and the page show and ask. Two
+engines share a tempo only by one following the other through the Clock
+module, never by a page or the bridge timing either of them.
+
 ## 2. Layouts
 
 Every page has all four. A page that lacks one is not done.

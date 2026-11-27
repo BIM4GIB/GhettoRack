@@ -1,6 +1,7 @@
 daisy/build/
 daisy/mac/build/
 daisy/hostbuild/
+decks/build/
 .DS_Store
 *.o
 __pycache__/
