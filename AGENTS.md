@@ -43,10 +43,11 @@ protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
             flash-seed.sh (flash one chosen Seed; macOS and Linux),
             boxcert.py (HTTPS without a browser warning: your own authority, a certificate per box),
-            mock_oled.py, mock_tft.py (draw the screen mockups in docs/DISPLAYS.md)
+            mock_oled.py, mock_tft.py, mock_atlas.py (draw the screen mockups in docs/DISPLAYS.md)
 docs/       CANON.md (how a module and its screens are made: read it before touching a
             page), wiring-guide.html (every connection, diagrams), images/,
-            DISPLAYS.md (a screen for the bare Daisy: options, mockups; nothing built)
+            DISPLAYS.md (a screen for the bare Daisy: options, mockups; nothing built),
+            NOTEBOX.md (a found cabinet as the home-jam speaker: sizes, the plan; nothing built)
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
             (`daisy/reverb.h` is a repacked copy of DaisySP-LGPL's ReverbSc, LGPL too)
 ```

@@ -5,3 +5,4 @@ decks/build/
 .DS_Store
 *.o
 __pycache__/
+local/

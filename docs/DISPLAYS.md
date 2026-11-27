@@ -113,6 +113,26 @@ an angle and in the dark.
 The two 256x64 panels share a layout but not a driver. Buy them in the same
 colour so the comparison is about size.
 
+## Bought: the 1.47" and the 1.9" IPS, and frames at their size
+
+Ordered 2026-11-27, not arrived: a 1.47" 320x172 (board `GMT147SPI`, round
+glass corners) and a 1.9" 320x170, both ST7789 on eight pins (GND, VDD, SCL,
+SDA, RES, DC, CS, BL). Neither has a touch chip.
+
+![320x170 frames](images/atlas-320x170.png)
+
+Sixteen frames at 320x170, one layout for both panels: the views of
+`daisy/tftui.h` (steps, mixer, patterns, track, system), the set screens, a
+knob popup, recording, sampling, overload and the stopped state. The sample
+data is invented. The last row shows both panels at the same physical scale.
+
+- The first and last rows of each frame keep 14 pixels clear at the sides for
+  the 1.47" panel's round corners (their radius is a guess: 22 pixels).
+- Only pattern, tempo, track name, set names and popups are in the big font.
+  The rest is single size: under 1 mm tall on the 1.47", about 1.2 mm on the
+  1.9". Whether that reads at arm's length is for the real glass to say.
+- A muted track is amber, as `docs/CANON.md` section 6 says.
+
 ## Tangent: the Bluetooth speaker as a case
 
 A small Bluetooth speaker (board `winnershine FF008 BK V1.1`, one driver and a
@@ -164,7 +184,8 @@ or `B+` runs down the button leg before cutting it.
 ```
 python3 tools/mock_oled.py daisy/oledfont.h docs/images/mock-oled-256x64.png
 python3 tools/mock_tft.py daisy/oledfont.h docs/images/mock-oled-256x64.png docs/images/mock-tft-320x240.png
+python3 tools/mock_atlas.py daisy/oledfont.h docs/images/atlas-320x170.png
 ```
 
-Both need Pillow. The second pastes the first's main screen in for the size
+All need Pillow. The second pastes the first's main screen in for the size
 comparison, so run them in that order.
