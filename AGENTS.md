@@ -39,9 +39,11 @@ pi4/        the same companion on a Raspberry Pi 4 with the 3.5" touch screen on
 protocol/   serial.md: what the Daisy's USB presents and the report lines
 tools/      sdprep.py (fill an SD card), seed2-setup.sh (fresh Seed), check-public.sh,
             flash-seed.sh (flash one chosen Seed; macOS and Linux),
-            boxcert.py (HTTPS without a browser warning: your own authority, a certificate per box)
+            boxcert.py (HTTPS without a browser warning: your own authority, a certificate per box),
+            mock_oled.py, mock_tft.py (draw the screen mockups in docs/DISPLAYS.md)
 docs/       CANON.md (how a module and its screens are made: read it before touching a
-            page), wiring-guide.html (every connection, diagrams), images/
+            page), wiring-guide.html (every connection, diagrams), images/,
+            DISPLAYS.md (a screen for the bare Daisy: options, mockups; nothing built)
 lib/        libDaisy v9.0.0 and DaisySP (+ LGPL) as pinned submodules
             (`daisy/reverb.h` is a repacked copy of DaisySP-LGPL's ReverbSc, LGPL too)
 ```
