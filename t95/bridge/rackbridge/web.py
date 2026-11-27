@@ -158,6 +158,8 @@ class WebMixin:
         if path == "/ir/cancel":
             self.ir.learning = None
             return 200, {"ok": True}
+        if path == "/pad":
+            return self.pad.set(d)
         if path == "/routes":
             return self.set_routes(d.get("routes"))
         if path == "/do":
@@ -297,6 +299,8 @@ class WebMixin:
                     await self.reply(writer, 404, "text/plain", b"not installed\n")
                 else:
                     await self.reply(writer, 200, "text/css; charset=utf-8" if path.endswith(".css") else "text/javascript; charset=utf-8", body)
+            elif path == "/pad":               # the game controller: what it is, what each control does and could do
+                await self.reply(writer, 200, "application/json", json.dumps(self.pad.describe()).encode() + b"\n")
             elif path == "/ca.crt":            # the owner's authority (tools/boxcert.py), for a phone to install; public by nature
                 try:
                     with open(os.path.join(os.path.dirname(self.args.state), "own-ca.crt"), "rb") as f:

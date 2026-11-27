@@ -46,6 +46,7 @@ Open the mocks: `t95/ui/mock/views.html?v=<name>` in a browser at 1920x1080
 | 6 Patterns | Sets | (in `patterns`) | the 8 slots on the Daisy's card: load (switches on the bar), save here, save as new, rename, delete, transition; DEFAULT SET (v13.34): the set in the firmware, any time | built (v13.10) |
 | 7 FX | FX | `fx` | 8 performance FX as hold pads; reverb, delay, master filter, drive pots; master out waveform | built |
 | 8 System | APC40 map | - | a drawing of the APC40: every button, knob and fader with what it does alone (white), with SHIFT (amber), on SEND C or a 303 track (blue); tap one for the full description. From v13.15 it is the editor: tap a control, CHANGE (alone or SHIFT), tap the control whose job it should do (asks which if it has two), or pick a job no button has, or nothing; "whole row" moves 8 at once; knobs and faders swap among themselves; ↺ one control back, RESET ALL (asks). Changed controls are dashed | built (v13.15; the job texts are written by hand from `daisy/box.cpp`) |
+| 8 System | Controller map | - | a drawing of the game controller on the box's USB: every button, stick and trigger with its job; a press on the controller lights it; tap one, CHANGE, pick a job; ↺ and RESET ALL. The box keeps it (`/pad`) | built (2026-11-27) |
 | 8 System | System | `system` | links, ping, log, quantise (pattern switch: bar/beat/step; mute and solo: at once/beat/bar; takes: bar/beat; held FX: at once/step/beat), other modules | built |
 | - | Song / chain | - | patterns in a row as an arrangement | later (no song mode in the firmware) |
 | - | Slice | - | chop a sample or loop across steps | later (new firmware feature) |
@@ -156,7 +157,7 @@ things by name.
 | PAT | all 64 patterns, the 8 FX as hold pads, copy / clear / undo | one bank of 8 with a bank row, big FX pads |
 | LOOP | LOOPER: the Daisy's own input into the selected track. Take length (free, 1, 2, 4, 8 bars), input level, COUNT-IN, MONITOR, an input meter; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE (CANCEL while armed), CLEAR. QUANTISE: what snaps to the beat, as on the big System view (pattern switch, mute and solo, takes, held FX) | the same |
 | LIB | LIBRARY and BOX CARD (files on the box and on the card in its slot: a waveform each, TO TRACK), DAISY CARD (the samples on the Daisy's own card: a folder and a file stepped with ‹ ›, each step loads into the selected track, UNDO; says so when the Daisy has no card), KITS (load on 1-8 / 9-16, undo), SETS (load, save here) | the same |
-| SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, RELOAD | the same |
+| SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, PAD MAP (the game controller's controls and jobs as a list, the pressed one lit, RESET; to read, a job is changed on a bigger screen), RELOAD | the same |
 
 The 1-8 / 9-16 button selects the same track on the other page. ZOOM is kept
 in the browser. No shadows or glows, and plain elements instead of a canvas:
@@ -188,7 +189,7 @@ file) and is the model for the rest.
 | Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, SOUND OUT (steps through the box's outputs: HDMI, the headphone socket; then off). SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
 
 Not there: editing 303 notes, recording from a microphone (the box has none), the
-APC40 map, sets rename and delete, hearing a file before it is sent (the box
+APC40 map, changing the game controller's jobs, sets rename and delete, hearing a file before it is sent (the box
 has no speaker: HEAR plays what is on the track, through the Daisy). The
 Every page of the box has a small layout now.
 

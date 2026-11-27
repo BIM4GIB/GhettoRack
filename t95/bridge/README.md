@@ -124,21 +124,41 @@ A USB game controller on the box (`rackbridge/gamepad.py`; found by what it has:
 button and two stick axes; held exclusively). Seen: a Sony PlayStation 3 pad by cable on the
 Pi, recognised by the kernel with nothing installed.
 
-| On the pad | Does |
+What each control does is a table: `PAD_DEFAULT`, plus the changes kept in `state.json`.
+`GET /pad` gives the controller, the table, the defaults and the jobs there are; `POST /pad`
+takes `{"btn": code, "job": j}`, `{"axis": code, "job": j}` or `{"reset": true}`. The ApcBox
+page draws it: System > Controller map (the 3.5" screen: SYS > PAD MAP, to read and reset).
+
+| On the pad | As it comes |
 |---|---|
-| D-pad, X, O, triangle, PS | the remote's `up` `down` `left` `right`, `ok`, `back`, `menu`, `home`, sent as `ir` events to the pages on the box's own screen (to every open page only if the box shows none, or with `--pad-everywhere`): a page needs nothing new. A held arrow repeats |
+| D-pad, X, O, triangle, PS | `up` `down` `left` `right`, `ok`, `back`, `menu`, `home` |
 | L1 / R1 | `prev` / `next`: the view before / after |
-| D-pad on the ApcBox page | left / right: the track before / after; up / down: the same strip on the other page of tracks (1-8, 9-16) |
-| start / select | `play` / `stop`, to the Daisy itself, once (two open pages would each toggle) |
-| left stick X | the master filter: low-pass left, high-pass right, off in the middle |
-| right stick X | the crossfader |
-| left stick Y, right stick Y | the selected track's filter and pitch. Let go and each is what it was before the stick moved, on the track it started on |
+| start / select | `play` / `stop` |
+| square, L3, R3 | nothing |
+| left stick | sideways the master filter, up and down the selected track's filter |
+| right stick | sideways the crossfader, up and down the selected track's pitch |
 | L2 / R2 | the selected track's sound, once per pull. No velocity yet |
 
-A stick's middle is a dead zone and is sent as exactly the middle; a moving stick sends a
-control at most every 40 ms and the last value always goes. `/health` has `pad` (device, name,
-presses, sent, dropped). Not there: the face buttons' pressure (this kernel driver gives only
-on and off), the pad by Bluetooth, its tilt sensor, choosing what a stick does from a page.
+Jobs a button can have: the remote's actions for a page (the arrows, OK, back, home, menu,
+view before / after), and on the Daisy: play, stop, play / stop, the selected track's sound,
+the pattern before / after, track 1 to 16, nothing. Jobs a stick axis or trigger can have:
+the master filter, the crossfader, the selected track's volume, pan, reverb send, delay send,
+pitch or filter, the selected track's sound, nothing.
+
+- A page's job goes as an `ir` event to the pages on the box's own screen (to every open page
+  only if the box shows none, or with `--pad-everywhere`), so a page needs nothing new. A held
+  arrow repeats. On the ApcBox page a pad's up and down go to the same strip on the other page
+  of tracks.
+- A job on the Daisy goes to the Daisy once, not through the pages.
+- A stick or trigger pushes a control from where it is towards its end and lets it go back:
+  let go, a track's knob is what it was before, on the track it started on; the master filter
+  and the crossfader go to their middle. A stick's middle is a dead zone; a moving stick sends
+  a control at most every 40 ms and the last value always goes.
+- Every press and movement also goes out as a `pad` event, for the drawing; a changed table as
+  `padmap`. `/health` has `pad` (device, name, presses, sent, dropped).
+
+Not there: SHIFT layers or combinations, a table per page, the face buttons' pressure (this
+kernel driver gives only on and off), the pad by Bluetooth, its tilt sensor.
 
 ## Samples (firmware v13.8 on)
 

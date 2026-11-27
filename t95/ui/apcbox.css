@@ -364,6 +364,7 @@ body.phone .apcinfo{padding:8px 10px;gap:4px;height:150px}body.phone .apcinfo h3
 body.short .apcinfo{padding:8px 10px;gap:4px}body.short .apcinfo h3{font-size:13px}body.short .apcinfo p{font-size:10.5px;line-height:1.3}body.short .apcfn b{font-size:12px}body.short .apcfn em{font-size:11px}
 
 .apc .ac.chg{border-style:dashed;border-color:#9aa1aa}.apc .ac.src{border-color:var(--amber);box-shadow:0 0 0 2px #ff9a1f88}
+.apc.padmap .ac b{font-size:15px}.apc.padmap .ac em{font-size:12px}.apc.padmap .ac.pbt{border-radius:10px}.apc.padmap .ac.hit{background:#2f6a3f;border-color:var(--green)}.apcinfo .apcbtns{overflow:auto;min-height:0}
 .apcrow{display:flex;align-items:center;gap:10px;min-height:34px}.apcrow b{font-size:16px}.apcrow em{font-style:normal;color:var(--amber);font-size:16px}
 .apcrow .b,.apcbtns .b{height:32px;padding:0 12px;justify-content:center}.apcrow .lbl{width:52px}
 .apcbtns{display:flex;flex-wrap:wrap;gap:8px}.apcbtns .b.am{color:var(--amber);border-color:#8a6a20}
@@ -466,7 +467,12 @@ body.small .b.go{color:#0b0c0d;background:var(--green);border-color:var(--green)
 .sm-sys .s-kv{display:grid;grid-template-columns:86px 1fr;gap:3px 6px}.sm-sys .s-k{color:var(--dim)}.sm-sys .s-v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sm-sys .s-v.bad{color:var(--red)}.sm-sys .s-v.warn{color:var(--yellow)}
 .sm-sys .s-log{white-space:pre;overflow:hidden;color:var(--dim);border-top:1px solid var(--line);padding-top:3px;font-size:10px}
-.sm-sys .s-bt{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.sm-sys .s-bt{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.sm-pad{display:grid;grid-template-rows:1fr 32px;gap:4px;padding:4px}
+.sm-pad .s-pl{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(11,1fr);grid-auto-flow:column;gap:1px 8px;min-height:0}
+.sm-pad .s-pr{display:grid;grid-template-columns:96px 1fr;gap:6px;align-items:center;min-width:0;padding:0 3px;border-radius:2px}.sm-pad .s-pr.hit{background:var(--green);color:#000}
+.sm-pad .s-k{color:var(--dim);white-space:nowrap;overflow:hidden}.sm-pad .s-pr.hit .s-k{color:#000}.sm-pad .s-v{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sm-pad .s-v.chg{color:var(--yellow)}
+.sm-pad .s-bt{display:grid;grid-template-columns:70px 1fr 80px;gap:4px;align-items:center}.sm-pad .s-msg{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 /* library: the Daisy's own card, a folder and a file stepped with arrows */
 .sm-lib .s-dc{grid-column:1 / -1;display:grid;grid-template-rows:30px 62px 62px 1fr;gap:6px;min-height:0}
 .sm-lib .s-dcs{color:var(--dim);font-size:11px;line-height:1.3;overflow:hidden;align-self:center}.sm-lib .s-dcs.bad{color:var(--red)}

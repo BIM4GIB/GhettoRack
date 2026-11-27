@@ -2288,6 +2288,180 @@ class PageControlTest(unittest.TestCase):
         self.assertEqual(pad()["dropped"], 0)
         self.do("track 1", "knob 3 6 64", "knob 3 4 64")
 
+    def test_p59b_the_controllers_jobs_can_be_changed(self):
+        """GET /pad says what each control does and could do; POST /pad gives one another job, kept in state.json"""
+        EV = struct.Struct("llHHi")
+        ev = lambda typ, code, value: os.write(self.padw, EV.pack(0, 0, typ, code, value) + EV.pack(0, 0, 0, 0, 0))
+        pad = lambda: json.loads(BridgeTest.get("/pad")[2])
+        irs = lambda: [d["action"] for e, d in list(self.box.named) if e == "ir"]
+        shown = lambda: [d for e, d in list(self.box.named) if e == "pad"]
+        t = lambda tr, k: int(self.last("T %d " % tr).split()[2 + k])
+        m = lambda i: int(self.last("M ").split()[1 + i])
+        saved = lambda: json.load(open(os.path.join(self.dir, "state.json"))).get("pad")
+        d = pad()
+        self.assertEqual((d["map"]["btn"]["304"], d["map"]["axis"]["0"], d["map"], d["device"]), ("ok", "filter", d["default"], self.padfifo))
+        self.assertEqual((len(d["buttons"]), len(d["axes"]), "toggle" in d["jobs"]["btn"], "t.vol" in d["jobs"]["axis"]), (15, 6, True, True))
+        for bad in ({}, {"btn": 304}, {"btn": 304, "job": "t.vol"}, {"btn": 312, "job": "ok"}, {"btn": "304", "job": "ok"},
+                    {"axis": 0, "job": "ok"}, {"axis": 7, "job": "filter"}, {"reset": 1}, {"btn": True, "job": "ok"}):
+            self.assertEqual(self.post("/pad", bad)[0], 400, bad)
+        self.assertEqual(pad()["map"], d["default"])
+        # the drawing sees every control move, whatever its job
+        n = len(shown())
+        ev(1, 308, 1); ev(1, 308, 0)                                    # square: no job
+        ev(3, 0, 255); ev(3, 0, 128)
+        self.assertTrue(self.box.wait_for(lambda c: shown()[n:] == [{"b": 308, "on": True}, {"b": 308, "on": False}, {"a": 0, "d": 1.0}, {"a": 0, "d": 0.0}], 5), shown()[n:])
+        # a button gets a job on the Daisy: X toggles play, square goes to track 12, triangle is the next pattern
+        self.do("stop", "pat 1")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0 and self.s(2) == 0, 8))
+        for code, job in ((304, "toggle"), (308, "t12"), (307, "pat+"), (305, "none")):
+            self.assertEqual(self.post("/pad", {"btn": code, "job": job})[0], 200)
+        self.assertEqual(saved(), {"btn": {"304": "toggle", "308": "t12", "307": "pat+", "305": "none"}, "axis": {}})
+        self.assertTrue(self.box.wait_for(lambda c: any(e == "padmap" and x["btn"]["308"] == "t12" for e, x in list(c.named)), 5))
+        n = len(irs())
+        ev(1, 304, 1); ev(1, 304, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 1, 5))
+        ev(1, 304, 1); ev(1, 304, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(0) == 0, 5))
+        ev(1, 308, 1); ev(1, 308, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 11, 5))
+        ev(1, 307, 1); ev(1, 307, 0)
+        self.assertTrue(self.box.wait_for(lambda c: self.s(2) == 1 or self.s(3) == 1, 5), self.last("S "))
+        ev(1, 305, 1); ev(1, 305, 0)                                    # O: nothing now
+        time.sleep(0.3)
+        self.assertEqual(irs()[n:], [])
+        # a knob with no middle on a stick: pushed it adds, let go it is what it was. And on a trigger
+        self.do("track 3", "knob 3 0 80", "knob 3 2 20", "pat 1")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 2 and t(2, 0) == 80 and t(2, 2) == 20, 5))
+        time.sleep(0.3)
+        self.assertEqual(self.post("/pad", {"axis": 1, "job": "t.vol"})[0], 200)
+        self.assertEqual(self.post("/pad", {"axis": 5, "job": "t.rev"})[0], 200)
+        ev(3, 1, 0)                                                     # stick up: to the top
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 0) == 127, 5), self.last("T 2 "))
+        ev(3, 1, 255)                                                   # down: to nothing
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 0) == 0, 5))
+        ev(3, 1, 128)
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 0) == 80, 5))
+        ev(3, 5, 128)                                                   # the trigger half pulled: half the way up from 20
+        self.assertTrue(self.box.wait_for(lambda c: 70 <= t(2, 2) <= 78, 5), self.last("T 2 "))
+        self.assertEqual(self.post("/pad", {"axis": 5, "job": "trig"})[0], 200)      # its job changes while held: put back first
+        self.assertTrue(self.box.wait_for(lambda c: t(2, 2) == 20, 5), self.last("T 2 "))
+        ev(3, 5, 0)
+        # a stick as a button's job: the selected track's sound once per push
+        self.assertEqual(self.post("/pad", {"axis": 3, "job": "trig"})[0], 200)
+        sent = pad()["sent"]
+        for v in (128, 200, 255, 250, 128, 0, 128):
+            ev(3, 3, v)
+        time.sleep(0.4)
+        self.assertEqual((pad()["sent"], m(1)), (sent + 2, 64))                       # right, then left: two pushes; no crossfader
+        # reset: as it came
+        self.assertEqual(self.post("/pad", {"reset": True})[0], 200)
+        self.assertEqual((pad()["map"], saved()), (d["default"], {"btn": {}, "axis": {}}))
+        n = len(irs())
+        ev(1, 304, 1); ev(1, 304, 0)
+        self.assertTrue(self.box.wait_for(lambda c: irs()[n:] == ["ok"], 5))
+        self.do("track 1", "knob 3 0 102", "knob 3 2 0")
+
+    def test_p59c_the_controller_map_in_a_browser(self):
+        """System > Controller map: the drawing says what each control does, a press lights it, a tap changes its job"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        EV = struct.Struct("llHHi")
+        ev = lambda typ, code, value: os.write(self.padw, EV.pack(0, 0, typ, code, value) + EV.pack(0, 0, 0, 0, 0))
+        pad = lambda: json.loads(BridgeTest.get("/pad")[2])
+        self.assertEqual(self.post("/pad", {"reset": True})[0], 200)
+        shots = os.environ.get("APCBOX_SHOTS")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            for name, vp in (("tv", {"width": 1440, "height": 800}), ("phone", {"width": 390, "height": 760}), ("sideways", {"width": 844, "height": 390})):
+                pg = b.new_page(viewport=vp)
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.goto("http://127.0.0.1:%d/apcbox?v=system" % self.http)
+                pg.locator("button.bigpad", has_text=re.compile("Controller map|Pad map")).click()
+                pg.wait_for_selector(".padmap .ac")
+                self.assertEqual(pg.locator(".padmap .ac").count(), 21)
+                cell = lambda t: pg.locator(".padmap .ac", has=pg.locator("b", has_text=re.compile("^" + re.escape(t) + "$")))
+                pg.wait_for_function("[...document.querySelectorAll('.padmap .ac em')].some(e => e.textContent === 'mst filter')")
+                self.assertEqual((cell("✕").locator("em").text_content(), cell("START").locator("em").text_content(), cell("L ↕").locator("em").text_content(),
+                                  cell("□").locator("em").text_content()), ("OK", "play", "trk filter", ""))
+                inside = pg.evaluate("""(() => { const w = document.querySelector('.apcwrap').getBoundingClientRect(); return [...document.querySelectorAll('.padmap .ac')].every(e => { const r = e.getBoundingClientRect(); return r.left >= w.left - 1 && r.right <= w.right + 1 && r.top >= w.top - 1 && r.bottom <= w.bottom + 1; }) && document.documentElement.scrollHeight <= innerHeight + 1; })()""")
+                self.assertTrue(inside, name)
+                # a press on the controller lights the control; a stick fills
+                ev(1, 308, 1)
+                pg.wait_for_function("document.querySelectorAll('.padmap .ac.hit').length === 1")
+                ev(1, 308, 0)
+                pg.wait_for_function("document.querySelectorAll('.padmap .ac.hit').length === 0")
+                ev(3, 3, 255)
+                pg.wait_for_function("[...document.querySelectorAll('.padmap .ac.pax')].filter(e => e.style.background).length === 1")
+                ev(3, 3, 128)
+                pg.wait_for_function("[...document.querySelectorAll('.padmap .ac.pax')].filter(e => e.style.background).length === 0")
+                if name == "tv":
+                    # tap, CHANGE, pick: square becomes track 5, the left stick's up and down the delay send
+                    cell("□").click()
+                    self.assertIn("nothing", pg.locator(".apcinfo .apcrow b").text_content())
+                    pg.locator(".apcinfo .b", has_text="CHANGE").click()
+                    pg.locator(".apcinfo .apcbtns .b", has_text=re.compile("^T5$")).click()
+                    pg.wait_for_function("document.querySelector('.padmap .ac.sel em').textContent === 'trk 5'")
+                    self.assertEqual((pad()["map"]["btn"]["308"], pg.locator(".padmap .ac.chg").count()), ("t5", 1))
+                    cell("L ↕").click()
+                    pg.locator(".apcinfo .b", has_text="CHANGE").click()
+                    self.assertEqual(pg.locator(".apcinfo .apcbtns .b").count(), 11)                 # the axis jobs and cancel
+                    pg.locator(".apcinfo .apcbtns .b", has_text="track delay send").click()
+                    pg.wait_for_function("document.querySelector('.padmap .ac.sel em').textContent === 'trk delay'")
+                    self.do("track 4", "knob 4 3 0")
+                    self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 3, 5))
+                    ev(1, 308, 1); ev(1, 308, 0)
+                    self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 4, 5))
+                    if shots:
+                        pg.screenshot(path=os.path.join(shots, "pad-map-tv.png"))
+                    # ↺ one control back, RESET ALL (asks) the rest
+                    cell("□").click()
+                    pg.locator(".apcinfo .b", has_text="↺").click()
+                    pg.wait_for_function("document.querySelectorAll('.padmap .ac.chg').length === 1")
+                    pg.locator(".hdr .b", has_text="RESET ALL").click()
+                    self.assertEqual(pad()["map"]["axis"]["1"], "t.dly")
+                    pg.locator(".hdr .b", has_text="SURE?").click()
+                    pg.wait_for_function("document.querySelectorAll('.padmap .ac.chg').length === 0")
+                    self.assertEqual(pad()["map"], pad()["default"])
+                elif shots:
+                    pg.screenshot(path=os.path.join(shots, "pad-map-%s.png" % name))
+                pg.locator(".hdr .b", has_text="System").click()
+                pg.wait_for_selector("button.bigpad")
+                pg.close()
+            # the 3.5" screen: SYS > PAD MAP lists every control with its job, lights the pressed one, RESET asks
+            self.assertEqual(self.post("/pad", {"btn": 308, "job": "t5"})[0], 200)
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox?small=1" % self.http)
+            pg.locator(".tab", has_text="SYS").click()
+            pg.locator(".sm-sys .s-bt .b", has_text="PAD MAP").click()
+            pg.wait_for_selector(".sm-pad .s-pr")
+            pg.wait_for_function("[...document.querySelectorAll('.sm-pad .s-v')].some(e => e.textContent === 'track 5' && e.classList.contains('chg'))")
+            rows = pg.evaluate("[...document.querySelectorAll('.sm-pad .s-pr')].map(r => [r.children[0].textContent, r.children[1].textContent])")
+            self.assertEqual((len(rows), rows[12], rows[17], rows[10]), (21, ["X", "OK"], ["left stick ↔", "master filter"], ["square", "track 5"]), rows)
+            fit = pg.evaluate("[...document.querySelectorAll('.sm-pad .s-pr, .sm-pad .b')].every(e => { const r = e.getBoundingClientRect(); return r.right <= 481 && r.bottom <= 321 && r.height >= 10; }) && [...document.querySelectorAll('.sm-pad .s-k')].every(e => e.scrollWidth <= e.clientWidth + 1)")
+            self.assertTrue(fit)
+            self.assertTrue(pg.locator(".tab.on", has_text="SYS").count() == 1)
+            ev(1, 304, 1)
+            pg.wait_for_function("document.querySelector('.sm-pad .s-pr.hit .s-k').textContent === 'X'")
+            ev(1, 304, 0)
+            pg.wait_for_function("document.querySelectorAll('.sm-pad .s-pr.hit').length === 0")
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "pad-map-small.png"))
+            pg.locator(".sm-pad .b", has_text="RESET").click()
+            self.assertEqual(pad()["map"]["btn"]["308"], "t5")
+            pg.locator(".sm-pad .b", has_text="SURE?").click()
+            pg.wait_for_function("document.querySelectorAll('.sm-pad .s-v.chg').length === 0")
+            self.assertEqual(pad()["map"], pad()["default"])
+            pg.locator(".sm-pad .b", has_text="SYS").click()
+            pg.wait_for_selector(".sm-sys")
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.do("track 1")
+
     def test_p6_samples_view_waveforms_preview_send_kits(self):
         code, _, body = BridgeTest.get("/samples/peaks?src=lib&path=" + urllib.parse.quote("b tone.wav"))
         pk = json.loads(body)

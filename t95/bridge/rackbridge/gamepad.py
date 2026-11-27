@@ -1,34 +1,53 @@
 """A game controller on the box's USB (seen: a Sony PlayStation 3 pad, 2026-11-26):
-its buttons are the remote's actions for the pages, its sticks sweep the Daisy.
+its buttons are the remote's actions for the pages or jobs on the Daisy, its sticks
+and triggers sweep the Daisy and spring back. What each control does is a table
+(PAD_DEFAULT) that a page can change: GET /pad, POST /pad, kept in state.json.
 
-Buttons go to the pages on the box's own screen as the same "ir" events a remote
-makes, so a page needs nothing new (to every open page only when the box shows none). Play and stop go to the Daisy once, not through the pages:
-two open pages would each toggle. The sticks spring back, so they only get
-controls that have a middle to spring back to, or put back what was there:
+Buttons with a page's job go to the pages on the box's own screen as the same "ir"
+events a remote makes, so a page needs nothing new (to every open page only when
+the box shows none). Jobs on the Daisy go to the Daisy once, not through the pages:
+two open pages would each act.
 
-    left  stick  X   the master filter (low-pass left, high-pass right, off in the middle)
-                 Y   the selected track's filter; let go and it is what it was
-    right stick  X   the crossfader (both sides in the middle)
-                 Y   the selected track's pitch; let go and it is what it was
-    L2 / R2          the selected track's sound, once per pull (no velocity yet)
+A stick or trigger adds to what is there and lets go of it again: pushed, the control
+moves from its value towards its end; let go, it is what it was (the master filter and
+the crossfader: their middle). So any knob can sit on a stick, with or without a middle.
 
 Nothing here is timing: a sweep is at most GP_RATE_S apart and the Daisy plays."""
 from .common import *
 from .util import *
 
 EV_KEY, EV_ABS = 0x01, 0x03
-GP_BUTTONS = {544: "up", 545: "down", 546: "left", 547: "right",      # the D-pad
-              304: "ok", 305: "back", 307: "menu", 316: "home",         # X, O, triangle, PS
-              310: "prev", 311: "next",                                 # L1, R1: the view before / after
-              315: "play", 314: "stop"}                                 # start, select
+# what a button can do. For the pages: the remote's actions. For the Daisy: the rest
+PAD_PAGE_JOBS = ["up", "down", "left", "right", "ok", "back", "home", "menu", "prev", "next"]
+PAD_BTN_JOBS = (PAD_PAGE_JOBS + ["play", "stop", "toggle", "trig", "pat-", "pat+"]
+                + ["t%d" % n for n in range(1, 17)] + ["none"])
+# what a stick axis or a trigger can do: (glob / knob, its number); "trig": the selected track's sound, once per pull
+PAD_AXIS = {"filter": ("glob", 9), "xfade": ("glob", 1), "t.vol": ("knob", 0), "t.pan": ("knob", 1),
+            "t.rev": ("knob", 2), "t.dly": ("knob", 3), "t.pitch": ("knob", 4), "t.filter": ("knob", 6)}
+PAD_AXIS_JOBS = list(PAD_AXIS) + ["trig", "none"]
+PAD_BTNS = [544, 545, 546, 547, 304, 305, 307, 308, 310, 311, 314, 315, 316, 317, 318]   # D-pad, X O triangle square, L1 R1, select start PS, L3 R3
+PAD_AXES = [0, 1, 3, 4, 2, 5]                                                             # LX LY RX RY, L2 R2
+PAD_DEFAULT = {"btn": {"544": "up", "545": "down", "546": "left", "547": "right",
+                       "304": "ok", "305": "back", "307": "menu", "308": "none", "316": "home",
+                       "310": "prev", "311": "next", "315": "play", "314": "stop", "317": "none", "318": "none"},
+               "axis": {"0": "filter", "1": "t.filter", "3": "xfade", "4": "t.pitch", "2": "trig", "5": "trig"}}
 GP_REPEAT = {"up", "down", "left", "right"}
-GP_DAISY = {"play": "play", "stop": "stop"}                             # to the Daisy itself, once
-GP_DEAD = 12             # of 127 either way from the middle: a worn stick rests anywhere in there
+GP_DEAD = 12             # of 63 either way from the middle: a worn stick rests anywhere in there
 GP_RATE_S = 0.04         # a control is sent at most this often while a stick moves
+GP_SHOW_S = 0.1          # ... and shown on a page's drawing at most this often
 GP_PULL = 60             # of 255: how far a trigger is pulled before it plays, and half of it to let go
-# stick axis -> (what, action number): "glob" has its own middle; "knob" is the selected track's, put back after
-GP_AXES = {0: ("glob", 9), 3: ("glob", 1), 1: ("knob", 6), 4: ("knob", 4)}
 GP_TRIGGERS = (2, 5)
+
+
+def pad_valid(d):
+    """the changes a state file or a page may hold: {"btn": {code: job}, "axis": {code: job}}, bad entries dropped"""
+    out = {"btn": {}, "axis": {}}
+    if isinstance(d, dict):
+        for kind, codes, jobs in (("btn", PAD_BTNS, PAD_BTN_JOBS), ("axis", PAD_AXES, PAD_AXIS_JOBS)):
+            for k, v in (d.get(kind) or {}).items() if isinstance(d.get(kind), dict) else ():
+                if isinstance(k, str) and k.isdigit() and int(k) in codes and v in jobs and PAD_DEFAULT[kind][k] != v:
+                    out[kind][k] = v
+    return out
 
 
 def find_pad(root=""):
@@ -64,45 +83,103 @@ class Gamepad:
         self.path = self.name = None
         self.buf = b""
         self.down = {}              # button code -> its repeat timer (or None)
-        self.axis = {}              # axis -> {"want": value to send, "sent": last sent, "at": when, "base": (track, value) for a knob}
+        self.axis = {}              # axis -> {"d": -1..1 wanted, "sent": last value sent, "at": when, "job", "base": (track or None, value)}
         self.pulled = set()
+        self.shown = {}             # axis -> (when, d) last told to the pages' drawing
         self.timer = None
         self.presses = self.sent = self.dropped = 0
 
     def info(self):
         return {"device": self.path, "name": self.name, "presses": self.presses, "sent": self.sent, "dropped": self.dropped}
 
-    # ---- buttons ----
-    def act(self, action):
-        if action in GP_DAISY:
-            self.send(GP_DAISY[action])
-            return
-        # The pad is plugged into the box, so it drives the box's own screen. Only with no page
-        # open there does it go to the others: a phone left on the jam recorder started a take
-        # at every X while the screen was on ApcBox (rig, 2026-11-26)
-        clients = list(self.b.clients)
-        own = [c for c in clients if c.peer and c.peer[0] in ("127.0.0.1", "::1")]
-        for c in (own if self.b.args.pad_local and own else clients):
-            c.push(sse_event("ir", {"action": action, "phase": "down", "pad": True}))
+    # ---- the table ----
+    def map(self):
+        ch = self.b.state.data.get("pad") or {}
+        return {k: dict(PAD_DEFAULT[k], **(ch.get(k) or {})) for k in ("btn", "axis")}
 
-    def repeat(self, code):
+    def describe(self):
+        return dict(self.info(), map=self.map(), default=PAD_DEFAULT,
+                    jobs={"btn": PAD_BTN_JOBS, "axis": PAD_AXIS_JOBS}, buttons=PAD_BTNS, axes=PAD_AXES)
+
+    def set(self, d):
+        """POST /pad: {"btn": code, "job": j}, {"axis": code, "job": j} or {"reset": true}"""
+        st = self.b.state
+        cur = pad_valid(st.data.get("pad"))
+        if d.get("reset") is True:
+            cur = {"btn": {}, "axis": {}}
+        else:
+            kind = "btn" if "btn" in d else "axis" if "axis" in d else None
+            code, job = d.get(kind) if kind else None, d.get("job")
+            if (kind is None or not isinstance(code, int) or isinstance(code, bool)
+                    or code not in (PAD_BTNS if kind == "btn" else PAD_AXES)
+                    or job not in (PAD_BTN_JOBS if kind == "btn" else PAD_AXIS_JOBS)):
+                return 400, {"error": "btn or axis (a control of the pad) and job (one of its jobs), or reset"}
+            cur[kind].pop(str(code), None)
+            if PAD_DEFAULT[kind][str(code)] != job:
+                cur[kind][str(code)] = job
+        self.let_go()                   # a stick held while its job changes: what it moved goes back first
+        st.data["pad"] = cur
+        st.save()
+        self.b.broadcast(sse_event("padmap", self.map()))
+        return 200, {"ok": True, "map": self.map()}
+
+    # ---- buttons ----
+    def s_field(self, i):
+        try:
+            return int(self.b.cache.lines["S"].split()[1 + i])
+        except (KeyError, IndexError, ValueError):
+            return None
+
+    def selected(self):
+        """the Daisy's selected track, 0-15, or None while it hasn't said"""
+        t = self.s_field(7)
+        return None if t is None else max(0, min(15, t))
+
+    def act(self, job):
+        if job == "none":
+            return
+        if job in PAD_PAGE_JOBS:
+            # The pad is plugged into the box, so it drives the box's own screen. Only with no page
+            # open there does it go to the others: a phone left on the jam recorder started a take
+            # at every X while the screen was on ApcBox (rig, 2026-11-26)
+            clients = list(self.b.clients)
+            own = [c for c in clients if c.peer and c.peer[0] in ("127.0.0.1", "::1")]
+            for c in (own if self.b.args.pad_local and own else clients):
+                c.push(sse_event("ir", {"action": job, "phase": "down", "pad": True}))
+        elif job in ("play", "stop"):
+            self.send(job)
+        elif job == "toggle":
+            self.send("stop" if self.s_field(0) else "play")
+        elif job == "trig":
+            t = self.selected()
+            if t is not None:
+                self.send("audition %d" % (t + 1))
+        elif job in ("pat-", "pat+"):
+            p = self.s_field(2)
+            if p is not None:
+                self.send("pat %d" % (max(0, min(63, p + (1 if job == "pat+" else -1))) + 1))
+        elif job[0] == "t" and job[1:].isdigit():
+            self.send("track %s" % job[1:])
+
+    def repeat(self, code, job):
         if code not in self.down:
             return
-        self.act(GP_BUTTONS[code])
-        self.down[code] = asyncio.get_running_loop().call_later(IR_REPEAT_S, self.repeat, code)
+        self.act(job)
+        self.down[code] = asyncio.get_running_loop().call_later(IR_REPEAT_S, self.repeat, code, job)
 
     def key(self, code, value):
-        action = GP_BUTTONS.get(code)
-        if action is None or value == 2:        # 2: the kernel's own repeat
+        if code not in PAD_BTNS or value == 2:       # 2: the kernel's own repeat
             return
         t = self.down.pop(code, None)
         if t:
             t.cancel()
+        self.b.broadcast(sse_event("pad", {"b": code, "on": value == 1}))      # for a page's drawing
         if value == 1:
             self.presses += 1
-            self.act(action)
-            self.down[code] = (asyncio.get_running_loop().call_later(IR_HOLD_S, self.repeat, code)
-                               if action in GP_REPEAT else None)
+            job = self.map()["btn"].get(str(code), "none")
+            self.act(job)
+            self.down[code] = (asyncio.get_running_loop().call_later(IR_HOLD_S, self.repeat, code, job)
+                               if job in GP_REPEAT else None)
 
     # ---- sticks and triggers ----
     def send(self, action):
@@ -112,46 +189,55 @@ class Gamepad:
         self.dropped += 1
         return False
 
-    def selected(self):
-        """the Daisy's selected track, 0-15, or None while it hasn't said"""
-        try:
-            return max(0, min(15, int(self.b.cache.lines["S"].split()[8])))
-        except (KeyError, IndexError, ValueError):
-            return None
-
     def knob_now(self, track, k):
         try:
             return max(0, min(127, int(self.b.cache.lines["T %d" % track].split()[2 + k])))
         except (KeyError, IndexError, ValueError):
             return None
 
+    def show(self, code, d):
+        t, was = now(), self.shown.get(code)
+        if was and was[1] == d:
+            return
+        if d == 0 or not was or t - was[0] >= GP_SHOW_S:
+            self.shown[code] = (t, d)
+            self.b.broadcast(sse_event("pad", {"a": code, "d": round(d, 2)}))
+
     def moved(self, code, value):
+        if code not in PAD_AXES:
+            return
         if code in GP_TRIGGERS:
-            if value >= GP_PULL and code not in self.pulled:
+            d = 0.0 if value < 8 else min(1.0, value / 255.0)
+        else:
+            v = stick(255 - value if code in (1, 4) else value)        # up is more
+            d = (v - 64) / (63.0 if v > 64 else 64.0)
+        self.show(code, d)
+        job = self.map()["axis"].get(str(code), "none")
+        if job == "trig":
+            pull = value if code in GP_TRIGGERS else abs(d) * 255
+            if pull >= GP_PULL and code not in self.pulled:
                 self.pulled.add(code)
-                t = self.selected()
-                if t is not None:
-                    self.send("audition %d" % (t + 1))
-            elif value < GP_PULL // 2:
+                self.act("trig")
+            elif pull < GP_PULL // 2:
                 self.pulled.discard(code)
             return
-        if code not in GP_AXES:
+        if job not in PAD_AXIS:
             return
-        what, k = GP_AXES[code]
-        v = stick(255 - value if code in (1, 4) else value)        # up is more
+        what, k = PAD_AXIS[job]
         a = self.axis.get(code)
         if a is None:
-            if v == 64:
+            if d == 0:
                 return
-            a = self.axis[code] = {"sent": None, "at": 0.0, "base": None}
-            if what == "knob":                                      # whose knob, and what it was: put back on letting go
+            if what == "glob":
+                base = (None, 64)
+            else:                                                   # whose knob, and what it was: put back on letting go
                 t = self.selected()
-                base = None if t is None else self.knob_now(t, k)
-                if base is None:
-                    del self.axis[code]
+                v0 = None if t is None else self.knob_now(t, k)
+                if v0 is None:
                     return
-                a["base"] = (t, base)
-        a["want"] = v
+                base = (t, v0)
+            a = self.axis[code] = {"sent": None, "at": 0.0, "job": job, "base": base}
+        a["d"] = d
         self.flush()
 
     def flush(self):
@@ -159,23 +245,35 @@ class Gamepad:
         self.timer = None
         t, wait = now(), None
         for code, a in list(self.axis.items()):
-            what, k = GP_AXES[code]
-            home = a["want"] == 64
-            if a["want"] != a["sent"] or home:
+            what, k = PAD_AXIS[a["job"]]
+            tr, base = a["base"]
+            d, home = a["d"], a["d"] == 0
+            want = round(base + d * (127 - base)) if d >= 0 else round(base + d * base)
+            if want != a["sent"] or home:
                 due = a["at"] + GP_RATE_S - t
                 if due > 0 and not home:
                     wait = due if wait is None else min(wait, due)
                     continue
-                if what == "glob":
-                    self.send("glob %d %d" % (k, a["want"]))
+                if home and a["sent"] is None:
+                    pass                                            # never moved it: nothing to put back
+                elif what == "glob":
+                    self.send("glob %d %d" % (k, want))
                 else:
-                    tr, base = a["base"]
-                    self.send("knob %d %d %d" % (tr + 1, k, base if home else a["want"]))
-                a["sent"], a["at"] = a["want"], t
+                    self.send("knob %d %d %d" % (tr + 1, k, want))
+                a["sent"], a["at"] = want, t
             if home:
                 del self.axis[code]
         if wait is not None:
             self.timer = asyncio.get_running_loop().call_later(wait, self.flush)
+
+    def let_go(self):
+        """every stick as if released: what it moved goes back"""
+        for a in self.axis.values():
+            a["d"] = 0
+        if self.timer:
+            self.timer.cancel()
+        self.flush()
+        self.pulled = set()
 
     # ---- the device ----
     def on_readable(self):
@@ -210,12 +308,7 @@ class Gamepad:
             if t:
                 t.cancel()
         self.down = {}
-        self.pulled = set()
-        for a in self.axis.values():            # a stick held when the cable went: back to the middle
-            a["want"] = 64
-        if self.timer:
-            self.timer.cancel()
-        self.flush()
+        self.let_go()                           # a stick held when the cable went
         self.fd = self.path = self.name = None
         self.buf = b""
 

@@ -10,7 +10,8 @@ class State:
     def __init__(self, path):
         self.path = path
         self.data = {"last": None, "autostart_s": 5, "hdmi_audio": False, "sound_out": None,
-                     "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": [], "clock": {}}
+                     "ir": {p: {} for p in IR_PROFILES}, "routes": {}, "presets": {}, "net_never": [], "clock": {},
+                     "pad": {"btn": {}, "axis": {}}}
         try:
             with open(path) as f:
                 d = json.load(f)
@@ -20,6 +21,8 @@ class State:
                 self.data["autostart_s"] = a if isinstance(a, int) and 0 <= a <= 60 else 5
                 self.data["hdmi_audio"] = d.get("hdmi_audio") is True
                 self.data["sound_out"] = d["sound_out"] if isinstance(d.get("sound_out"), str) else None
+                from .gamepad import pad_valid
+                self.data["pad"] = pad_valid(d.get("pad"))       # the game controller's changed jobs
                 if isinstance(d.get("clock"), dict):
                     self.data["clock"] = d["clock"]      # Clock checks each field
                 nv = d.get("net_never")

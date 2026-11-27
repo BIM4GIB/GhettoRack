@@ -1434,13 +1434,121 @@ V.map = {
   },
   S() { },
 };
+/* ---------- the game controller's map (System > Controller map; the box keeps it: GET / POST /pad) ---------- */
+const PAD_HW = { 544: "D-pad up", 545: "D-pad down", 546: "D-pad left", 547: "D-pad right", 304: "X", 305: "O", 307: "triangle", 308: "square",
+  310: "L1", 311: "R1", 314: "SELECT", 315: "START", 316: "PS", 317: "L3 (left stick pressed)", 318: "R3 (right stick pressed)" };
+const PAD_AX = { 0: "left stick, sideways", 1: "left stick, up and down", 3: "right stick, sideways", 4: "right stick, up and down", 2: "L2 (trigger)", 5: "R2 (trigger)" };
+/* job -> [short, long, what it does] */
+const PAD_JOB = {
+  up: ["up", "up", "For the page on the box's screen. ApcBox: the same strip on the other page of tracks. Held: repeats."],
+  down: ["down", "down", "For the page on the box's screen. ApcBox: the same strip on the other page of tracks. Held: repeats."],
+  left: ["left", "left", "For the page on the box's screen. ApcBox: the track before. Held: repeats."],
+  right: ["right", "right", "For the page on the box's screen. ApcBox: the track after. Held: repeats."],
+  ok: ["OK", "OK", "For the page on the box's screen. ApcBox: play / stop. Jam recorder: REC."],
+  back: ["back", "back", "For the page on the box's screen: back to the modules."],
+  home: ["home", "home", "For the page on the box's screen: the modules."],
+  menu: ["menu", "menu", "For the page on the box's screen: the modules."],
+  prev: ["view −", "the view before", "For the page on the box's screen: the tab before this one."],
+  next: ["view +", "the view after", "For the page on the box's screen: the tab after this one."],
+  play: ["play", "play", "Starts the Daisy's sequencer."], stop: ["stop", "stop", "Stops it."],
+  toggle: ["play/stop", "play / stop", "Starts the Daisy's sequencer, or stops it when it runs."],
+  trig: ["play trk", "play the selected track", "The selected track's sound, once per press or pull."],
+  "pat-": ["pat −", "the pattern before", "Queues the pattern before this one: it comes in on the bar."],
+  "pat+": ["pat +", "the pattern after", "Queues the pattern after this one: it comes in on the bar."],
+  none: ["", "nothing", "This control does nothing."],
+  filter: ["mst filter", "the master filter", "Low-pass one way, high-pass the other, off when let go."],
+  xfade: ["crossfader", "the crossfader", "To the A side one way, the B side the other, both when let go."],
+  "t.vol": ["trk vol", "the selected track's volume", "Pushed: from where it is towards full (or nothing). Let go: what it was."],
+  "t.pan": ["trk pan", "the selected track's pan", "Pushed: from where it is towards one side. Let go: what it was."],
+  "t.rev": ["trk reverb", "the selected track's reverb send", "Pushed: from where it is towards full. Let go: what it was."],
+  "t.dly": ["trk delay", "the selected track's delay send", "Pushed: from where it is towards full. Let go: what it was."],
+  "t.pitch": ["trk pitch", "the selected track's pitch", "Pushed: from where it is up or down. Let go: what it was."],
+  "t.filter": ["trk filter", "the selected track's filter", "Pushed: from where it is towards high-pass or low-pass. Let go: what it was."],
+};
+for (let n = 1; n <= 16; n++) PAD_JOB["t" + n] = ["trk " + n, "track " + n, "Selects track " + n + "."];
+/* the drawing, 1000 x 560: [kind, code, x, y, w, h, label on the control] */
+const PAD_AT = [["axis", 2, 110, 20, 150, 44, "L2"], ["btn", 310, 110, 70, 150, 38, "L1"], ["axis", 5, 740, 20, 150, 44, "R2"], ["btn", 311, 740, 70, 150, 38, "R1"],
+  ["btn", 544, 150, 150, 76, 60, "▲"], ["btn", 546, 70, 214, 76, 60, "◀"], ["btn", 547, 230, 214, 76, 60, "▶"], ["btn", 545, 150, 278, 76, 60, "▼"],
+  ["btn", 314, 366, 222, 84, 42, "SELECT"], ["btn", 316, 458, 290, 84, 50, "PS"], ["btn", 315, 550, 222, 84, 42, "START"],
+  ["btn", 307, 774, 150, 76, 60, "△"], ["btn", 308, 694, 214, 76, 60, "□"], ["btn", 305, 854, 214, 76, 60, "○"], ["btn", 304, 774, 278, 76, 60, "✕"],
+  ["axis", 0, 236, 384, 200, 46, "L ↔"], ["axis", 1, 236, 434, 200, 46, "L ↕"], ["btn", 317, 236, 484, 200, 38, "L3"],
+  ["axis", 3, 564, 384, 200, 46, "R ↔"], ["axis", 4, 564, 434, 200, 46, "R ↕"], ["btn", 318, 564, 484, 200, 38, "R3"]];
+let padSel = -1, padPick = false, padSure = false;
+const Pad = { d: null, live: {},
+  async load() { try { this.d = await (await fetch("/pad")).json(); } catch (e) { this.d = null; } if (cur && cur.PM) cur.PM(); },
+  async set(body) { try { const r = await (await fetch("/pad", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json(); if (r.map && this.d) this.d.map = r.map; } catch (e) { } if (cur && cur.PM) cur.PM(); },
+  job(kind, code) { return this.d ? this.d.map[kind][code] : "none"; },
+  std(kind, code) { return !this.d || this.d.map[kind][code] === this.d.default[kind][code]; },
+};
+V.pad = {
+  build() {
+    view.className = "v"; view.style.gridTemplateRows = PHONE ? "auto 1fr auto" : "auto 1fr";
+    if (!PHONE) view.style.gridTemplateColumns = SHORT ? "1fr 250px" : "1fr 440px";
+    const hdr = el("div", "hdr"); if (!PHONE) hdr.style.gridColumn = "span 2";
+    const h = "padding:0 12px;height:" + sz(32, 30, 24) + "px";
+    const back = el("button", "b", "‹ System"); back.style.cssText = h; back.onclick = () => { padPick = false; show("system"); };
+    this.key = el("span", "lbl");
+    this.reset = el("button", "b", "RESET ALL"); this.reset.style.cssText = h;
+    this.reset.onclick = () => { if (!padSure) { padSure = true; return this.PM(); } padSure = false; padPick = false; Pad.set({ reset: true }); };
+    hdr.append(back, this.key, el("span", "sp"), this.reset);
+    const wrap = el("div", "apcwrap"), board = el("div", "apc padmap"); board.style.height = "560px"; wrap.appendChild(board);
+    this.info = el("div", "apcinfo"); this.els = [];
+    PAD_AT.forEach(([kind, code, x, y, w, h2, t], i) => {
+      const d = el("div", "ac " + (kind === "axis" ? "pax" : "pbt")); d.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h2}px`;
+      const b = el("b", "", t), e = el("em"); d.append(b, e); d.onclick = () => { padSel = i; padPick = false; padSure = false; this.PM(); };
+      board.appendChild(d); this.els.push({ d, e, kind, code });
+    });
+    [["TRIGGERS", 110, 12], ["TRIGGERS", 740, 12], ["D-PAD", 70, 142], ["BUTTONS", 694, 142], ["LEFT STICK", 236, 376], ["RIGHT STICK", 564, 376]].forEach(([t, x, y]) => { const l = el("span", "al", t); l.style.cssText = `left:${x}px;top:${y}px`; board.appendChild(l); });
+    view.append(hdr, wrap, this.info);
+    const fit = () => { const w = wrap.clientWidth, hh = wrap.clientHeight, k = Math.min(w / 1000, hh / 560); board.style.transform = `scale(${k})`; board.style.left = Math.max(0, (w - 1000 * k) / 2) + "px"; };
+    requestAnimationFrame(fit);
+    Pad.load(); this.PM();
+  },
+  PM() {
+    const D = Pad.d;
+    this.key.textContent = !D ? "the box isn't answering" : D.device ? (PHONE ? "" : "Controller map · ") + D.name + (PHONE ? "" : " · press a control: it lights · dashed: changed") : "no game controller on the box's USB (the map can still be set)";
+    this.reset.textContent = padSure ? "SURE?" : "RESET ALL"; this.reset.classList.toggle("warn", padSure); this.reset.disabled = !D;
+    this.els.forEach((x, i) => { const j = PAD_JOB[Pad.job(x.kind, x.code)] || ["?"];
+      x.e.textContent = j[0]; x.d.classList.toggle("sel", i === padSel); x.d.classList.toggle("chg", !Pad.std(x.kind, x.code)); });
+    this.PL(); this.panel();
+  },
+  /* what the pad is doing right now: a pressed button lights, a stick or trigger fills */
+  PL() {
+    for (const x of this.els) { const v = Pad.live[(x.kind === "btn" ? "b" : "a") + x.code] || 0;
+      if (x.kind === "btn") x.d.classList.toggle("hit", !!v);
+      else { const trig = x.code === 2 || x.code === 5, a = trig ? 0 : 50, z = trig ? v * 100 : 50 + v * 50, lo = Math.min(a, z), hi = Math.max(a, z);
+        x.d.style.background = v ? `linear-gradient(90deg,#1b1e22 ${lo}%,#2f6a3f ${lo}%,#2f6a3f ${hi}%,#1b1e22 ${hi}%)` : ""; } }
+  },
+  panel() {
+    const I = this.info, x = this.els[padSel]; I.textContent = "";
+    const btn = (t, f, cls) => { const b = el("button", "b " + (cls || ""), t); b.onclick = f; return b; };
+    if (!x) { I.append(el("h3", "", "Tap a control"), el("p", "", "Every button, stick and trigger of the game controller plugged into the box. Tap one to see what it does and to give it another job. Press it on the controller and it lights here. The box keeps the layout."),
+      el("p", "", "Buttons with a page's job (arrows, OK, back, views) act on the page on the box's own screen. A stick or trigger pushes a control from where it is and lets it go back.")); return; }
+    const kind = x.kind, code = x.code, now = Pad.job(kind, code), j = PAD_JOB[now] || ["", now, ""];
+    I.append(el("span", "lbl", kind === "btn" ? PAD_HW[code] : PAD_AX[code]));
+    if (padPick) {
+      I.append(el("h3", "", "Which job?"));
+      const r = el("div", "apcbtns");
+      for (const n of (Pad.d ? Pad.d.jobs[kind] : [])) r.append(btn(n === "none" ? "nothing" : /^t\d+$/.test(n) ? "T" + n.slice(1) : PAD_JOB[n][1].replace("the selected track's ", "track ").replace("the selected track", "track"),
+        () => { padPick = false; Pad.set({ [kind]: code, job: n }); }, n === now ? "on" : "act"));
+      r.append(btn("cancel", () => { padPick = false; this.PM(); }));
+      I.append(r); return;
+    }
+    const r = el("div", "apcrow"); r.append(el("span", "lbl", "does"), el("b", "", j[1]), el("span", "sp"), btn("CHANGE", () => { padPick = true; this.PM(); }, "act"));
+    if (!Pad.std(kind, code)) r.append(btn("↺", () => Pad.set({ [kind]: code, job: Pad.d.default[kind][code] })));
+    I.append(r, el("p", "", j[2]));
+    if (!Pad.std(kind, code)) I.append(el("p", "", "As it came: " + (PAD_JOB[Pad.d.default[kind][code]] || ["", "?"])[1] + "."));
+  },
+  S() { },
+};
 V.system = {
   build() {
     view.className = "v"; view.style.cssText = PHONE ? "grid-template-rows:auto 1fr auto" : "grid-template-columns:1fr 1fr;grid-template-rows:1fr auto";
     const box = (t, inner) => { const b = el("div", "box"); b.style.cssText = "overflow:hidden;min-height:0"; b.append(el("h3", "", t), inner); return b; };
     this.kv = el("div", "kv"); this.logEl = el("div", "log");
     const pg = el("div", "pg"); pg.style.cssText = "grid-template-columns:repeat(" + (PHONE ? 2 : 4) + ",1fr);grid-auto-rows:48px" + (PHONE ? "" : ";grid-column:span 2");
-    { const b = el("button", "bigpad", "APC40 map"); b.onclick = () => show("map"); pg.appendChild(b); pg.style.gridTemplateColumns = PHONE ? "repeat(3,1fr)" : "repeat(5,1fr)"; }
+    { const b = el("button", "bigpad", "APC40 map"); b.onclick = () => show("map"); pg.appendChild(b); pg.style.gridTemplateColumns = PHONE ? "repeat(3,1fr)" : "repeat(6,1fr)"; }
+    { const b = el("button", "bigpad", PHONE ? "Pad map" : "Controller map"); b.onclick = () => show("pad"); pg.appendChild(b); }
     [["Modules", "/"], ["Classic page", "/classic"], ["MIDI hub", "/midihub"], ["Clock", "/clock"]].forEach(([n, u]) => { const b = el("button", "bigpad", PHONE ? n.replace(" page", "") : n); b.onclick = () => { location.href = u + (tv ? "?tv=1" : ""); }; pg.appendChild(b); });
     const qb = el("div", "qrow"); if (!PHONE) qb.style.gridColumn = "span 2";
     const qc = (label, seg) => { const c = el("div", "qc"); c.append(el("span", "lbl", label), seg.el); qb.appendChild(c); return seg; };
@@ -1504,7 +1612,7 @@ function smStatus() {
 }
 function smTabs() {
   const tb = document.getElementById("tabs"); tb.textContent = "";
-  SM_TABS.forEach(t => { const b = el("button", "tab" + (t[0] === curName ? " on" : ""), t[1]); b.onclick = () => show(t[0]); tb.appendChild(b); });
+  SM_TABS.forEach(t => { const b = el("button", "tab" + (t[0] === (curName === "sm_pad" ? "sm_sys" : curName) ? " on" : ""), t[1]); b.onclick = () => show(t[0]); tb.appendChild(b); });
 }
 /* A fader in a narrow strip, with one meter bar beside its slot */
 function SmFader(onChange, bars) {
@@ -1865,12 +1973,38 @@ V.sm_loop = {
   N() { this.S(); }, P() { this.S(); },
 };
 
+/* SYS > PAD MAP on the small screen: what each control of the game controller does, lit while pressed.
+   To read, and RESET; a job is changed on a phone, laptop or TV (System > Controller map) */
+V.sm_pad = {
+  build() {
+    view.className = "sm sm-pad";
+    const list = el("div", "s-pl"); this.els = [];
+    for (const [kind, code] of PAD_AT.slice().sort((a, b) => (a[0] === b[0] ? 0 : a[0] === "btn" ? -1 : 1))) {
+      const r = el("div", "s-pr"), k = el("span", "s-k", (kind === "btn" ? PAD_HW[code] : PAD_AX[code]).replace(/ \(.*/, "").replace("up and down", "↕").replace("sideways", "↔").replace(",", "")), v = el("span", "s-v");
+      r.append(k, v); list.appendChild(r); this.els.push({ r, v, kind, code });
+    }
+    const bt = el("div", "s-bt"); this.msg = el("span", "s-msg");
+    const back = el("button", "b", "‹ SYS"); back.onclick = () => show("sm_sys");
+    this.reset = el("button", "b", "RESET"); this.reset.onclick = () => { if (!padSure) { padSure = true; return this.PM(); } padSure = false; Pad.set({ reset: true }); };
+    bt.append(back, this.msg, this.reset); view.append(list, bt);
+    padSure = false; Pad.load(); this.PM();
+  },
+  PM() {
+    const D = Pad.d;
+    for (const x of this.els) { const j = PAD_JOB[Pad.job(x.kind, x.code)] || ["", "?"]; x.v.textContent = j[1].replace("the selected track's ", "trk ").replace("the selected track", "trk").replace("the ", ""); x.v.classList.toggle("chg", !Pad.std(x.kind, x.code)); }
+    this.msg.textContent = !D ? "the box isn't answering" : D.device ? D.name : "no game controller plugged in";
+    this.reset.textContent = padSure ? "SURE?" : "RESET"; this.reset.classList.toggle("warn", padSure); this.reset.disabled = !D;
+    this.PL();
+  },
+  PL() { for (const x of this.els) x.r.classList.toggle("hit", !!(Pad.live[(x.kind === "btn" ? "b" : "a") + x.code])); },
+  S() { },
+};
 V.sm_sys = {
   build() {
     view.className = "sm sm-sys";
     this.kv = el("div", "s-kv"); this.log = el("div", "s-log");
     const bt = el("div", "s-bt");
-    [["MODULES", () => { location.href = "/?small=1"; }], ["SETTINGS", () => { location.href = "/settings?small=1"; }], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
+    [["MODULES", () => { location.href = "/?small=1"; }], ["SETTINGS", () => { location.href = "/settings?small=1"; }], ["PAD MAP", () => show("sm_pad")], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
     view.append(this.kv, this.log, bt);
     this.key = ""; this.L();
   },
@@ -1905,7 +2039,7 @@ const TABS = SMALL ? SM_TABS : [["perform", "Perform", "Perf"], ["steps", "Steps
 function buildTabs() {
   if (SMALL) return smTabs();
   const tb = document.getElementById("tabs"); tb.textContent = "";
-  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === (curName === "map" ? "system" : curName) ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
+  TABS.forEach((t, i) => { const b = el("button", "tab" + (t[0] === (curName === "map" || curName === "pad" ? "system" : curName) ? " on" : "")); if (!PHONE && !SHORT) b.appendChild(el("kbd", "", String(i + 1))); b.appendChild(document.createTextNode(t[1])); b.onclick = () => show(t[0]); tb.appendChild(b); });
   if (!PHONE && !SHORT) tb.append(el("span", "sp"), el("span", "lbl", "1-8 views · ◀ ▶ track · space play"));
 }
 function show(name) {
@@ -1975,6 +2109,8 @@ function connect() {
   es.addEventListener("bridge", e => { try { const b = JSON.parse(e.data); st.bridge = b; st.daisy = !!b.daisy; st.ctl = b.control || 0; topStatus(); call("B"); } catch (err) { } });
   es.addEventListener("xfer", e => { try { st.xfer = JSON.parse(e.data); call("X"); } catch (err) { } });
   es.addEventListener("ir", e => { try { const d = JSON.parse(e.data); remote(d.action, d.pad); } catch (err) { } });
+  es.addEventListener("pad", e => { try { const d = JSON.parse(e.data); if (d.b != null) Pad.live["b" + d.b] = d.on ? 1 : 0; else Pad.live["a" + d.a] = d.d; call("PL"); } catch (err) { } });
+  es.addEventListener("padmap", e => { try { if (Pad.d) Pad.d.map = JSON.parse(e.data); call("PM"); } catch (err) { } });
   es.onerror = () => { st.daisy = false; sendErr = "the box is not answering"; topStatus(); };
   es.onopen = () => { sendErr = ""; topStatus(); };
 }
