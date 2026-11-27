@@ -5,13 +5,16 @@ kiosk on a Raspberry Pi 4, with its own Daisy Seed, and the 3.5" touch screen
 on the Pi's header instead of on the Daisy. Nothing here replaces the T95
 setup; the code under `t95/` is shared and unchanged.
 
-## Status as of 2026-11-25
+## Status as of 2026-11-27
 
-The Pi runs the bridge, the settings helper and the kiosk from `main`,
-installed with the stock `t95/bridge/install.sh` and `t95/kiosk/install.sh`.
-A second Seed on its USB runs ApcBox. The screen shows the kiosk and takes
-touch, with a layout of its own (480x320). **No comparison with the T95 has
-been measured yet.**
+The Pi runs the bridge, the settings helper and the kiosk from `main`, installed with
+`t95/bridge/install.sh` and `t95/kiosk/install.sh`; `/opt/apcbox-bridge/VERSION` says which
+commit. On 2026-11-26 it ran on files copied over by hand; the install of 2026-11-27 from its
+own clone ended that: every installed file matched the repo afterwards, its
+`/etc/default/apcbox-bridge` was kept, nothing was mounted from its own card, and the Daisy,
+the game controller, the helper and HTTPS answered. A second Seed on its USB runs ApcBox
+(v13.34). The screen shows the kiosk and takes touch, with a layout of its own (480x320).
+**No comparison with the T95 has been measured yet.**
 
 ## Hardware and evidence
 
