@@ -13,6 +13,9 @@ MidiTest: fake controllers on ptys. Nothing forwarded before the Daisy says
 message, sysex in pieces, LED lines out in order, LED coalescing when a
 controller stops reading, controller and Daisy hotplug, a Daisy that stops
 reading while a controller floods, ping round trips.
+
+DecksTest: the Numark DJ module's bridge part, with the real deck engine
+(decks/build.sh first) and no sound card.
 """
 import errno
 import json
@@ -5447,6 +5450,194 @@ class JamTest(unittest.TestCase):
         self.assertGreater(size, 44 + 48000)
         self.assertEqual(struct.unpack("<I", head[40:44])[0], size - 44)
         self.assertEqual(subprocess.run(["pgrep", "-f", self.arecord], capture_output=True).stdout, b"")
+
+
+DECKD = os.path.join(REPO, "decks", "build", "deckd")
+NUMARK_HELLO = bytes.fromhex("f07e000601f7" "f000207f0301f7")
+NUMARK_BYE = bytes.fromhex("f000207f02f7")
+
+
+@unittest.skipUnless(os.path.exists(DECKD), "build the deck engine first (decks/build.sh)")
+class DecksTest(unittest.TestCase):
+    """The Numark DJ module's bridge part: the real deck engine (deckd, no sound card), a fake Numark on a pty"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dir = tempfile.mkdtemp(dir="/tmp")      # short: the engine's socket sits in it
+        cls.music = os.path.join(cls.dir, "music")
+        os.makedirs(os.path.join(cls.music, "sub"))
+        make_wav(os.path.join(cls.music, "one.wav"), secs=4.0)
+        make_wav(os.path.join(cls.music, "sub", "two.wav"), secs=2.0)
+        with open(os.path.join(cls.dir, "outside.wav"), "wb") as f:
+            f.write(b"x")
+        cls.numark = FakeController(os.path.join(cls.dir, "numark"))
+        cls.keys = FakeController(os.path.join(cls.dir, "keys"))
+        cls.http = free_port()
+        cls.proc = cls.start()
+        BridgeTest.http = cls.http
+        BridgeTest.wait_health(lambda h: len(h["controllers"]) == 2, 10)
+
+    @classmethod
+    def start(cls, *more):
+        p = subprocess.Popen(
+            [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
+             "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
+             "--midi", cls.numark.link + "=MixTrack Pro FX", "--midi", cls.keys.link + "=LPK25",
+             "--deckd", DECKD, "--decks-card", "null", "--music", cls.music] + list(more),
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+        cls.addClassCleanup(p.kill)
+        return p
+
+    def setUp(self):
+        BridgeTest.http = self.http
+
+    post = SettingsTest.post
+
+    def decks(self):
+        return json.loads(BridgeTest.get("/decks")[2])
+
+    def wait_decks(self, pred, timeout=5):
+        end = time.time() + timeout
+        d = None
+        while time.time() < end:
+            d = self.decks()
+            if pred(d):
+                return d
+            time.sleep(0.05)
+        raise AssertionError("the decks never matched: %s" % json.dumps({k: d[k] for k in d if k not in ("waves", "files")}))
+
+    def engines(self):
+        return subprocess.run(["pgrep", "-f", DECKD + " --socket " + self.dir], capture_output=True).stdout.split()
+
+    def test_d1_not_chosen_nothing_runs(self):
+        h = BridgeTest.health()
+        self.assertEqual((h["decks"]["wanted"], h["decks"]["running"], h["decks"]["engine"]), (False, False, True))
+        self.assertEqual(self.engines(), [])
+        self.numark.play([0x90, 0x00, 0x7F, 0xBF, 0x08, 0x7F])      # in ApcBox: to the Daisy that is not there; nothing breaks
+        code, out = self.post("/decks", {"a": "play 1 1"})
+        self.assertEqual(code, 503)
+        d = self.decks()
+        self.assertFalse(d["running"])
+        self.assertEqual(d["files"], ["one.wav", os.path.join("sub", "two.wav")])
+        self.assertNotIn("decks", json.loads(BridgeTest.get("/routes")[2])["destinations"])
+
+    def test_d2_a_module_without_a_page_is_not_offered(self):
+        code, out = self.post("/select", {"module": "dj"})
+        self.assertEqual(code, 400)
+        self.assertFalse(next(m for m in json.loads(BridgeTest.get("/state")[2])["modules"] if m["id"] == "dj")["ready"])
+
+    def test_d3_chosen_the_engine_runs_and_greets_the_controller(self):
+        self.proc.terminate(); self.proc.wait(8)
+        type(self).proc = self.start("--try-module", "dj")
+        BridgeTest.wait_health(lambda h: len(h["controllers"]) == 2, 10)
+        self.numark.received(0.2)
+        self.keys.received(0.2)
+        self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
+        h = BridgeTest.wait_health(lambda h: h["decks"]["connected"], 10)
+        self.assertEqual(h["decks"]["controllers"], ["MixTrack Pro FX"])
+        self.assertIsNone(h["decks"]["error"])
+        self.assertEqual(len(self.engines()), 1)
+        got = self.numark.received(1.0)
+        self.assertTrue(got.startswith(NUMARK_HELLO), got[:40].hex())
+        self.assertIn(bytes([0x90, 0x00, 0x01]), got)               # play, deck 1: dim
+        self.assertIn(bytes([0x91, 0x07, 0x7F]), got)               # scratch, deck 2: on
+        self.assertEqual(self.keys.received(0.3), b"")              # another controller gets none of it
+        self.assertIn("decks", json.loads(BridgeTest.get("/routes")[2])["destinations"])
+        d = self.wait_decks(lambda d: d["running"] and d["health"])
+        self.assertEqual((d["health"]["period"], d["health"]["buffer"], d["health"]["xruns"]), (64, 192, 0))
+
+    def test_d4_the_controller_plays_the_mixer_and_a_page_hears_of_it(self):
+        sse = SseClient(self.http)
+        self.addCleanup(sse.close)
+        time.sleep(0.3)
+        self.numark.play([0xBF, 0x08, 0x7F])                        # crossfader hard right
+        self.numark.play([0xB0, 0x1C, 0x00, 0xBE, 0x23, 0x7F])      # deck 1's fader down, master up
+        d = self.wait_decks(lambda d: d["mix"].get("xfader") == 1.0 and d["mix"]["master"] == 1.0 and d["decks"][0].get("volume") == 0.0)
+        self.assertEqual(d["decks"][1]["volume"], 1.0)
+        self.assertTrue(sse.wait_for(lambda s: any(e == "decks" and x["mix"].get("xfader") == 1.0 for e, x in s.named), 3))
+        self.keys.play([0xBF, 0x08, 0x00])                          # not routed to the decks
+        self.numark.play([0xF8, 0xF0, 0x7E, 0x00, 0xF7, 0xB1, 0x1C, 0x40])   # clock and sysex are not passed on; what follows is
+        d = self.wait_decks(lambda d: abs(d["decks"][1]["volume"] - 0.504) < 0.001)
+        self.assertEqual(d["mix"]["xfader"], 1.0)
+
+    def test_d5_a_page_asks(self):
+        self.assertEqual(self.post("/decks", {"a": "set master 0.5"})[0], 200)
+        self.assertEqual(self.post("/decks", {"a": "set rate 2 -0.04"})[0], 200)
+        d = self.wait_decks(lambda d: d["mix"]["master"] == 0.5 and d["decks"][1]["rate"] == -0.04)
+        for bad in ("", "reboot", "set bogus 1 1", "play 1 1\nload 1 /etc/passwd", "play one", "set master nan", "play 1 2 3 4", 7, None):
+            self.assertEqual(self.post("/decks", {"a": bad})[0], 400, bad)
+        for deck, f in ((1, "../outside.wav"), (1, "/etc/passwd"), (3, "one.wav"), (1, "nothere.wav"), (1, "sub"), (1, ""), (1, None)):
+            self.assertEqual(self.post("/decks", {"a": "load", "deck": deck, "file": f})[0], 400, f)
+        self.assertEqual(self.wait_decks(lambda d: True)["mix"]["master"], 0.5)
+
+    def test_d6_load_and_play(self):
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg loads the tracks")
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
+        d = self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and "1" in d["waves"], 10)
+        self.assertAlmostEqual(d["decks"][0]["len"], 4.0, delta=0.05)
+        self.assertEqual(len(d["waves"]["1"]["peaks"]), 1600)
+        self.assertEqual(d["waves"]["1"]["track"], d["decks"][0]["track"])
+        self.numark.received(0.2)
+        self.numark.play([0x90, 0x00, 0x7F, 0x90, 0x00, 0x00])      # play, deck 1
+        d = self.wait_decks(lambda d: d["decks"][0]["playing"] and d["decks"][0]["pos"] > 0.3)
+        self.assertIn(bytes([0x90, 0x00, 0x7F]), self.numark.received(0.4))      # its play light
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "sub/two.wav"})[0], 200)   # refused by the engine: it plays
+        time.sleep(0.5)
+        self.assertEqual(self.decks()["decks"][0]["name"], "one")
+        self.assertEqual(self.post("/decks", {"a": "play 1 0"})[0], 200)
+        self.wait_decks(lambda d: not d["decks"][0]["playing"])
+        self.numark.play([0xBF, 0x00, 0x01, 0x9F, 0x03, 0x7F])      # browse one on, LOAD on deck 2
+        d = self.wait_decks(lambda d: d["decks"][1].get("name") == "two", 10)
+        self.assertEqual(d["browse"]["name"], "two")
+
+    def test_d7_the_controller_comes_back(self):
+        self.numark.unplug()
+        BridgeTest.wait_health(lambda h: h["decks"]["controllers"] == [], 5)
+        self.numark.plug()
+        BridgeTest.wait_health(lambda h: h["decks"]["controllers"] == ["MixTrack Pro FX"], 5)
+        got = self.numark.received(1.0)
+        self.assertTrue(got.startswith(NUMARK_HELLO), got[:40].hex())
+        self.assertIn(bytes([0x90, 0x07, 0x7F]), got)               # every light again
+
+    def test_d8_the_engine_dies_and_is_started_again(self):
+        was = BridgeTest.health()["decks"]["starts"]
+        self.numark.received(0.2)
+        subprocess.run(["kill", "-9", self.engines()[0].decode()])
+        BridgeTest.wait_health(lambda h: h["decks"]["starts"] == was + 1 and h["decks"]["connected"], 10)
+        self.assertTrue(NUMARK_HELLO in self.numark.received(1.0))
+        self.numark.play([0xBF, 0x08, 0x00])
+        self.wait_decks(lambda d: d["mix"].get("xfader") == 0.0)
+
+    def test_d9_left_the_controller_is_put_back_and_the_engine_stops(self):
+        self.numark.received(0.2)
+        self.assertEqual(self.post("/select", {"module": "apcbox"})[0], 200)
+        BridgeTest.wait_health(lambda h: not h["decks"]["running"] and not h["decks"]["connected"], 5)
+        got = self.numark.received(0.5)
+        self.assertIn(NUMARK_BYE, got, got.hex())
+        self.assertEqual(self.engines(), [])
+        self.assertFalse(self.decks()["running"])
+        self.assertEqual(self.post("/decks", {"a": "play 1 1"})[0], 503)
+
+    def test_da_no_engine_no_card(self):
+        self.proc.terminate(); self.proc.wait(8)
+        type(self).proc = self.start("--try-module", "dj", "--decks-card", "NoSuchCard", "--asound", self.dir)
+        BridgeTest.wait_health(lambda h: "decks" in h, 10)
+        self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
+        h = BridgeTest.wait_health(lambda h: h["decks"]["error"], 5)
+        self.assertIn("no sound card called NoSuchCard", h["decks"]["error"])
+        self.assertEqual(self.engines(), [])
+        os.makedirs(os.path.join(self.dir, "NoSuchCard"))           # the card appears; the engine cannot open it and stops
+        BridgeTest.wait_health(lambda h: h["decks"]["starts"] >= 1, 8)
+
+    def test_db_stopping_the_bridge_stops_the_engine(self):
+        self.proc.terminate(); self.proc.wait(8)
+        type(self).proc = self.start("--try-module", "dj")
+        BridgeTest.wait_health(lambda h: h["decks"]["connected"], 10)   # the module chosen last is still the DJ one
+        self.assertEqual(len(self.engines()), 1)
+        self.proc.terminate()
+        self.proc.wait(8)
+        self.assertEqual(self.engines(), [])
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from .listen import Listen
 from .ble import Ble
 from .devices import Devices
 from .jam import Jam
+from .decks import Decks
 
 
 class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMixin):
@@ -99,6 +100,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
         self.xfer_wake = asyncio.Event()
         self.xfer_replies = asyncio.Queue()
         self.jam = Jam(self)
+        self.decks = Decks(self)
         self.net_init()
         self.clock = Clock(self, self.state.data.get("clock") or {})
 
@@ -132,6 +134,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
             "clock": self.clock.info(),
             "listen": self.listen.info(),
             "jam": self.jam.info(),
+            "decks": self.decks.info(),
         }
 
 
@@ -156,7 +159,7 @@ async def main_async(args):
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, me.cancel)  # finally blocks run (BY to peers)
     try:
         await asyncio.gather(*servers, b.serial_task(), b.midi_task(), b.control_task(),
-                             b.ir.task(), b.pad.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task(), b.jam.task())
+                             b.ir.task(), b.pad.task(), b.xfer_task(), b.hdmi.task(), b.net_task(), b.ble.task(), b.devices.task(), b.jam.task(), b.decks.task())
     finally:
         # Stop taking connections, and don't wait for the open ones. `async with server` did:
         # from Python 3.12 on Server.wait_closed() waits until every browser has left, and the
@@ -164,6 +167,7 @@ async def main_async(args):
         # were up and it killed the bridge (rig, 2026-11-24: every restart that night).
         # asyncio.run cancels the browsers' handlers once this returns; their finally blocks run.
         b.jam.stop_now()      # a take that is running: arecord closes its file
+        b.decks.stop_now()    # the deck engine goes with the bridge
         server.close()
         if tls:
             tls.close()
@@ -225,6 +229,16 @@ def main(argv=None):
     ap.add_argument("--loop-sync", type=int, default=1, choices=range(6),
                     help="alsaloop -S: how it follows the Daisy's clock. 1 (simple) lets the queue creep up to the whole "
                          "buffer over hours (153 ms seen on a Pi); 4 (samplerate) holds it")
+    ap.add_argument("--deckd", default=next((p for p in (os.path.join(here, "deckd"),
+                    os.path.join(here, "..", "..", "decks", "build", "deckd")) if os.path.exists(p)), None),
+                    help="the deck engine (decks/build.sh builds it); the Numark DJ module runs it")
+    ap.add_argument("--decks-card", default="FX", help="the sound card the decks play through, by its ALSA name "
+                    "(FX: the Numark Mixtrack Pro FX); null: no sound card (tests)")
+    ap.add_argument("--decks-period", type=int, default=64, help="frames a block of the decks' sound")
+    ap.add_argument("--decks-buffer", type=int, default=192, help="frames the decks keep queued on the card (192: 4.4 ms)")
+    ap.add_argument("--music", help="the decks' music folder (default: music, next to the state file)")
+    ap.add_argument("--try-module", action="append", default=[], metavar="ID",
+                    help="a module that has no page yet may be chosen all the same (POST /select); repeatable")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
     ap.add_argument("--sysblock", default="/sys/block", help="where the block devices are listed (is a card in the SD slot)")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")

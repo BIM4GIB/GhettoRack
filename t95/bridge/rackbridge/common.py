@@ -119,7 +119,8 @@ MODULES = [
     {"id": "dawsync", "name": "Cubase sync", "url": None, "ready": False, "needs": [], "profile": None,
      "about": "planned: a plugin in Cubase shares its transport (Link)", "routes": []},
     {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "needs": [], "profile": None,
-     "about": "later", "routes": []},
+     "about": "two decks on the box, played from a Numark Mixtrack Pro FX; no page yet",
+     "routes": [{"from": "MixTrack Pro FX", "to": "decks"}]},
 ]
 POST_MAX = 4096
 

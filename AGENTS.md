@@ -29,7 +29,8 @@ daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: 
             release/ApcBox.bin (latest built firmware)
 decks/      the deck engine for the Numark DJ module (deckd: two decks, mixer, the
             Numark Mixtrack Pro FX's map in numark.h; build.sh, engine_test.cpp;
-            its README says what is built and measured). No page or bridge part yet
+            its README says what is built and measured). The bridge runs it
+            (`t95/bridge/rackbridge/decks.py`). No page yet
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers, a game controller,
             remote, router, network MIDI), ui/ (selector, MIDI hub, clock, the
             ApcBox page: edit apcbox.css/.js, run build.py; VIEWS.md lists every screen;
@@ -64,7 +65,7 @@ tools/flash-seed.sh                # flash (pick the port)
 ```
 Tests: `daisy/sets_test.cpp` (pattern copy/undo, sets save/load/switching,
 touch, T95 controller routing, looper/quantise/keyboard controls), `hostcmd_test.cpp` (serial commands vs echo), `link_test.cpp` (resync keeps lines whole), `liverec_test.cpp`,
-`acid_engine_test.cpp`, `host_test.cpp`, `decks/engine_test.cpp` (the deck engine and the Numark map; `decks/build.sh` builds and names it), `reverb_test.cpp` (`daisy/reverb.h` against the library's reverb, sample for sample), `t95/bridge/test_bridge.py` (its end-to-end part
+`acid_engine_test.cpp`, `host_test.cpp`, `decks/engine_test.cpp` (the deck engine and the Numark map; `decks/build.sh` builds and names it), `reverb_test.cpp` (`daisy/reverb.h` against the library's reverb, sample for sample), `t95/bridge/test_bridge.py` (its `DecksTest` needs `decks/build.sh` first; its end-to-end part
 runs the firmware control code via `daisy/hostbuild/t95sim`, built by `build_host.sh`); build lines
 are at the top of each file or in `build_host.sh`. Run them after engine/box changes.
 

@@ -47,6 +47,11 @@ install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
 install -m 644 "$REPO/t95/ui/apcbox.html" "$DEST/apcbox.html"
 install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
 install -m 644 "$REPO/t95/ui/jam.html" "$DEST/jam.html"
+# The deck engine for the Numark DJ module (decks/README.md), built here for this box.
+# Without it the module says so and everything else works.
+{ command -v g++ >/dev/null && [ -f /usr/include/alsa/asoundlib.h ] || \
+    { apt-get update && apt-get install -y --no-install-recommends g++ libasound2-dev; }; } && \
+  OUT="$DEST" DECKD_ONLY=1 sh "$REPO/decks/build.sh" || echo "note: no deck engine; the Numark DJ module stays off"
 # Settings: the helper that does the few things needing root (t95/helper/README.md).
 # The bridge reaches it through the group; networks it joins and its PIN stay on the box.
 getent group ghettorack >/dev/null || groupadd --system ghettorack

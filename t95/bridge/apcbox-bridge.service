@@ -18,7 +18,11 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-# No real-time priority: this is telemetry and web serving, not timing work
+# No real-time priority for the bridge: this is telemetry and web serving, not timing work.
+# The limits below are for the deck engine it starts (deckd, the Numark DJ module): one audio
+# thread there asks for real-time priority and holds its tracks in memory (decks/README.md).
+LimitRTPRIO=75
+LimitMEMLOCK=infinity
 
 [Install]
 WantedBy=multi-user.target

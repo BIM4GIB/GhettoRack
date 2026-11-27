@@ -1,7 +1,7 @@
 """The router: any MIDI source to any destination, by device name.
 
 Sources and destinations are the ports (USB and network MIDI sessions) plus
-"daisy". A route: {"from": name or "*", "to": name or "daisy", "ch": 0 (all)
+"daisy" and, as a destination, "decks" (the DJ module's engine, decks.py). A route: {"from": name or "*", "to": name or "daisy", "ch": 0 (all)
 or 1-16 (then channel messages of that channel only), "remap": 0 or 1-16, "types": subset of ROUTE_TYPES (missing: all)}.
 The active module's default routes plus its own (set on its page, saved
 per module, with named presets) are applied. Only ports routed to the Daisy
@@ -88,6 +88,11 @@ class RouterMixin:
                 if not self.ctl_send(b"%sM%d %s\n" % (ESC, p.num, out.hex().encode())):
                     p.dropped_in += 1
                 sent = True
+            elif r["to"] == "decks":
+                if ty in ("clock", "sysex"):
+                    continue           # the decks keep their own time, and take no sysex
+                self.decks.midi_in(out)
+                sent = True
             else:
                 q = self.port_by_name(r["to"])
                 if q is not None:
@@ -125,7 +130,7 @@ class RouterMixin:
         m = self.module()
         dests = [p.name for p in sorted(self.ports.values(), key=lambda p: p.num)]
         return {"module": m["id"], "defaults": m["routes"], "routes": self.state.data["routes"].get(m["id"], []),
-                "sources": dests, "destinations": dests + (["daisy"] if self.fd is not None else []),
+                "sources": dests, "destinations": dests + (["daisy"] if self.fd is not None else []) + (["decks"] if self.decks.connected() else []),
                 "presets": sorted(self.state.data["presets"].get(m["id"], {})), "types": list(ROUTE_TYPES),
                 "net": self.net_info()}
 

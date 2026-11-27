@@ -153,7 +153,7 @@ class WebMixin:
             return 400, {"error": "JSON object expected"}
         if path == "/select":
             m = d.get("module")
-            if m not in [x["id"] for x in MODULES if x["ready"]]:
+            if m not in [x["id"] for x in MODULES if x["ready"] or x["id"] in self.args.try_module]:
                 return 400, {"error": "unknown or unready module"}
             self.state.data["last"] = m
             self.state.save()
@@ -196,6 +196,8 @@ class WebMixin:
             return self.set_routes(d.get("routes"))
         if path == "/do":
             return self.ui_do(d.get("a"))
+        if path == "/decks":
+            return self.decks.do(d)
         if path == "/clock":
             return self.clock.set(d)
         if path == "/clock/transport":
@@ -348,6 +350,9 @@ class WebMixin:
             elif path == "/clock":
                 body = dict(self.clock.info(), ports=[p.name for p in sorted(self.ports.values(), key=lambda p: p.num)])
                 await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
+            elif path == "/decks":             # the DJ module's engine: what it is doing (decks.py)
+                out = await asyncio.get_running_loop().run_in_executor(None, self.decks.full)
+                await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/jam" and "json" not in params:
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["jam"])
             elif path == "/jam":
