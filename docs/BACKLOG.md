@@ -26,6 +26,16 @@ protocol 11). No report line changed.
   loaded again afterwards so nothing stays marked unsaved.
 - Not there: a list of a folder's files (needs new report lines).
 
+## Names on the 3.5" screen (2026-11-27, browser-tested)
+
+- ApcBox LIB > SETS: SAVE AS NEW (a name typed, or none for one made by itself), RENAME, DELETE
+  beside LOAD, SAVE HERE and DEFAULT SET. LIB > KITS: SAVE 1-8 / 9-16 (the selected track's page)
+  under a typed name, asking before it replaces a kit; RENAME and DELETE for kits on the card.
+  MIDI hub > SAVED: SAVE AS NEW asks for the name. Jam recorder: RENAME (2026-11-26).
+- The ApcBox page has a keyboard of its own (`smKeyboard`, the keys a name on the Daisy's card
+  may have); the other pages use the one in `small.js`.
+- Still not on the small screen: renaming a hub preset (the bridge has no call for it).
+
 ## A game controller on the box (2026-11-26, on the Pi, real presses NOT watched yet)
 
 - A PlayStation 3 pad by USB cable: the Pi's kernel knows it (17 buttons, both sticks and the

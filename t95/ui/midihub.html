@@ -207,7 +207,10 @@ function small() {
       const has = R.presets.includes(pick), side = el("div", "g-side"); side.style.gridTemplateRows = "repeat(3,1fr) 40px";
       const ld = Small.btn("LOAD", async () => { const r = await post("/presets/load", { name: pick }); sel = null; if (!r.error) say(pick + " loaded"); load(); }, has ? "go" : ""); ld.disabled = !has;
       const dl = Small.btn(sure === pick && has ? "SURE?" : "DELETE", async () => { if (sure !== pick) { sure = pick; return build(); } sure = ""; await post("/presets/delete", { name: pick }); pick = ""; load(); }, sure === pick && has ? "warn" : ""); dl.disabled = !has;
-      const sv = Small.btn("SAVE AS NEW", async () => { let k = 1; while (R.presets.includes("preset " + k)) k++; const r = await post("/presets/save", { name: "preset " + k }); if (!r.error) { pick = "preset " + k; say("saved as preset " + k); } load(); });
+      const sv = Small.btn("SAVE AS NEW", async () => { let k = 1; while (R.presets.includes("preset " + k)) k++;
+        const name = await Small.keyboard({ title: "preset name", value: "preset " + k, max: 24 }); if (name === null || !name.trim()) return;
+        if (R.presets.includes(name.trim())) return say("there is a preset called " + name.trim() + " already", true);
+        const r = await post("/presets/save", { name: name.trim() }); if (!r.error) { pick = name.trim(); say("saved as " + pick); } load(); });
       side.append(ld, sv, dl, pg.nav);
       if (!note) U.msg.textContent = R.presets.length ? "" : "no presets yet: SAVE AS NEW keeps the routing as it is now";
       root.append(pg.el, side, U.msg); F.view.appendChild(root);

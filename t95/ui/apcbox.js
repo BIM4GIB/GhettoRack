@@ -1614,6 +1614,23 @@ function smTabs() {
   const tb = document.getElementById("tabs"); tb.textContent = "";
   SM_TABS.forEach(t => { const b = el("button", "tab" + (t[0] === (curName === "sm_pad" ? "sm_sys" : curName) ? " on" : ""), t[1]); b.onclick = () => show(t[0]); tb.appendChild(b); });
 }
+/* Typing a name on the 480x320 screen: covers the frame, resolves with the name or null on CANCEL.
+   Names on the Daisy's card are a-z, 0-9, space and "-", up to 16: those are the keys (the same
+   keyboard, with more on it, is in small.js for the other pages) */
+function smKeyboard(opts) {
+  return new Promise(done => {
+    const o = el("div", "s-kb"), max = opts.max || 16; let val = (opts.value || "").slice(0, max);
+    const head = el("div", "s-kh"), out = el("span", "s-kv"); head.append(el("span", "s-kt", opts.title || "name"), out);
+    const keys = el("div", "s-kk"), foot = el("div", "s-kf");
+    const end = v => { o.remove(); done(v); }, draw = () => { out.textContent = val + "▏"; };
+    const key = (t, f, cls) => { const b = el("button", "b " + (cls || ""), t); b.onclick = () => { f(); draw(); }; return b; };
+    for (const row of ["1234567890", "qwertyuiop", "asdfghjkl-", "zxcvbnm"]) for (let i = 0; i < 10; i++) { const c = row[i];
+      keys.appendChild(c ? key(c, () => { if (val.length < max) val += c; }) : el("span")); }
+    foot.append(key("SPACE", () => { if (val.length < max && val && !val.endsWith(" ")) val += " "; }), key("DEL", () => { val = val.slice(0, -1); }),
+      key("CANCEL", () => end(null)), key("OK", () => end(val.trim()), "go"));
+    o.append(head, keys, foot); document.querySelector(".app").appendChild(o); draw();
+  });
+}
 /* A fader in a narrow strip, with one meter bar beside its slot */
 function SmFader(onChange, bars) {
   const f = el("div", "s-sf"), cap = el("i", "s-cap"), lv = [];
@@ -1878,16 +1895,40 @@ V.sm_lib = {
       mk("HEAR TRACK " + (st.sel + 1), () => act(`audition ${st.sel + 1}`));
       mk("FOLDER UP", () => { const p = smLibPath[smLib]; smLibPath[smLib] = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : ""; smLibPage = 0; this.load(); }, "", !smLibPath[smLib]);
     } else if (smLib === "kits") {
+      /* a kit made on the box is tracks 1-8 or 9-16 as they are now; which, follows the selected track.
+         Built-in kits can be loaded only; the ones on the card can be renamed and deleted too */
+      const pg = st.sel >> 3, nb = st.kitNb == null ? 0 : st.kitNb, card = it && it.kit >= nb, old = st.kitNb == null;
+      const find = n => st.kits.findIndex(k => (k || "").toLowerCase() === n);
       mk("LOAD ON 1-8", () => { act(`kit ${it.kit + 1} 0`); this.say(it.name + ": loading into tracks 1-8"); }, "go", !it);
       mk("LOAD ON 9-16", () => { act(`kit ${it.kit + 1} 1`); this.say(it.name + ": loading into tracks 9-16"); }, "go", !it);
+      mk(this.sure.startsWith("over ") ? "REPLACE?" : "SAVE " + (pg ? "9-16" : "1-8"), async () => {
+        if (this.sure.startsWith("over ")) { const n = this.sure.slice(5); this.sure = ""; act(`kit over ${pg} ${n}`); this.say("saving tracks " + (pg ? "9-16" : "1-8") + " as " + n); return this.render(); }
+        const n = cleanName(await smKeyboard({ title: "kit name" }) || ""); if (!n) return;
+        const ex = find(n);
+        if (ex >= 0 && ex < nb) return this.say(st.kits[ex] + " is built in: pick another name", true);
+        if (ex >= 0) { this.sure = "over " + n; this.say("there is a kit " + n + ": tap REPLACE? to save over it"); return this.render(); }
+        act(`kit save ${pg} ${n}`); this.say("saving tracks " + (pg ? "9-16" : "1-8") + " as " + n);
+      }, this.sure.startsWith("over ") ? "warn" : "", old);
+      mk("RENAME", async () => { const from = it.kit, n = cleanName(await smKeyboard({ title: "kit name", value: it.name }) || ""); if (!n || n === it.name.toLowerCase()) return;
+        if (find(n) >= 0) return this.say("there is a kit called " + n + " already", true);
+        act(`kit rename ${from + 1} ${n}`); this.pick = -1; this.say("renamed to " + n); }, "", !card);
+      mk(this.sure === "kdel" ? "SURE?" : "DELETE", () => { if (this.sure !== "kdel") { this.sure = "kdel"; return this.render(); } this.sure = ""; act("kit delete " + (it.kit + 1)); this.say(it.name + " deleted"); this.pick = -1; this.render(); }, this.sure === "kdel" ? "warn" : "", !card);
       mk("UNDO KIT", () => act("lrec undo"), "", st.lp.undo < 101);
     } else {
+      const open = () => st.sets.filter(x => x.exists).length;
       mk("LOAD", () => { act("set load " + (it.set + 1)); this.say("set " + (it.set + 1) + ": switches on the bar"); }, "go", !it || !it.exists);
       mk(this.sure === "save" ? "SURE?" : "SAVE HERE", () => { if (this.sure !== "save" && it.exists) { this.sure = "save"; return this.render(); } act((it.exists && st.ctl >= 12 ? "set over " : "set save ") + (it.set + 1)); this.sure = ""; this.say("saving to slot " + (it.set + 1)); this.render(); }, this.sure === "save" ? "warn" : "", !it);
+      mk("SAVE AS NEW", async () => { if (open() >= 8) return this.say("all 8 slots are used: delete one, or SAVE HERE", true);
+        const n = await smKeyboard({ title: "set name (OK alone: a name by itself)" }); if (n === null) return;
+        act(("set new " + cleanName(n)).trim()); this.say("saving to the first free slot" + (n ? " as " + cleanName(n) : "")); });
+      mk("RENAME", async () => { const slot = it.set, n = cleanName(await smKeyboard({ title: "set name", value: it.name }) || ""); if (!n || n === it.name) return;
+        act("set name " + (slot + 1) + " " + n); this.say("slot " + (slot + 1) + ": " + n); }, "", !it || !it.exists);
+      mk(this.sure === "sdel" ? "SURE?" : "DELETE", () => { if (this.sure !== "sdel") { this.sure = "sdel"; return this.render(); } this.sure = ""; act("set delete " + (it.set + 1)); this.say("slot " + (it.set + 1) + " deleted"); this.render(); }, this.sure === "sdel" ? "warn" : "", !it || !it.exists);
       mk(this.sure === "demo" ? "SURE?" : "DEFAULT SET", () => { if (st.ctl < 13) return this.say("needs firmware v13.34 or newer on the Daisy", true);
         if (this.sure !== "demo" && st.dirty) { this.sure = "demo"; this.say("unsaved changes go"); return this.render(); }
         act("set demo"); this.sure = ""; this.say("default set: switches on the bar"); this.render(); }, this.sure === "demo" ? "warn" : "");
     }
+    this.side.style.gridTemplateRows = `repeat(${this.side.children.length},1fr) 34px`;
     const nav = el("div", "s-nav"), pv = el("button", "b", "‹"), nx = el("button", "b", "›");
     pv.disabled = smLibPage === 0; nx.disabled = smLibPage >= pages - 1;
     pv.onclick = () => { smLibPage--; this.pick = -1; this.render(); }; nx.onclick = () => { smLibPage++; this.pick = -1; this.render(); };

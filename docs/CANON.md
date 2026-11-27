@@ -92,7 +92,7 @@ exactly that.
 |---|---|---|
 | A button | `Small.btn(text, fn, cls)`; `cls`: `on`, `go`, `warn`, `rec` | a styled `div`, a link |
 | A list | `Small.pager(per, row)` | a scrolling box |
-| Text from the user | `Small.keyboard({ title, value, max, secret })` | an `<input>`: there is no keyboard on the box |
+| Text from the user | `Small.keyboard({ title, value, max, secret })`; on the ApcBox page, which is its own file, `smKeyboard({ title, value, max })` with only the keys a name on the Daisy's card may have | an `<input>`: there is no keyboard on the box |
 | A PIN or a number to type | `Small.numpad({ title, max })` | the keyboard |
 | A number to nudge | a stepper, `‹ value ›`, applied at each tap | a field and a SAVE |
 | One of a few | a row of buttons, the chosen one `on` | a dropdown: `<select>` does not work by touch here |

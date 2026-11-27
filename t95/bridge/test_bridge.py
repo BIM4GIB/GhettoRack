@@ -839,21 +839,33 @@ class RouterTest(unittest.TestCase):
             self.assertEqual(cell(2, 2).text_content(), "1>10 note")
             if shots:
                 pg.screenshot(path=os.path.join(shots, "small-hub-grid.png"))
-            # presets: saved under a name of its own (no keyboard on the screen), loaded, deleted after asking
+            # presets: saved under a name typed on the screen's keyboard (it offers "preset 1"), loaded, deleted after asking
             pg.locator(".g-tab", has_text="SAVED").click()
+            had = list(self.routes()["presets"])                                        # (other tests leave presets of their own)
             pg.locator(".g-b", has_text="SAVE AS NEW").click()
+            pg.wait_for_selector(".g-kb")
+            self.assertEqual(pg.locator(".g-kval").text_content(), "preset 1\u258f")
+            pg.locator(".g-kfoot .g-b", has_text="CANCEL").click()
+            time.sleep(0.3)
+            self.assertEqual(list(self.routes()["presets"]), had)                       # CANCEL: nothing saved
+            pg.locator(".g-b", has_text="SAVE AS NEW").click()
+            for _ in range(8):
+                pg.locator(".g-kfoot .g-b", has_text="DEL").click()
+            for c in "live":
+                pg.locator(".g-keys .g-b", has_text=re.compile("^" + c + "$")).click()
+            pg.locator(".g-kfoot .g-b", has_text="OK").click()
             pg.wait_for_selector(".g-li.on")
-            self.assertEqual(pg.locator(".g-li.on .g-nm").text_content(), "preset 1")
+            self.assertEqual(pg.locator(".g-li.on .g-nm").text_content(), "live")
             self.assertEqual(pg.evaluate(inside), [[], [500, 320]], "hub, SAVED")
             self.post("/routes", {"routes": []})
             pg.locator(".g-b", has_text="LOAD").click()
             routes_are([{"from": "LPK25", "to": "Synth", "ch": 1, "remap": 10, "types": ["note"]}])
             pg.locator(".g-b", has_text="DELETE").click()
             pg.wait_for_selector(".g-b.warn")
-            self.assertIn("preset 1", self.routes()["presets"])
+            self.assertIn("live", self.routes()["presets"])
             pg.locator(".g-b", has_text="SURE?").click()
-            pg.wait_for_function("![...document.querySelectorAll('.g-li .g-nm')].some(e => e.textContent === 'preset 1')")    # (other tests leave presets of their own)
-            self.assertNotIn("preset 1", self.routes()["presets"])
+            pg.wait_for_function("![...document.querySelectorAll('.g-li .g-nm')].some(e => e.textContent === 'live')")    # (other tests leave presets of their own)
+            self.assertNotIn("live", self.routes()["presets"])
             # the network list
             pg.locator(".g-tab", has_text="NET").click()
             pg.wait_for_selector(".g-hint")
@@ -2201,6 +2213,101 @@ class PageControlTest(unittest.TestCase):
             b.close()
         self.assertEqual(errors, [])
         self.do("track 1", "tempo %d" % bpm)
+
+    def test_p58b_names_on_the_small_screen(self):
+        """LIB > SETS and KITS on the 3.5 inch screen: save as new with a name typed on the screen's keyboard, rename, delete"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        self.assertTrue(self.box.wait_for(lambda c: self.s(13) == 1))            # the card is there
+        sets = lambda: {int(l.split()[1]): l.split(" ", 7)[7] for l in list(self.box.lines) if l.startswith("J ") and len(l.split()) > 7 and l == self.last(" ".join(l.split()[:2]) + " ")}
+        kits = lambda: sorted(os.listdir(os.path.join(self.card, "kits"))) if os.path.isdir(os.path.join(self.card, "kits")) else []
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            errors = []
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.goto("http://127.0.0.1:%d/apcbox?small=1" % self.http)
+            pg.locator(".tab", has_text="LIB").click()
+            pg.locator(".s-lt .b", has_text="SETS").click()
+            side = lambda: pg.locator(".sm-lib .s-ls > .b")
+            self.assertEqual(side().all_text_contents(), ["LOAD", "SAVE HERE", "SAVE AS NEW", "RENAME", "DELETE", "DEFAULT SET"])
+            fit = "[...document.querySelectorAll('.sm-lib .s-ls .b, .s-kb .b, .s-kb .s-kh')].every(e => { const r = e.getBoundingClientRect(); return r.right <= 481 && r.bottom <= 321 && r.height >= 28; })"
+            self.assertTrue(pg.evaluate(fit))
+            typed = lambda t: [pg.locator(".s-kk .b", has_text=re.compile("^" + re.escape(c) + "$")).click() if c != " " else pg.locator(".s-kf .b", has_text="SPACE").click() for c in t]
+            # SAVE AS NEW: the keyboard covers the frame; CANCEL saves nothing; a name typed is the set's name
+            side().nth(2).click()
+            pg.wait_for_selector(".s-kb")
+            self.assertEqual(pg.evaluate("(() => { const r = document.querySelector('.s-kb').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })()"), [0, 0, 480, 320])
+            self.assertTrue(pg.evaluate(fit))
+            typed("x")
+            pg.locator(".s-kf .b", has_text="CANCEL").click()
+            time.sleep(0.5)
+            self.assertEqual(sets(), {})
+            side().nth(2).click()
+            typed("jam  7-b")
+            if os.environ.get("APCBOX_SHOTS"):
+                pg.screenshot(path=os.path.join(os.environ["APCBOX_SHOTS"], "small-keyboard.png"))
+            pg.locator(".s-kf .b", has_text="DEL").click()
+            self.assertEqual(pg.locator(".s-kv").text_content(), "jam 7-\u258f")              # one space, not two
+            pg.locator(".s-kf .b", has_text="OK").click()
+            self.assertTrue(self.box.wait_for(lambda c: sets() == {0: "jam 7-"} and self.s(55) == 0, 20), sets())
+            pg.wait_for_function("document.querySelector('.sm-lib .s-li .s-nm').textContent.includes('jam 7-')")
+            # RENAME starts from the name it has; DELETE asks
+            pg.locator(".sm-lib .s-li").first.click()
+            side().nth(3).click()
+            self.assertEqual(pg.locator(".s-kv").text_content(), "jam 7-\u258f")
+            typed("9")
+            pg.locator(".s-kf .b", has_text="OK").click()
+            self.assertTrue(self.box.wait_for(lambda c: sets() == {0: "jam 7-9"}, 10), sets())
+            pg.locator(".sm-lib .s-li").first.click()
+            side().nth(4).click()
+            self.assertEqual((side().nth(4).text_content(), sets()), ("SURE?", {0: "jam 7-9"}))
+            if os.environ.get("APCBOX_SHOTS"):
+                pg.screenshot(path=os.path.join(os.environ["APCBOX_SHOTS"], "small-sets.png"))
+            side().nth(4).click()
+            self.assertTrue(self.box.wait_for(lambda c: self.last("J 0 ") == "J 0 0", 10), self.last("J 0 "))
+            # KITS: tracks 1-8 saved under a typed name, renamed, deleted; a built-in kit can't be renamed or deleted
+            self.do("track 2")
+            pg.locator(".s-lt .b", has_text="KITS").click()
+            self.assertEqual(side().all_text_contents(), ["LOAD ON 1-8", "LOAD ON 9-16", "SAVE 1-8", "RENAME", "DELETE", "UNDO KIT"])
+            pg.locator(".sm-lib .s-li").first.click()
+            self.assertTrue(side().nth(3).is_disabled() and side().nth(4).is_disabled())
+            before = kits()
+            side().nth(2).click()
+            typed("small kit")
+            pg.locator(".s-kf .b", has_text="OK").click()
+            self.assertTrue(self.box.wait_for(lambda c: kits() == sorted(before + ["small kit"]), 20), kits())
+            pg.wait_for_function("document.querySelector('.sm-lib .s-msg').textContent.includes('small kit')")
+            time.sleep(1.0)
+            row = lambda name: pg.locator(".sm-lib .s-li", has_text=name)
+            for _ in range(4):                                                      # it may be on a later page of the list
+                if row("small kit").count():
+                    break
+                pg.locator(".sm-lib .s-nav .b").last.click()
+            row("small kit").click()
+            side().nth(2).click()                                                   # the same name again: asks before replacing
+            typed("small kit")
+            pg.locator(".s-kf .b", has_text="OK").click()
+            pg.wait_for_function("document.querySelectorAll('.sm-lib .s-ls > .b')[2].textContent === 'REPLACE?'")
+            row("small kit").click()                                                # picking something else drops the question
+            self.assertEqual(side().nth(2).text_content(), "SAVE 1-8")
+            side().nth(3).click()
+            self.assertEqual(pg.locator(".s-kv").text_content(), "small kit\u258f")
+            typed("2")
+            pg.locator(".s-kf .b", has_text="OK").click()
+            self.assertTrue(self.box.wait_for(lambda c: "small kit2" in kits() and "small kit" not in kits(), 10), kits())
+            pg.wait_for_function("[...document.querySelectorAll('.sm-lib .s-li')].some(e => e.textContent.includes('small kit2'))")
+            row("small kit2").click()
+            side().nth(4).click()
+            side().nth(4).click()
+            self.assertTrue(self.box.wait_for(lambda c: kits() == before, 10), kits())
+            pg.close()
+            b.close()
+        self.assertEqual(errors, [])
+        self.assertFalse(os.path.exists(os.path.join(self.card, "kits", "small kit2")))
+        self.do("track 1")
 
     def test_p59_a_game_controller(self):
         """A PlayStation pad on the box: buttons are the remote's actions for the pages, start and select go to
