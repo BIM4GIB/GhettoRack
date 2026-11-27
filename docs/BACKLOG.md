@@ -26,8 +26,14 @@ status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
   one of 8 s that nothing starts; only trial builds run one, 20 s). Before it is on, the longest
   main-loop pass has to be measured with a card load and a set switch running, or it resets a
   working box. **Not built: a wire** from a Pi header pin to the Seed's reset, for a Seed that
-  no software reaches; whether the Seed has its reset on a pin is not checked. **Not tried on a
-  Seed**: the reset itself (the desk tests see the action arrive and the page's buttons).
+  no software reaches; whether the Seed has its reset on a pin is not checked.
+- **On the Pi rig's Seed (2026-11-27, through the bridge's `/do`, not by touch):** `restart`:
+  the Seed left the USB and was back 5.0 s later on v13.35, on the default set (nothing was
+  saved), 0 bad lines. `folder 1`, `files 0 5`: five `BL` lines with the names in `samples/bass`;
+  `file at 2` loaded the third. A 2.3 s cut of a jam take sent from the box to track 12, then
+  `lrec undo` (the 909 open hat back) and `lrec redo` (the cut back). For the watchdog: the
+  Seed's own log gave a slowest main-loop pass of 522 ms in that stretch. Not seen: the buttons
+  on the 3.5" screen under a finger, the sound of any of it.
 - Tested: `sets_test.cpp` (undo, redo, undo, redo of a sent sample with the sound compared;
   `files` and `file at` with bad values), the bridge suite against the firmware's control code
   (`test_p58` the list, `test_e2d_sample_to_the_real_firmware` undo and redo).
