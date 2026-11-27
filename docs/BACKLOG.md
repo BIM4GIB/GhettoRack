@@ -36,7 +36,8 @@ protocol 11). No report line changed.
   found the real pad; nobody has pressed a button on it with this running.
 - 2026-11-27: a map of it, like the APC40's: System > Controller map draws the pad, lights what is
   pressed, and gives a control another job (`GET` / `POST /pad`, kept in `state.json`); SYS > PAD
-  MAP on the 3.5" screen reads it and resets. Browser-tested with a stand-in pad.
+  MAP on the 3.5" screen reads it and resets. Browser-tested with a stand-in pad. Rene at the
+  rig with the real pad: the drawing matches the buttons.
 - Known gap: only the ApcBox page and the big layouts of the others act on remote actions. The
   small layouts of the start screen, jam recorder, clock, hub and Settings do not: the D-pad does
   nothing there yet. That wants one shared piece in `t95/ui/small.js` (move between buttons,
