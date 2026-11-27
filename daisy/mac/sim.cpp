@@ -815,6 +815,7 @@ int main(int argc, char** argv)
         if(resync_req.exchange(false))
             BoxResync();
         BoxPoll(now);
+        BoxTakeRestart(); // no board to reset here
         FlushLeds(now);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

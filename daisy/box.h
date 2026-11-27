@@ -14,7 +14,7 @@
 namespace ab
 {
 /** The firmware's version: the start line of the log and the `VF` report line */
-constexpr char kFirmware[] = "13.34";
+constexpr char kFirmware[] = "13.35";
 
 /** One APC40 LED or knob ring: wanted value and last value confirmed sent */
 struct LedSlot
@@ -114,6 +114,9 @@ void BoxKeysGone();
 void BoxPoll(uint32_t now);
 /** Resend the whole state on the monitor stream */
 void BoxResync();
+/** True once after a page asked for a restart (`restart` in ESC U): the platform resets the
+ *  board. Where there is no board to reset (the Mac build) it is taken and dropped */
+bool BoxTakeRestart();
 
 LedSlot* BoxLeds(int* n);
 /** 128x64 OLED image in SSD1306 page order (1024 bytes); the version

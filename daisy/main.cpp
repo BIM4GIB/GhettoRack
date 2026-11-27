@@ -1260,6 +1260,14 @@ int main(void)
             System::Delay(50);
             System::ResetToBootloader(System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
+        if(BoxTakeRestart())
+        {
+            /* a page asked: start again as the RESET button does. The bootloader waits its
+               few seconds, then starts ApcBox */
+            hw.SetLed(false);
+            System::Delay(50);
+            NVIC_SystemReset();
+        }
         if(ui_link.TakeResync())
         {
             BoxResync();

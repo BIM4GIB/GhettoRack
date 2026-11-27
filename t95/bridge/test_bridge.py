@@ -1620,6 +1620,14 @@ class EndToEndTest(unittest.TestCase):
         t = SampleTest.wait_xfer(self, out["id"])
         self.assertEqual(t["state"], "done", t)
         self.assertTrue(c.wait_for(lambda c: "N 2 e2e_tone.wav" in c.lines), [l for l in c.lines if l.startswith("N 2")])
+        # v13.35: undo gives back what the track held, redo the sample (kept in the Daisy's undo memory)
+        n2 = lambda c: [l for l in c.lines if l.startswith("N 2 ")][-1]
+        lp = lambda c: [int(x) for x in [l for l in c.lines if l.startswith("LP ")][-1].split()[1:]]
+        self.assertTrue(c.wait_for(lambda c: lp(c)[7] == 3, 5), lp(c))
+        self.assertEqual(SampleTest.post(self, "/do", {"a": ["lrec undo"]})[0], 200)
+        self.assertTrue(c.wait_for(lambda c: n2(c) != "N 2 e2e_tone.wav" and lp(c)[8] == 3, 5), (n2(c), lp(c)))
+        self.assertEqual(SampleTest.post(self, "/do", {"a": ["lrec redo"]})[0], 200)
+        self.assertTrue(c.wait_for(lambda c: n2(c) == "N 2 e2e_tone.wav" and lp(c)[7] == 3, 5), (n2(c), lp(c)))
         print("\n  2 s sample to the firmware over a pty: %d KB in %.2f s (%s KB/s)" % (
             t["bytes"] // 1024, t["seconds"], t["kb_per_s"]))
         c.close()
@@ -1786,7 +1794,7 @@ class PageControlTest(unittest.TestCase):
     def test_p1_no_controller_and_the_page_still_drives(self):
         h = BridgeTest.health()
         self.assertEqual(h["controllers"], [])
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 13)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 14)
         self.assertEqual(self.do("mute 3 1", "solo 9 1", "track 5")[0], 200)
         self.assertTrue(self.box.wait_for(lambda c: self.s(19) & 4 and self.s(20) & 256 and self.s(7) == 4))
         self.do("mute 3 0", "solo 9 0", "track 1")
@@ -2238,7 +2246,7 @@ class PageControlTest(unittest.TestCase):
             from playwright.sync_api import sync_playwright
         except ImportError:
             self.skipTest("playwright not installed")
-        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 13)
+        self.assertEqual(json.loads(BridgeTest.get("/caps")[2])["control_version"], 14)
         self.do("track 4")
         self.assertTrue(self.box.wait_for(lambda c: self.s(7) == 3))
         name = lambda: self.last("N 3 ")[4:]
@@ -2253,35 +2261,42 @@ class PageControlTest(unittest.TestCase):
             pg.wait_for_selector(".sm-lib .s-lt")
             self.assertEqual(pg.locator(".sm-lib .s-lt .b").all_text_contents(), ["LIBRARY", "BOX CARD", "DAISY CARD", "KITS", "SETS"])
             pg.locator(".s-lt .b", has_text="DAISY CARD").click()
-            pg.wait_for_function("document.querySelector('.s-dcs') && document.querySelector('.s-dcs').textContent.startsWith('Card in')")
+            pg.wait_for_function("document.querySelector('.s-dc') && document.querySelector('.sm-lib .s-msg').textContent.includes('no files in this folder')")
             out = pg.evaluate("""() => { const bad = [];
-                for (const e of document.querySelectorAll('.tab, .tb, .b, .s-dcm, .s-dcs')) { const r = e.getBoundingClientRect();
+                for (const e of document.querySelectorAll('.tab, .tb, .b, .s-dcm, .s-li, .s-msg')) { const r = e.getBoundingClientRect();
                     if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
                 return bad; }""")
             self.assertEqual(out, [])
-            folder = lambda: pg.locator(".s-dcr").nth(0).locator(".s-dcn").text_content()
-            file_ = lambda: pg.locator(".s-dcr").nth(1).locator(".s-dcn").text_content()
-            self.assertIn("track 4", pg.locator(".s-dcs").text_content())
+            rows = lambda: [t for t in pg.locator(".s-dcl .s-li .s-nm").all_text_contents() if t]
             # folder ›: the first folder with files, by name and number; the top folder (no files) is passed over
-            pg.locator(".s-dcr").nth(0).locator(".b").nth(1).click()
+            pg.locator(".s-dcr .b").nth(1).click()
             pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'bass'")
-            self.assertEqual(pg.locator(".s-dcr").nth(0).locator(".s-d").nth(1).text_content(), "2 / 3")
-            pg.locator(".s-dcr").nth(0).locator(".b").nth(1).click()
+            self.assertTrue(pg.locator(".s-dcr .s-d").text_content().startswith("2 / 3"))
+            # the folder's files by name (control protocol 14: asked for with `files`, answered in BL lines)
+            pg.wait_for_function("[...document.querySelectorAll('.s-dcl .s-nm')].map(e => e.textContent).filter(t => t).join() === 'deep'")
+            pg.locator(".s-dcr .b").nth(1).click()
             pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'drums'")
-            # file ›: the sample is in the selected track, on the Daisy, and named on the page
-            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
-            self.assertTrue(self.box.wait_for(lambda c: name() == "a kick.wav", 5), name())
-            pg.wait_for_function("document.querySelectorAll('.s-dcr')[1].querySelector('.s-dcn').textContent === 'a kick'")
-            self.assertEqual(pg.locator(".s-dcr").nth(1).locator(".s-d").nth(1).text_content(), "1 / 2")
-            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
+            pg.wait_for_function("[...document.querySelectorAll('.s-dcl .s-nm')].map(e => e.textContent).filter(t => t).join() === 'a kick,b snare'")
+            self.assertEqual(pg.locator(".s-dcl .s-li:not([disabled])").count(), 2)
+            self.assertIn("track 4", pg.locator(".sm-lib .s-msg").text_content())
+            self.assertEqual(pg.locator(".s-dcside .s-nav span").text_content(), "1 / 1")
+            # a tap on a name: the sample is in the selected track, on the Daisy, and that row is lit
+            pg.locator(".s-dcl .s-li", has_text="b snare").click()
             self.assertTrue(self.box.wait_for(lambda c: name() == "b snare.wav", 5), name())
-            # past the folder's end: on into the next folder that has files (round to the first)
-            pg.locator(".s-dcr").nth(1).locator(".b").nth(2).click()
+            pg.wait_for_function("document.querySelector('.s-dcl .s-li.on') && document.querySelector('.s-dcl .s-li.on').textContent === 'b snare'")
+            pg.locator(".s-dcl .s-li", has_text="a kick").click()
+            self.assertTrue(self.box.wait_for(lambda c: name() == "a kick.wav", 5), name())
+            pg.wait_for_function("document.querySelector('.s-dcl .s-li.on').textContent === 'a kick'")
+            # a file stepped to elsewhere (the encoder, the APC40): the list follows, into the next folder too
+            self.do("file 2")
             self.assertTrue(self.box.wait_for(lambda c: name() == "deep.wav", 5), name())
-            pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'bass'")
+            pg.wait_for_function("document.querySelector('.s-dcr .s-dcn').textContent === 'bass' && document.querySelector('.s-dcl .s-li.on') && document.querySelector('.s-dcl .s-li.on').textContent === 'deep'")
+            shot = os.environ.get("APCBOX_SHOTS")
+            if shot:
+                pg.screenshot(path=os.path.join(shot, "daisycard.png"))
             # UNDO: the sound from before the browsing
-            pg.wait_for_function("!document.querySelector('.s-dcf .b:nth-child(2)').disabled")
-            pg.locator(".s-dcf .b", has_text="UNDO").click()
+            pg.wait_for_function("!document.querySelector('.s-dcside .b:nth-child(2)').disabled")
+            pg.locator(".s-dcside .b", has_text="UNDO").click()
             self.assertTrue(self.box.wait_for(lambda c: name() == was, 5), name())
             # SETS: DEFAULT SET is the one in the firmware (v13.34); with unsaved changes it asks first
             bpm = self.s(5)
@@ -2638,7 +2653,7 @@ class PageControlTest(unittest.TestCase):
             self.assertTrue(fit)
             self.assertTrue(pg.locator(".tab.on", has_text="SYS").count() == 1)
             ev(1, 304, 1)
-            pg.wait_for_function("document.querySelector('.sm-pad .s-pr.hit .s-k').textContent === 'X'")
+            pg.wait_for_function("(document.querySelector('.sm-pad .s-pr.hit .s-k') || {}).textContent === 'X'")
             ev(1, 304, 0)
             pg.wait_for_function("document.querySelectorAll('.sm-pad .s-pr.hit').length === 0")
             if shots:
@@ -2650,6 +2665,17 @@ class PageControlTest(unittest.TestCase):
             self.assertEqual(pad()["map"], pad()["default"])
             pg.locator(".sm-pad .b", has_text="SYS").click()
             pg.wait_for_selector(".sm-sys")
+            # RESTART DAISY: the first tap only asks, the second sends `restart` to the firmware
+            rs = pg.locator(".sm-sys .s-bt .b").nth(4)
+            self.assertEqual(rs.inner_text(), "RESTART DAISY")
+            rs.click()
+            self.assertIn("SURE?", rs.inner_text())
+            self.assertNotIn("restart asked", pg.locator(".sm-sys .s-log").inner_text())
+            if shots:
+                pg.screenshot(path=os.path.join(shots, "sys-restart.png"))
+            rs.click()
+            pg.wait_for_function("document.querySelector('.sm-sys .s-log').textContent.includes('restart asked')")
+            self.assertEqual(rs.inner_text(), "RESTART DAISY")
             pg.close()
             b.close()
         self.assertEqual(errors, [])
@@ -4380,6 +4406,11 @@ class SettingsTest(unittest.TestCase):
                 for s_ in ("net", "hot", "bt", "sys", "dev", "ir"):
                     pg.goto(url + "?s=" + s_)
                     pg.wait_for_function("document.getElementById('c-helper').textContent === 'helper: running'")
+                    if s_ == "sys":
+                        # RESTART DAISY: there, and off while no Daisy is on the box
+                        self.assertEqual(pg.evaluate("[document.getElementById('y-daisy').textContent, document.getElementById('y-daisy').disabled]"), ["RESTART DAISY", True])
+                        if os.environ.get("APCBOX_SHOTS"):
+                            pg.screenshot(path=os.path.join(os.environ["APCBOX_SHOTS"], "settings-sys-%d.png" % w_))
                     self.assertEqual(pg.evaluate("[document.documentElement.scrollHeight > innerHeight + 1, document.documentElement.scrollWidth > innerWidth + 1]"),
                                      [False, False], (w_, h_, s_))
                     out = pg.evaluate("""() => [...document.querySelectorAll('section.on button, section.on input, nav button')].filter(e => {
@@ -4696,6 +4727,9 @@ class SettingsTest(unittest.TestCase):
             pg.wait_for_function("a => document.querySelector('.g-stepper span:nth-child(3)').textContent === (a + 1) + ' s'", arg=a0)
             pg.locator(".g-stepper .g-b").nth(0).click()
             pg.wait_for_function("a => document.querySelector('.g-stepper span:nth-child(3)').textContent === (a ? a + ' s' : 'stay')", arg=a0)
+            self.assertEqual(pg.evaluate("(b => [b.textContent, b.disabled])(document.querySelectorAll('.g-row3 .g-b')[3])"), ["RESTART DAISY", True])
+            if os.environ.get("APCBOX_SHOTS"):
+                pg.screenshot(path=os.path.join(os.environ["APCBOX_SHOTS"], "settings-sys-small.png"))
             pg.locator(".g-row3 .g-b", has_text="REBOOT").click()
             pg.wait_for_function("document.querySelectorAll('.g-row3 .g-b')[1].textContent === 'SURE?'")
             self.assertNotIn("systemctl reboot", open(self.calls).read())

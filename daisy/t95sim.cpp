@@ -259,6 +259,7 @@ int main(int argc, char** argv)
             last++;
         }
         BoxPoll(now);
+        BoxTakeRestart(); // nothing to reset: the `L restart asked` line is what a test sees
         t95.Poll(now, false);
     }
 }

@@ -106,7 +106,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
 
 - Read [t95/README.md](t95/README.md) and [protocol/serial.md](protocol/serial.md)
   before changing the bridge or USB transport. Firmware v13.x and serial report
-  version 19 are separate version numbers.
+  version 20 are separate version numbers.
 - Preserve direct Web Serial and the Mac engine UI. The existing HTTP monitor
   uses SSE at `/events`; reuse it for initial telemetry rather than introducing
   another transport without a reason. Mac-only `/ui` and `/tft.bmp` features
@@ -117,7 +117,7 @@ are at the top of each file or in `build_host.sh`. Run them after engine/box cha
   and `daisy/xfer.h`), from v13.9 the page actions in `ESC U` (control
   protocol 4: mute, solo, knobs, steps...), from v13.10 set actions (protocol 5), from v13.11 `ESC T` (protocol 6: the T95's clock; the Daisy steers
   its sequencer onto it, the audio clock stays the timing source), from v13.12 the looper, quantise and roll actions in `ESC U` (protocol 7). Send control frames only after the Daisy reports a
-  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+, looper/quantise/roll actions at 7+, `lrec redo` and `quant fx` at 8+, `kit save/over/rename/delete` at 9+, `map` at 10+, `file` and `folder` (the card's samples from a page) at 11+, `set demo` at 13+, `set over` at 12+ (from v13.33 `set save` never replaces another set; whoever sends `set over` has asked first). v13.2 and older act
+  `P` line, `ESC U` only at version 2+, `ESC F` only at 3+, page actions at 4+, sets at 5+, `ESC T` at 6+, looper/quantise/roll actions at 7+, `lrec redo` and `quant fx` at 8+, `kit save/over/rename/delete` at 9+, `map` at 10+, `file` and `folder` (the card's samples from a page) at 11+, `set demo` at 13+, `files` and `file at` (a folder's file names, answered in `BL` lines) and `restart` (the Daisy resets itself) at 14+, `set over` at 12+ (from v13.33 `set save` never replaces another set; whoever sends `set over` has asked first). v13.2 and older act
   on any bare `R`/`B` byte, so never open the port with echo on (plain
   `cat`/`stty`/`screen` on Linux). Sample data goes only as `ESC F` frames
   (never ESC M), sent at low priority behind MIDI by the bridge.

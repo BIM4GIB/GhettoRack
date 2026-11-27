@@ -33,7 +33,7 @@ class TestPlat : public Platform
     {
         if(l[0] == 'F' && strchr("OACL", l[1])) // sample transfer replies
             xfer_lines.push_back(l);
-        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3) || !strncmp(l, "CK ", 3) || !strncmp(l, "CL ", 3) || !strncmp(l, "MB ", 3) || !strncmp(l, "MC ", 3))
+        if((strchr("HOZJ", l[0]) && l[1] == ' ') || !strncmp(l, "JT ", 3) || !strncmp(l, "KL ", 3) || !strncmp(l, "KP ", 3) || !strncmp(l, "CK ", 3) || !strncmp(l, "CL ", 3) || !strncmp(l, "MB ", 3) || !strncmp(l, "MC ", 3) || !strncmp(l, "BL ", 3))
             ui_lines.push_back(l);
     }
     bool FileOpen(const char* p) override { return (rf = fopen(Full(p).c_str(), "rb")) != nullptr; }
@@ -648,7 +648,7 @@ int main()
     {
         t95p.Init(T95Send);
         T95Tick(10);
-        CHECK(T95Count("P 13 00 00 00 -1") >= 1); // version line with nothing attached
+        CHECK(T95Count("P 14 00 00 00 -1") >= 1); // version line with nothing attached
         t95_lines.clear();
         T95Frame("\x1bN1 APC40 mkI\n");
         T95Tick(5);
@@ -721,7 +721,7 @@ int main()
         T95Tick(5);
         CHECK(kb_track[60] == -1 && kb_track[67] == 0);
         T95Tick(1000);
-        CHECK(T95Count("P 13 03 01 02 1") >= 1);
+        CHECK(T95Count("P 14 03 01 02 1") >= 1);
 
         /* a 303 track: the note is folded into the 303's range and played */
         e.SetSynth(1, true);
@@ -740,7 +740,7 @@ int main()
         SelectTrack(0);
 
         /* UI actions (control protocol 2) */
-        CHECK(T95Count("P 13 ") >= 1);
+        CHECK(T95Count("P 14 ") >= 1);
         e.Stop();
         T95Tick(2);
         T95Frame("\x1bU play\n");
@@ -1341,7 +1341,7 @@ int main()
         T95Tick(2100, false, false);
         CHECK(t95p.Active() == -1 && !t95p.AnyAttached());
         CHECK(!shift); // held buttons released
-        CHECK(T95Count("P 13 00 00 00 -1") >= 1);
+        CHECK(T95Count("P 14 00 00 00 -1") >= 1);
 
         /* A frame stamped a moment after the main loop read the clock (how the
            Daisy does it) must not look like 49 days of silence */
@@ -1437,6 +1437,29 @@ int main()
             CHECK(e.GetSlot(2).length == (uint32_t)frames);
             CHECK(strcmp(slot_path[2], "t95/tone_330.wav") == 0);
             CHECK(!XferBusy());
+
+            /* v13.35: undo gives back what the track held; redo the sent sample, which exists
+               only in the track's memory, so the undo memory keeps the sound itself */
+            T95Tick(40);
+            CHECK(LooperCan(false) && lundo.track == 2);
+            T95Frame("\x1bU lrec undo\n");
+            WaitIdle();
+            T95Tick(40);
+            CHECK(e.GetSlot(2).length == old_len && BuiltInKitOf(slot_path[2]) >= 0);
+            CHECK(LooperCan(true));
+            T95Frame("\x1bU lrec redo\n");
+            WaitIdle();
+            T95Tick(40);
+            CHECK(e.GetSlot(2).length == (uint32_t)frames && strcmp(slot_path[2], "t95/tone_330.wav") == 0);
+            CHECK(!memcmp(e.GetSlot(2).data, &w[44], (size_t)frames * 2));
+            T95Frame("\x1bU lrec undo\n"); // and back once more: the built-in sound reloads
+            WaitIdle();
+            T95Tick(40);
+            CHECK(e.GetSlot(2).length == old_len && BuiltInKitOf(slot_path[2]) >= 0);
+            T95Frame("\x1bU lrec redo\n");
+            WaitIdle();
+            T95Tick(40);
+            CHECK(e.GetSlot(2).length == (uint32_t)frames && !memcmp(e.GetSlot(2).data, &w[44], (size_t)frames * 2));
 
             // commit with chunks missing, then abort
             xfer_lines.clear();
@@ -1679,6 +1702,44 @@ int main()
             Tick(200);
             WaitIdle();
             CHECK(cur_file == 0 && !strcmp(folders[cur_folder], "samples/test"));
+            /* v13.35, control protocol 14: the folder's file names on request, and one picked by number */
+            {
+                auto bl = [] {
+                    std::vector<std::string> v;
+                    for(auto& l : ui_lines)
+                        if(l.rfind("BL ", 0) == 0)
+                            v.push_back(l);
+                    return v;
+                };
+                ui_lines.clear();
+                T95Frame("\x1bU files 0 16\n");
+                auto v = bl();
+                CHECK((int)v.size() == (num_files < 16 ? num_files : 16));
+                char want[200];
+                snprintf(want, sizeof(want), "BL %d 0 %s", cur_folder, files[0]);
+                CHECK(!v.empty() && v[0] == want);
+                ui_lines.clear();
+                T95Frame("\x1bU files 1 1\n");
+                v = bl();
+                snprintf(want, sizeof(want), "BL %d 1 %s", cur_folder, files[1]);
+                CHECK(v.size() == 1 && v[0] == want);
+                ui_lines.clear();
+                T95Frame("\x1bU files -1 4\n\x1bU files 0 17\n\x1bU files 0 0\n\x1bU files 9999 4\n");
+                CHECK(bl().empty());
+                T95Frame("\x1bU file at 1\n");
+                WaitIdle();
+                Tick(40);
+                CHECK(cur_file == 1 && strcmp(slot_path[10], first) && strncmp(slot_path[10], "samples/test/", 13) == 0);
+                T95Frame("\x1bU file at 9999\n\x1bU file at -1\n");
+                Tick(40);
+                CHECK(cur_file == 1);
+                /* `restart`: noted once for the platform to act on; near misses are not it */
+                CHECK(!BoxTakeRestart());
+                T95Frame("\x1bU restart 1\n\x1bU restartx\n\x1bU rest\n");
+                CHECK(!BoxTakeRestart());
+                T95Frame("\x1bU restart\n");
+                CHECK(BoxTakeRestart() && !BoxTakeRestart());
+            }
             T95Frame("\x1bU lrec undo\n");
             WaitIdle();
             Tick(40);

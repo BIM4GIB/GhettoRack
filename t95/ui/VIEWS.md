@@ -125,10 +125,12 @@ live, with markers and bar lines), pad, list row with waveform.
   strips of those tracks are dimmed with a red outline, and System > Links
   names the tracks. The Daisy's own screen shows the same line in a red bar.
 - v13.32 (control protocol 11): `file d` and `folder d`, the Daisy's own card
-  from a page. The small LIB view has a DAISY CARD tab for it. A list of a
-  folder's files is still missing: the firmware says only where the browser is.
+  from a page. The small LIB view has a DAISY CARD tab for it.
 - v13.33 (control protocol 12): `set over n [name]`; `set save` no longer replaces a set.
   SAVE HERE sends `set over` after its second tap.
+- v13.35 (control protocol 14, report 20): `files start count` answered in `BL` lines and
+  `file at n`: DAISY CARD is a list of the folder's files by name. A sample sent from the box
+  can be undone (`lrec undo`), on the small page with UNDO beside TO TRACK.
 - v13.34 (control protocol 13): `set demo`, the default set from the firmware, switched in on
   the bar. DEFAULT SET in both layouts' SETS (asks when there are unsaved changes).
 
@@ -156,8 +158,8 @@ things by name.
 | MIX | 16 strips: pan and two sends as bars, fader with a meter, mute, solo, crossfader side; master | 8 strips with pan and reverb pots; master |
 | PAT | all 64 patterns, the 8 FX as hold pads, copy / clear / undo | one bank of 8 with a bank row, big FX pads |
 | LOOP | LOOPER: the Daisy's own input into the selected track. Take length (free, 1, 2, 4, 8 bars), input level, COUNT-IN, MONITOR, an input meter; REC LOOP, OVERDUB, SAMPLE (one-shot), STOP, UNDO / REDO TAKE (CANCEL while armed), CLEAR. QUANTISE: what snaps to the beat, as on the big System view (pattern switch, mute and solo, takes, held FX) | the same |
-| LIB | LIBRARY and BOX CARD (files on the box and on the card in its slot: a waveform each, TO TRACK), DAISY CARD (the samples on the Daisy's own card: a folder and a file stepped with ‹ ›, each step loads into the selected track, UNDO; says so when the Daisy has no card), KITS (load on 1-8 / 9-16, SAVE the selected track's page as a kit under a typed name, RENAME and DELETE a kit on the card, undo), SETS (LOAD, SAVE HERE, SAVE AS NEW under a typed name, RENAME, DELETE, DEFAULT SET). A name is typed on the screen's own keyboard: a-z, 0-9, space, `-`, up to 16 | the same |
-| SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, PAD MAP (the game controller's controls and jobs as a list, the pressed one lit, RESET; to read, a job is changed on a bigger screen), RELOAD | the same |
+| LIB | LIBRARY and BOX CARD (files on the box and on the card in its slot: a waveform each, TO TRACK, UNDO for what the track held before), DAISY CARD (the samples on the Daisy's own card: the folder stepped with ‹ ›, its files by name five to a page, a tap loads one into the selected track, UNDO; says so when the Daisy has no card or older firmware than v13.35), KITS (load on 1-8 / 9-16, SAVE the selected track's page as a kit under a typed name, RENAME and DELETE a kit on the card, undo), SETS (LOAD, SAVE HERE, SAVE AS NEW under a typed name, RENAME, DELETE, DEFAULT SET). A name is typed on the screen's own keyboard: a-z, 0-9, space, `-`, up to 16 | the same |
+| SYS | Daisy link, firmware, ping, CPU and overload, loop memory, controllers, log; MODULES, SETTINGS, PAD MAP (the game controller's controls and jobs as a list, the pressed one lit, RESET; to read, a job is changed on a bigger screen), RELOAD, RESTART DAISY (the Daisy's RESET button from here, firmware v13.35; asks, and says so when the set is unsaved) | the same |
 
 The 1-8 / 9-16 button selects the same track on the other page. ZOOM is kept
 in the browser. No shadows or glows, and plain elements instead of a canvas:
@@ -186,7 +188,7 @@ file) and is the model for the rest.
 | Jam recorder (`/jam`) | built | REC: the button, time, levels, room left, the box's SD card and EJECT. TAKES: five to a page, TO LIBRARY, TO CARD, RENAME (the screen's keyboard), DELETE (asks). No playing (the box has no speaker) |
 | Clock (`/clock`) | built | CLOCK: tempo, position, beat lamps, START / CONTINUE, -1 -0.1 +0.1 +1 TAP, clock on, send when stopped, share on Link. FROM: where the tempo comes from. OUT: who gets the clock. STATS: timing |
 | MIDI hub (`/midihub`) | built | ROUTE: the grid, 5 senders by 5 receivers a page (‹ › for more of either); tap a square to connect and select it, EDIT for channel, to-channel and message types (each tap applied at once), REMOVE. A sender's name turns green while it sends. NET: what is on the network, NEVER CONNECT / ALLOW. SAVED: presets, LOAD, SAVE AS NEW (the name typed on the screen's keyboard, "preset N" offered), RENAME, DELETE (asks) |
-| Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, SOUND OUT (steps through the box's outputs: HDMI, the headphone socket; then off). SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
+| Settings (`/settings`) | built | NET: the Wi-Fi it is on, SCAN, networks four to a page, JOIN / RETRY (the password on the screen's keyboard, the join on trial as on the TV page), FORGET (asks), BOX NAME. HOT: the hotspot, its password, BY ITSELF. BT: on / off, SCAN, VISIBLE, PAIR / FORGET. IR: the remote's buttons five to a page, PROFILE, LEARN TAP / HOLD, CLEAR. DEV: Daisy, controllers, sound cards, the box's SD card, SOUND OUT (steps through the box's outputs: HDMI, the headphone socket; then off). SYS: start-up delay, RESTART BRIDGE / REBOOT / SHUT DOWN (ask), RESTART DAISY (asks; no PIN, it is the Daisy's own action), SET / CHANGE PIN. The PIN shows as a button in the top bar (LOCKED / UNLOCKED) and is asked for on a number pad when something needs it |
 
 Not there: editing 303 notes, recording from a microphone (the box has none), the
 APC40 map, changing the game controller's jobs, hearing a file before it is sent (the box

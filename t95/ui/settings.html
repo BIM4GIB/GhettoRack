@@ -136,7 +136,7 @@ header a{white-space:nowrap}
       <div class="kv" id="y-kv"></div>
       <div class="row"><span class="dim">On boot, start the last module after</span><input id="y-auto" type="number" min="0" max="60" style="width:80px"><span class="dim">s (0 = stay on the start screen)</span><button id="y-auto-save">SAVE</button></div>
       <div id="y-banner" class="banner"></div>
-      <div class="row"><button id="y-bridge">RESTART BRIDGE</button><button id="y-reboot">REBOOT</button><button id="y-off" class="warn">SHUT DOWN</button></div>
+      <div class="row"><button id="y-bridge">RESTART BRIDGE</button><button id="y-reboot">REBOOT</button><button id="y-off" class="warn">SHUT DOWN</button><button id="y-daisy">RESTART DAISY</button></div>
       <h2>PIN</h2>
       <div class="row"><input id="y-old" type="password" inputmode="numeric" maxlength="8" placeholder="old PIN" autocomplete="off" style="width:120px">
         <input id="y-new" type="password" inputmode="numeric" maxlength="8" placeholder="new PIN" autocomplete="off" style="width:120px"><button id="y-pin">SET PIN</button>
@@ -240,6 +240,10 @@ function small() {
       const pw = E("div", "g-row3"); U.pw = {};
       for (const [k, cmd, t, done] of [["bridge", "restart_bridge", "RESTART BRIDGE", "Bridge restarting, back in seconds"], ["reboot", "reboot", "REBOOT", "Rebooting, back in about a minute"],
         ["off", "poweroff", "SHUT DOWN", "Shutting down. Wait for the box's light before unplugging"]]) { const b = B(t, () => power(k, cmd, done)); b.dataset.t = t; U.pw[k] = b; pw.appendChild(b); }
+      /* the Daisy's RESET button from here: an action to the Daisy (firmware v13.35), not the helper's, so no PIN */
+      U.daisy = B("RESTART DAISY", async () => { if (sure !== "daisy") { sure = "daisy"; say("the sound stops, an unsaved set is gone: once more"); return show(); }
+        sure = ""; const o = await bpost("/do", { a: "restart" }); say(o.ok ? "Daisy restarting, back in a few seconds" : o.error || "the box isn't answering", o.ok ? "note" : "bad"); show(); });
+      pw.style.gridTemplateColumns = "repeat(4,1fr)"; pw.appendChild(U.daisy);
       const pr = E("div", "g-row2"); U.setpin = B("", setPin); U.pinhint = E("div", "g-text"); pr.style.gridTemplateColumns = "150px 1fr"; pr.append(U.setpin, U.pinhint);
       box.append(U.kv, stp, pw, pr); body.appendChild(box);
     }
@@ -304,6 +308,7 @@ function small() {
       kv([["Wi-Fi", w.ssid || "?"], ["helper", h ? "running" : "not running"], ["page", secure ? "secure" : "plain http: read-only"]]);
       const a = br.autostart_s || 0; U.auto.textContent = a ? a + " s" : "stay";
       for (const k in U.pw) { U.pw[k].textContent = sure === k ? "SURE?" : U.pw[k].dataset.t; U.pw[k].classList.toggle("warn", sure === k); U.pw[k].disabled = !h; }
+      U.daisy.textContent = sure === "daisy" ? "SURE?" : "RESTART DAISY"; U.daisy.classList.toggle("warn", sure === "daisy"); U.daisy.disabled = !br.daisy;
       U.setpin.textContent = st.pin_set ? "CHANGE PIN" : "SET PIN"; U.setpin.disabled = !h;
       U.pinhint.textContent = st.pin_set ? "The PIN is asked for whatever changes the box." : "4 to 8 digits. Whoever sets it first owns the box's settings.";
     }
@@ -568,7 +573,8 @@ function draw() {
   if (document.activeElement !== $("y-auto")) $("y-auto").value = br.autostart_s || 0;
   $("y-old").style.display = st.pin_set ? "" : "none"; $("y-pin").textContent = st.pin_set ? "CHANGE PIN" : "SET PIN";
   $("y-pin-hint").textContent = st.pin_set ? "" : "4 to 8 digits. Whoever sets it first owns the box's settings.";
-  for (const [id, k, t] of [["y-bridge", "bridge", "RESTART BRIDGE"], ["y-reboot", "reboot", "REBOOT"], ["y-off", "off", "SHUT DOWN"]]) $(id).textContent = sure === k ? "SURE?" : t;
+  for (const [id, k, t] of [["y-bridge", "bridge", "RESTART BRIDGE"], ["y-reboot", "reboot", "REBOOT"], ["y-off", "off", "SHUT DOWN"], ["y-daisy", "daisy", "RESTART DAISY"]]) $(id).textContent = sure === k ? "SURE?" : t;
+  $("y-daisy").disabled = !br.daisy;
   kv("d-kv", [["Daisy", br.daisy ? "connected" + (br.firmware ? ", firmware " + br.firmware : "") + ", control " + br.control : "not connected"], ["controllers", (br.controllers || []).join(", ") || "none"],
     ["Bluetooth MIDI", !br.ble_midi ? "?" : br.ble_midi.state !== "running" ? ({ off: "off", "no dbus-fast": "not installed (python3-dbus-fast)", "no BlueZ": "Bluetooth is off" })[br.ble_midi.state] || br.ble_midi.state
       : br.ble_midi.connected.length ? br.ble_midi.connected.map(x => x.name).join(", ") : br.ble_midi.paired ? br.ble_midi.paired + " paired, none in reach" : "none paired"],
@@ -702,6 +708,15 @@ $("y-auto-save").onclick = async () => { const a = +$("y-auto").value;
 $("y-bridge").onclick = () => power("bridge", "restart_bridge", "Bridge restarting, back in seconds");
 $("y-reboot").onclick = () => power("reboot", "reboot", "Rebooting, back in about a minute");
 $("y-off").onclick = () => power("off", "poweroff", "Shutting down. Wait for the box's light before unplugging");
+/* the Daisy's RESET button from here: an action to the Daisy itself (firmware v13.35), nothing the helper does, so no PIN */
+async function restartDaisy(tell, redraw) {
+  if (sure !== "daisy") { sure = "daisy"; tell("The Daisy starts again: the sound stops and a set that isn't saved is gone. Once more to do it", "note"); return redraw(); }
+  sure = ""; let o;
+  try { o = await (await fetch("/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a: "restart" }) })).json(); }
+  catch (e) { o = { error: "the box isn't answering" }; }
+  tell(o.error || "Daisy restarting, back in a few seconds", o.error ? "bad" : "note"); redraw();
+}
+$("y-daisy").onclick = () => restartDaisy((t, c) => banner("y-banner", t, c), draw);
 $("y-pin").onclick = async () => {
   if (!secure) return banner("y-banner", "Needs the secure page", "bad", httpsAct());
   const o = await sys("pin_set", { old: $("y-old").value, new: $("y-new").value });

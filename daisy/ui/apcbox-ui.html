@@ -251,7 +251,7 @@ body.tv { zoom: 1.35; } /* the T95 kiosk on a TV: ?tv=1 */
 "use strict";
 /* ---------------- state ---------------- */
 const NT = 16, NS = 16;
-const REPORT_VERSION = 19; // firmware sends "V 19"
+const REPORT_VERSION = 20; // firmware sends "V 20"
 const st = {
   link: false, demo: false, gotData: false,
   play: 0, step: 0, pat: 0, queued: -1, rec: 0, bpm: 0, metro: 0, sel: 0, page: 0, shift: 0, copy: 0,
@@ -341,6 +341,7 @@ function handleLine(line) {
     case "B": st.browse = nums(); break;
     case "BF": st.folder = rest; break;
     case "BN": st.file = rest; break;
+    case "BL": break; // a folder's file names, asked for by the box's page
     case "K": st.kit = nums(); break;
     case "KN": { const a = rest.split(" "); const i = +a[0]; if (i >= 0 && i < 5) st.kitNames[i] = [a.slice(2).join(" "), +a[1]]; break; }
     case "W": { const [w, s] = rest.split(" "); st.want = w || ""; st.sent = s || ""; break; }

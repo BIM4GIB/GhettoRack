@@ -730,6 +730,9 @@ bool TrackLoading(int t)
 /* A sample sent from the T95 (xfer.h) is read by the loader like a file:
    "t95/<name>" reads from the received bytes in the staging pool */
 bool IsT95Path(const char* p) { return strncmp(p, "t95/", 4) == 0; }
+/** A sound that exists only in the track's memory (a recording, a sample sent from the box):
+ *  nothing to reload it from, so undo has to keep the sound itself */
+bool MemOnly(const char* p) { return IsRecPath(p) || IsT95Path(p); }
 const uint8_t* mem_file = nullptr;
 uint32_t       mem_size = 0, mem_pos = 0;
 bool           mem_open = false;
@@ -1267,7 +1270,7 @@ struct LooperUndo
     bool     loop  = false;
     int      mode  = 0;       // what the take was (Engine::kRec...)
     int      bars = 0, off = 0;
-    float    bpm  = 0.f;
+    float    bpm  = 0.f, rate = 1.f;
     uint32_t length = 0, gen = 0;
     char     path[kPathLen] = "", orig[kPathLen] = "";
 };
@@ -1287,9 +1290,10 @@ void LooperDescribe(int t, LooperUndo& u, bool keep)
     u.off           = eng->LoopOffset(t);
     u.bpm           = eng->LoopBpm(t);
     u.length        = s.length;
+    u.rate          = s.rate;
     snprintf(u.path, kPathLen, "%s", slot_path[t]);
     snprintf(u.orig, kPathLen, "%s", slot_orig[t]);
-    u.data = keep && mem && (u.loop || IsRecPath(slot_path[t])) && s.length && s.length <= cap
+    u.data = keep && mem && (u.loop || MemOnly(slot_path[t])) && s.length && s.length <= cap
              && !eng->IsSynth(t);
 }
 
@@ -1305,10 +1309,10 @@ void LooperBackup(int t, int mode)
         memcpy(mem, eng->GetSlot(t).data, (size_t)lundo.length * sizeof(int16_t));
 }
 
-constexpr int kUndoBrowse = 3; // lundo.mode: not a take, a sample picked with the arrows or the encoder
+constexpr int kUndoBrowse = 3; // lundo.mode: not a take, a sample picked with the arrows or the encoder, or sent from the box
 
-/** Before a browsed sample goes into a track: keep what it held. Stepping on
- *  through files keeps the first one, so undo goes back to the original */
+/** Before a browsed sample, or one sent from the box (v13.35), goes into a track: keep what it
+ *  held. Stepping on through files keeps the first one, so undo goes back to the original */
 void BrowseBackup(int t)
 {
     if(eng->LiveRecState() != 0)
@@ -1320,7 +1324,7 @@ void BrowseBackup(int t)
     }
     LooperBackup(t, kUndoBrowse);
     /* a recording that didn't fit the undo memory (a long loop) can't come back */
-    lundo.valid = lundo.data || !(lundo.loop || IsRecPath(lundo.path));
+    lundo.valid = lundo.data || !(lundo.loop || MemOnly(lundo.path));
     lundo.await = true;
 }
 
@@ -1373,7 +1377,7 @@ void LooperExchange(bool keep)
     {
         if(!same)
         {
-            s.rate   = 1.f;
+            s.rate   = lundo.loop ? 1.f : lundo.rate;
             s.length = lundo.length;
             if(lundo.loop)
                 eng->SetLoop(t, lundo.bars, lundo.bpm, lundo.off);
@@ -1390,7 +1394,7 @@ void LooperExchange(bool keep)
         eng->ClearLoop(t);
         const char* p = lundo.orig[0] ? lundo.orig : lundo.path;
         char        k[8];
-        if(!p[0] || IsRecPath(p))
+        if(!p[0] || MemOnly(p))
         {
             snprintf(k, sizeof(k), "@k%d", BuiltInKitFor(t));
             p = k;
@@ -1406,7 +1410,7 @@ void LooperExchange(bool keep)
     lundo.await     = await;
     lundo.gen       = slot_gen[t];
     /* it can come back if its sound was kept, or it reloads from a path */
-    lundo.valid = keep && (cur.data || !(cur.loop || IsRecPath(cur.path)));
+    lundo.valid = keep && (cur.data || !(cur.loop || MemOnly(cur.path)));
 }
 
 /** mode: Engine::kRecLoop / kRecOverdub / kRecShot. false = not now */
@@ -3106,7 +3110,7 @@ void ComposeScreen(uint32_t now)
 
 
 /* Bump when the lines change, so an old monitor page says it's stale */
-constexpr int kReportVersion = 19; // 19: OV (overload: voices left out); 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version); 18: SM (loop memory)
+constexpr int kReportVersion = 20; // 20: BL (a folder's file names, on request); 19: OV (overload: voices left out); 15: KP has the number of built-in kits, LP undo/redo 101/102 = a kit load; 16: MB, MC (the button map); 17: VF (the firmware's version); 18: SM (loop memory)
 constexpr int kReportVersionOld = 11; // 10: H (meters), O (patterns with steps), Z (waveform outline); 11: J, JT (sets), KL, KP (kits)
 uint8_t  rep_grid[kTracks * kSteps + 1];
 int      rep_grid_pat = -1;
@@ -4170,7 +4174,7 @@ void BoxPoll(uint32_t now)
                    was a recording too long to keep */
                 lundo.valid = mode == Engine::kRecOverdub
                                   ? lundo.data // a long loop wasn't kept: its overdub stays
-                                  : (!lng && (lundo.data || !(lundo.loop || IsRecPath(lundo.path))));
+                                  : (!lng && (lundo.data || !(lundo.loop || MemOnly(lundo.path))));
                 lundo.redo  = false;
                 lundo.gen   = slot_gen[t];
             }
@@ -4231,6 +4235,14 @@ void BoxPoll(uint32_t now)
         last = now;
         Report(now);
     }
+}
+
+static bool restart_req = false;
+bool BoxTakeRestart()
+{
+    bool r      = restart_req;
+    restart_req = false;
+    return r;
 }
 
 void BoxResync()
@@ -4588,6 +4600,33 @@ bool BoxUiCommand(const char* c, uint32_t now)
         eng->Audition(n - 1);
     /* ---- control protocol 11: the samples on the Daisy's own card, from a page. What the encoder
        does in its samples job and the APC40's BANK buttons do, as actions. B / BF / BN say where it is ---- */
+    /* ---- control protocol 14 (v13.35): the names of a folder's files, and one of them picked.
+       `files start count` (count 1-16) answers with a `BL folder index name` line for each file there
+       is from `start` on, numbered as `B` numbers them (from 0); `file at n` loads file n of the
+       folder the browser is in into the selected track ---- */
+    else if(sscanf(c, "files %d %d", &a, &n) == 2)
+    {
+        if(a >= 0 && n >= 1 && n <= 16)
+            for(int i = a; i < a + n && i < num_files; i++)
+                Out("BL %d %d %s", cur_folder, i, files[i]);
+    }
+    else if(sscanf(c, "file at %d", &a) == 1)
+    {
+        if(a >= 0 && a < num_files)
+        {
+            cur_file     = a;
+            browse_accum = 0;
+            LoadBrowsedFile(true);
+        }
+    }
+    /* the Daisy started again without a hand on its RESET button (v13.35, protocol 14). The box
+       only notes it; the platform's main loop does it (BoxTakeRestart). Nothing is saved first:
+       whoever sends it has asked */
+    else if(strcmp(c, "restart") == 0)
+    {
+        restart_req = true;
+        Out("L restart asked");
+    }
     else if(sscanf(c, "file %d", &a) == 1 && a >= -16 && a <= 16 && a != 0)
     {
         browse_accum += a; // loads into the selected track; past a folder's end, on into the next

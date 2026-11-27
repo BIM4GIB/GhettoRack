@@ -4,6 +4,34 @@ Everything agreed, mentioned or left open that isn't built yet, so it doesn't
 get lost. Newest state: 2026-11-27. Move a line out when it's done (the
 status tables are `t95/README.md` and `t95/ui/VIEWS.md`).
 
+## v13.35: a folder's files by name, undo for a sent sample, the Daisy restarted from a page (2026-11-27)
+
+`daisy/release/ApcBox.bin` is v13.35: control protocol 14, report version 20. No new buffer
+(SDRAM as before, 95.27%).
+
+- **A list of a folder's files on DAISY CARD** (small page, LIB): the folder stepped with ‹ ›,
+  its files five to a page by name, a tap loads that one into the selected track, the row of the
+  file the browser is on is lit and the list follows the encoder and the APC40. New: `files start
+  count` answered in `BL folder index name` lines, and `file at n`. The big pages have no DAISY
+  CARD view; nothing changed there.
+- **Undo for a sample sent from the box**: the transfer keeps what the track held, like a file
+  browsed on the card. `lrec undo` brings it back, `lrec redo` the sent sample (it exists only
+  in the track's memory, so the undo memory keeps the sound itself; one longer than a slot has
+  no redo). UNDO on the small page's LIBRARY and BOX CARD tabs; the big page's looper UNDO
+  does the same.
+- **RESTART DAISY**: `restart` in `ESC U` and the firmware resets itself (`NVIC_SystemReset`
+  in `daisy/main.cpp`), as the RESET button does. On ApcBox's SYS view (small page) and in
+  Settings > System (every layout); the first tap asks. It needs a firmware that still answers:
+  a Seed that hangs is not reached by it. **Not built: a watchdog** for that case (`diag.h` has
+  one of 8 s that nothing starts; only trial builds run one, 20 s). Before it is on, the longest
+  main-loop pass has to be measured with a card load and a set switch running, or it resets a
+  working box. **Not built: a wire** from a Pi header pin to the Seed's reset, for a Seed that
+  no software reaches; whether the Seed has its reset on a pin is not checked. **Not tried on a
+  Seed**: the reset itself (the desk tests see the action arrive and the page's buttons).
+- Tested: `sets_test.cpp` (undo, redo, undo, redo of a sent sample with the sound compared;
+  `files` and `file at` with bad values), the bridge suite against the firmware's control code
+  (`test_p58` the list, `test_e2d_sample_to_the_real_firmware` undo and redo).
+
 ## v13.32: the Daisy's card from a page (on the Pi rig's Seed, 2026-11-26)
 
 `daisy/release/ApcBox.bin` is v13.32. `daisy/box.cpp`, `ports.h` (control
@@ -24,7 +52,6 @@ protocol 11). No report line changed.
 - Seen on the Pi rig: 20 folders; two folder steps to `clap`, two file steps to
   "Clap 707" in track 1 on the Daisy, UNDO back to the 808 kick; the saved set
   loaded again afterwards so nothing stays marked unsaved.
-- Not there: a list of a folder's files (needs new report lines).
 
 ## Small things from the list (2026-11-27, browser-tested, nothing tried on a panel or a phone)
 
@@ -648,7 +675,8 @@ them one on the map (REC still arms a loop).
 - Per-step velocity and probability (a step is off / on / accent today).
 - The Daisy's own SD card browsed from the T95; sets copied to and from the
   T95 (backup); a whole kit sent from the T95 library in one go.
-- Undo for a sample sent from the T95.
+- A kit loaded over a sample sent from the box: undoing the kit can't bring that sample back
+  (it reloads by path, and a sent sample has none). Read in `daisy/kits.h`, not tried.
 - Kit names from a page are 16 characters, lower case (the command line to
   the Daisy is 31 characters).
 - Looper: more than one undo; one-shot on

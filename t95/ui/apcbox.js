@@ -50,6 +50,7 @@ document.body.classList.toggle("tv", tv);
 
 /* ---------- state, from the Daisy ---------- */
 const st = {
+  brL: { folder: -1, files: -1, names: [] },   /* DAISY CARD: the file names of the folder the browser is in, as far as asked for */
   S: null, playing: 0, step: 0, pat: 0, qpat: -1, rec: 0, bpm: 1200, metro: 0, sel: 0, mute: 0, solo: 0, synth: 0,
   loading: 0, fx: 0, lrec: 0, lrecT: 0, lrecBars: 0, inPeak: 0, mon: 0, cpu: 0, apc: 0, sd: 0, set: -1, dirty: 0,
   grid: "0".repeat(256), gridPat: -1, patmask: 0n, meters: new Uint8Array(18), glob: new Uint8Array(10),
@@ -1826,7 +1827,7 @@ V.sm_pat = {
 };
 
 let smLib = "lib", smLibPage = 0;
-const smLibPath = { lib: "", sd: "" }, SM_ROWS = 6;
+const smLibPath = { lib: "", sd: "" }, SM_ROWS = 6, DC_ROWS = 5;
 V.sm_lib = {
   build() {
     view.className = "sm sm-lib";
@@ -1840,36 +1841,54 @@ V.sm_lib = {
     view.append(tabs, this.list, this.side, this.msg);
     if (smLib === "lib" || smLib === "sd") this.load(); else this.fill();
   },
-  /* The samples on the Daisy's card: a folder and a file, stepped with ‹ ›. Each file step loads that sample into
-     the selected track at once (as the encoder does), so it is heard by playing the track. Control protocol 11 */
+  /* The samples on the Daisy's card: the folder stepped with ‹ ›, its files as a list. A tap on a file loads it into
+     the selected track at once (as the encoder does), so it is heard by playing the track. The names come on request
+     (`files`, BL lines: control protocol 14, v13.35), a page of the list at a time */
   card() {
-    const box = el("div", "s-dc"), d = this.dc = { n: 0 };
-    const step = cmd => () => { if (st.ctl < 11) return this.say("needs firmware v13.32 or newer on the Daisy", true); act(cmd, "dc" + (d.n++)); };
-    const row = (label, cmd, big) => { const r = el("div", "s-dcr"), a = el("button", "b", "‹"), z = el("button", "b", "›"), mid = el("div", "s-dcm"), cnt = el("span", "s-d"), nm = el("span", "s-dcn");
-      a.onclick = step(cmd + " -1"); z.onclick = step(cmd + " 1"); mid.append(el("span", "s-d", label), cnt, nm); r.append(a, mid, z);
-      if (big) { const a10 = el("button", "b", "‹‹"), z10 = el("button", "b", "››"); a10.onclick = step(cmd + " -10"); z10.onclick = step(cmd + " 10"); r.prepend(a10); r.append(z10); r.classList.add("big"); }
-      box.appendChild(r); return { nm, cnt, btns: [...r.querySelectorAll("button")] }; };
-    d.state = el("div", "s-dcs"); box.appendChild(d.state);
-    d.folder = row("folder", "folder", false); d.file = row("file", "file", true);
-    const foot = el("div", "s-dcf");
+    const box = el("div", "s-dc"), d = this.dc = { n: 0, rows: [], ask: "", askT: 0, at: null };
+    const fr = el("div", "s-dcr"), a = el("button", "b", "‹"), z = el("button", "b", "›"), mid = el("div", "s-dcm");
+    d.fnm = el("span", "s-dcn"); d.fcnt = el("span", "s-d"); mid.append(d.fnm, d.fcnt); fr.append(a, mid, z); d.fbtns = [a, z];
+    a.onclick = () => act("folder -1", "dc" + (d.n++)); z.onclick = () => act("folder 1", "dc" + (d.n++));
+    d.list = el("div", "s-ll s-dcl"); d.note = el("div", "s-dcs");
+    for (let k = 0; k < DC_ROWS; k++) { const row = el("button", "s-li"), nm = el("span", "s-nm"); row.appendChild(nm);
+      row.onclick = () => { const i = smLibPage * DC_ROWS + k; act("file at " + i); d.pick = i; this.R(); };
+      d.list.appendChild(row); d.rows.push({ row, nm, key: "" }); }
+    d.list.appendChild(d.note);
+    d.side = el("div", "s-ls s-dcside");
     d.hear = el("button", "b", ""); d.hear.onclick = () => act(`audition ${st.sel + 1}`);
     d.undo = el("button", "b", "UNDO"); d.undo.onclick = () => act("lrec undo");
-    foot.append(d.hear, d.undo); box.appendChild(foot);
+    const nav = el("div", "s-nav"); d.pv = el("button", "b", "‹"); d.nx = el("button", "b", "›"); d.pg = el("span", "", "");
+    d.pv.onclick = () => { smLibPage--; this.R(); }; d.nx.onclick = () => { smLibPage++; this.R(); };
+    nav.append(d.pv, d.pg, d.nx); d.side.append(d.hear, d.undo, nav);
+    box.append(fr, d.list, d.side);
     return box;
   },
   R() {
     const d = this.dc; if (!d) return;
-    const b = st.br || { folder: 0, folders: 0, file: -1, files: 0 }, old = st.ctl && st.ctl < 11, none = !st.sd;
-    d.state.textContent = old ? "The Daisy's firmware is too old for this: flash v13.32" : none ? "No card in the Daisy. Put one in, then restart the Daisy: it does not find a card put in while it runs"
-      : "Card in: " + b.folders + " folders. A step loads that sample into track " + (st.sel + 1) + " at once";
-    d.state.classList.toggle("bad", !!(old || none));
-    const base = n => (n || "").replace(/^.*\//, "");
-    d.folder.nm.textContent = none ? "-" : base(st.brF) || "-"; d.folder.cnt.textContent = b.folders ? (b.folder + 1) + " / " + b.folders : "";
-    d.file.nm.textContent = none || !st.brN || st.brN === "-" ? (b.files ? "tap › for the first" : "none here: folder ›") : st.brN.replace(/\.[a-z0-9]+$/i, "");
-    d.file.cnt.textContent = b.files ? (b.file >= 0 ? b.file + 1 : "-") + " / " + b.files : "";
-    for (const x of d.folder.btns.concat(d.file.btns)) x.disabled = !!(old || none);
-    for (const x of d.file.btns) x.disabled = x.disabled || !b.files;
+    const b = st.br || { folder: 0, folders: 0, file: -1, files: 0 }, old = st.ctl && st.ctl < 14, none = !st.sd, off = !!(old || none);
+    const L = st.brL, base = n => (n || "").replace(/^.*\//, "");
+    d.fnm.textContent = none ? "-" : base(st.brF) || "-"; d.fcnt.textContent = b.folders ? (b.folder + 1) + " / " + b.folders + "   " + b.files + (b.files === 1 ? " file" : " files") : "";
+    for (const x of d.fbtns) x.disabled = off;
+    /* the list follows the browser: a file picked here, with the encoder or on the APC40 is on the page shown */
+    const at = b.folder + ":" + b.file;
+    if (at !== d.at) { if (b.file >= 0) smLibPage = Math.floor(b.file / DC_ROWS); else if (d.at === null || +d.at.split(":")[0] !== b.folder) smLibPage = 0; d.at = at; d.pick = -1; }
+    const pages = Math.max(1, Math.ceil(b.files / DC_ROWS)); smLibPage = Math.max(0, Math.min(pages - 1, smLibPage));
+    const start = smLibPage * DC_ROWS; let missing = false;
+    d.rows.forEach((x, k) => { const i = start + k, there = !off && i < b.files, name = there && L.folder === b.folder ? L.names[i] : undefined;
+      if (there && name === undefined) missing = true;
+      const key = (there ? "1" : "0") + (i === b.file ? "c" : i === d.pick ? "p" : "") + "|" + (name || "");
+      if (key === x.key) return; x.key = key;
+      x.row.hidden = off; x.row.disabled = !there || name === undefined; x.row.className = "s-li" + (i === b.file ? " on" : "");
+      x.nm.textContent = !there ? "" : name === undefined ? "…" : name.replace(/\.[a-z0-9]+$/i, "") + (i === d.pick && i !== b.file ? "  loading" : ""); });
+    d.note.hidden = !off;
+    d.note.textContent = old ? "The Daisy's firmware is too old for this list: flash v13.35" : none ? "No card in the Daisy. Put one in, then restart the Daisy: it does not find a card put in while it runs" : "";
+    d.note.classList.toggle("bad", off);
+    if (missing && st.daisy) { const key = b.folder + ":" + start, now = performance.now();
+      if (key !== d.ask || now - d.askT > 1500) { d.ask = key; d.askT = now; act(`files ${start} ${DC_ROWS}`);
+        setTimeout(() => { if (this.dc === d && curName === "sm_lib") this.R(); }, 1600); } }
+    d.pv.disabled = off || smLibPage === 0; d.nx.disabled = off || smLibPage >= pages - 1; d.pg.textContent = off ? "" : (smLibPage + 1) + " / " + pages;
     d.hear.textContent = "HEAR TRACK " + (st.sel + 1); d.undo.disabled = !st.lp.undo;    /* any undo the Daisy has: a browsed sample is one */
+    if (!off) this.say(!b.folders ? "no samples on the Daisy's card" : !b.files ? "no files in this folder: folder ›" : "a tap loads the sample into track " + (st.sel + 1));
   },
   files() { return smLib === "lib" || smLib === "sd"; },
   say(t, bad) { this.msg.textContent = t || ""; this.msg.classList.toggle("bad", !!bad); },
@@ -1904,12 +1923,14 @@ V.sm_lib = {
         row.onclick = () => { this.pick = i; this.sure = ""; this.render(); }; }
       this.list.appendChild(row);
     });
-    this.side.textContent = "";
+    this.side.textContent = ""; this.side.classList.toggle("four", this.files()); this.wasU = st.lp.undo;
     const it = this.items[this.pick], mk = (t, f, cls, off) => { const b = el("button", "b " + (cls || ""), t); b.disabled = !!off; b.onclick = f; this.side.appendChild(b); return b; };
     if (this.files()) {
       mk("TO TRACK " + (st.sel + 1), async () => { const r = await this.post("/samples/send", { src: smLib, path: this.full(it.file), track: st.sel + 1 }); this.say(r.error || it.file + ": on its way to track " + (st.sel + 1), !!r.error); }, "go", !it);
       mk("HEAR TRACK " + (st.sel + 1), () => act(`audition ${st.sel + 1}`));
       mk("FOLDER UP", () => { const p = smLibPath[smLib]; smLibPath[smLib] = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : ""; smLibPage = 0; this.load(); }, "", !smLibPath[smLib]);
+      /* what the track held before a sample was sent to it (v13.35); older firmware keeps no undo for that */
+      mk("UNDO", () => act("lrec undo"), "", !st.lp.undo || st.lp.undo > 100);
     } else if (smLib === "kits") {
       /* a kit made on the box is tracks 1-8 or 9-16 as they are now; which, follows the selected track.
          Built-in kits can be loaded only; the ones on the card can be renamed and deleted too */
@@ -1963,7 +1984,7 @@ V.sm_lib = {
   S() { smTopS(); if (this.dc) return this.R(); if (this.was !== st.sel + "." + st.set + st.dirty) { this.was = st.sel + "." + st.set + st.dirty; this.render(); } },
   K() { if (smLib === "kits") this.fill(); },
   J() { if (smLib === "sets") this.fill(); },
-  P() { if (this.dc) return this.R(); if (smLib === "kits") this.render(); },
+  P() { if (this.dc) return this.R(); if (smLib === "kits" || (this.files() && this.wasU !== st.lp.undo)) this.render(); },
   X() { const x = st.xfer; if (!x || !this.files()) return;
     const pct = x.chunks ? Math.round(x.acked / x.chunks * 100) : 0;
     this.say(x.state === "failed" ? x.name + ": " + (x.error || "failed") : x.state === "done" ? x.name + " is in track " + x.track + (x.cut ? " (cut to fit)" : "") + (x.kb_per_s ? " · " + x.kb_per_s + " kB/s" : "")
@@ -2062,6 +2083,12 @@ V.sm_sys = {
     this.kv = el("div", "s-kv"); this.log = el("div", "s-log");
     const bt = el("div", "s-bt");
     [["MODULES", () => { location.href = "/?small=1"; }], ["SETTINGS", () => { location.href = "/settings?small=1"; }], ["PAD MAP", () => show("sm_pad")], ["RELOAD", () => location.reload()]].forEach(([n, f]) => { const b = el("button", "b", n); b.onclick = f; bt.appendChild(b); });
+    /* the Daisy's RESET button from here (v13.35): two taps, the second within 4 s */
+    const rs = this.rs = el("button", "b", "RESTART DAISY"); this.sure = false;
+    rs.onclick = () => { if (!st.daisy || st.ctl < 14) return;
+      if (!this.sure) { this.sure = true; clearTimeout(this.sureT); this.sureT = setTimeout(() => { this.sure = false; this.R(); }, 4000); return this.R(); }
+      clearTimeout(this.sureT); this.sure = false; act("restart"); this.R(); };
+    bt.appendChild(rs); this.R();
     view.append(this.kv, this.log, bt);
     this.key = ""; this.L();
   },
@@ -2081,7 +2108,9 @@ V.sm_sys = {
     this.kv.textContent = "";
     for (const [k, v, c] of rows) this.kv.append(el("span", "s-k", k), el("span", "s-v " + c, v));
   },
-  S() { smTopS(); this.B(); },
+  R() { const rs = this.rs; rs.disabled = !st.daisy || st.ctl < 14; rs.className = "b" + (this.sure ? " warn" : "");
+    rs.textContent = this.sure ? (st.dirty ? "UNSAVED: SURE?" : "SURE?") : "RESTART DAISY"; },
+  S() { smTopS(); this.B(); this.R(); },
   L() { this.log.textContent = st.log.slice(-4).join("\n"); },
 };
 
@@ -2137,7 +2166,9 @@ function line(l) {
       st.sets[i] = f[1] === "1" ? { exists: true, bpm: +f[2] / 10, samples: +f[3], loops: +f[4], synths: +f[5], name: f.slice(6).join(" ") } : { exists: false }; call("J"); break; }
     case "JT": { const i = rest.indexOf(" "); st.trans = +rest.slice(0, i); st.transName = rest.slice(i + 1); call("J"); break; }
     /* where the Daisy's own sample browser is (its card): folder and file by number, and their names */
-    case "B": { const f = rest.split(" ").map(Number); if (f.length >= 4) { st.br = { folder: f[0], folders: f[1], file: f[2], files: f[3] }; call("R"); } break; }
+    case "B": { const f = rest.split(" ").map(Number); if (f.length >= 4) { st.br = { folder: f[0], folders: f[1], file: f[2], files: f[3] };
+      if (st.brL.folder !== f[0] || st.brL.files !== f[3]) st.brL = { folder: f[0], files: f[3], names: [] }; call("R"); } break; }
+    case "BL": { const m = /^(\d+) (\d+) (.*)$/.exec(rest); if (m && +m[1] === st.brL.folder) { st.brL.names[+m[2]] = m[3]; call("R"); } break; }
     case "BF": st.brF = rest; call("R"); break;
     case "BN": st.brN = rest; call("R"); break;
     case "KL": { const i = rest.indexOf(" "), k = +rest.slice(0, i); if (k >= 0 && k < 64) { st.kits[k] = rest.slice(i + 1); call("K"); } break; }
@@ -2158,7 +2189,7 @@ function line(l) {
       st.sm = { total: f[0], free: f[1], largest: f[2], claims: f[3], slot: f[4], take: f[5] }; call("P"); call("B"); break; }
   }
 }
-const REPORT_VERSION = 19;
+const REPORT_VERSION = 20;
 let es = null;
 function connect() {
   es = new EventSource("/events?view=apcbox");

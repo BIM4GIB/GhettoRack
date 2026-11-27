@@ -205,6 +205,7 @@ void XferCommit(const char* t)
     mem_file   = xfer_buf;
     mem_size   = xfer_size;
     xfer_state = kXferLoading;
+    BrowseBackup(xfer_track); // v13.35: undo gives back what the track held
     QueueLoad(xfer_track, mem_name, false);
     Out("FC %d ok", id);
 }
