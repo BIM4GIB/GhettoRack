@@ -11,10 +11,15 @@ decks are doing is kept as the last value of each line for pages to read.
     POST /decks {"a": ..}  one of DECK_ACTIONS, or {"a": "load", "deck": 1, "file": "name in the music folder"},
                            or {"a": "at", "file": ..}: the browse cursor onto that file
     SSE  "decks"           the same picture without outlines and files, at most DECKS_PUSH_HZ a second
-    GET  /decks/card?path= a folder of the box's SD card: its folders and audio files
-    POST /decks/copy       {"path": a file or folder on the card}: into the music folder, one at a time
+    GET  /decks/card?src=&path=  a folder of the box's SD card (src=card) or of a USB stick in the box
+                           (src=usb): its folders and audio files
+    POST /decks/copy       {"src", "path": a file or folder there}: into the music folder, one at a time
     POST /decks/delete     {"file": ..}: out of the music folder; not while it is on a deck
-    POST /decks/upload?name=  the body into the music folder (a phone or a Mac sends a track)
+    POST /decks/upload?name=&dir=  the body into the music folder, in a folder of it if said (a phone or
+                           a Mac sends a track, or a folder of them dropped on the page)
+
+A track can also be loaded straight from the card or the stick ({"a": "load", "src": "usb", ..}):
+it is read whole into memory, so the stick can be pulled once it is on the deck.
 
 A controller reaches the decks through a route to "decks" (the module's own:
 the Numark by name). Sysex and clock from it are not passed on.
@@ -117,7 +122,7 @@ class Decks:
         return {"wanted": self.wanted(), "running": self.running(), "connected": self.connected(),
                 "card": self.b.args.decks_card, "card_here": self.card_here(), "engine": bool(self.binary and os.path.exists(self.binary)),
                 "controllers": [p.name for p in self.controllers()], "starts": self.starts, "dropped": self.dropped,
-                "error": self.error, "health": self.health, "card": self.b.sd_ready(), "copy": self.copy, "free": self.free()}
+                "error": self.error, "health": self.health, "card": self.b.sd_ready(), "usb": self.source("usb") is not None, "copy": self.copy, "free": self.free()}
 
     def picture(self):
         return {"wanted": self.wanted(), "running": self.connected(), "error": self.error, "said": self.said, "decks": self.decks, "mix": self.mix, "fx": self.fx, "browse": self.browse,
@@ -131,6 +136,15 @@ class Decks:
                 if not n.startswith(".") and n.lower().endswith(DECKS_EXT):
                     out.append(os.path.join(root, n))
         return [os.path.relpath(p, self.music) for p in sorted(out)[:DECKS_FILES_MAX]]
+
+    def source(self, src):
+        """The folder of an outside source that is there now, or None. card: the box's SD card; usb: a stick"""
+        if src == "card":
+            return self.b.roots("sd")
+        u = self.b.args.usb
+        if src == "usb" and u and os.path.isdir(u) and (os.path.ismount(u) or self.b.args.sdcard_any):
+            return u
+        return None
 
     def rel(self, path):
         """A file of the music folder as pages name it, or None"""
@@ -175,11 +189,13 @@ class Decks:
             # as the engine lists it: under the folder it was given, whatever links lead there
             line = "at " + os.path.join(self.music, os.path.relpath(path, os.path.realpath(self.music)))
         elif a == "load":
-            deck, rel = d.get("deck"), d.get("file")
-            path = safe_join(self.music, rel) if isinstance(rel, str) and rel else None
-            if deck not in (1, 2) or path is None or not os.path.isfile(path) or not path.lower().endswith(AUDIO_EXT) \
+            deck, rel, src = d.get("deck"), d.get("file"), d.get("src", "music")
+            root = self.music if src == "music" else self.source(src) if src in ("card", "usb") else None
+            path = safe_join(root, rel) if isinstance(rel, str) and rel else None
+            if deck not in (1, 2) or path is None or not os.path.isfile(path) or not path.lower().endswith(DECKS_EXT) \
                     or "\n" in path or "\r" in path:
-                return 400, {"error": "deck 1 or 2 and a file in the music folder"}
+                return 400, {"error": "deck 1 or 2 and a file in the music folder" if src == "music" else
+                             "deck 1 or 2 and a file on the %s" % ("box's SD card" if src == "card" else "USB stick")}
             line = "load %d %s" % (deck, path)
         else:
             line = deck_action(a)
@@ -206,11 +222,11 @@ class Decks:
         self.send("scan")
         return 200, {"ok": True}
 
-    def card_list(self, rel):
-        root = self.b.roots("sd")
+    def card_list(self, rel, src="card"):
+        root = self.source(src)
         d = safe_join(root, rel)
         if d is None or not os.path.isdir(d):
-            return {"error": "no SD card in the box" if root is None else "no such folder on the card"}
+            return {"error": ("no USB stick in the box" if src == "usb" else "no SD card in the box") if root is None else "no such folder there"}
         dirs, files = [], []
         try:
             for n in sorted(os.listdir(d), key=str.lower):
@@ -224,17 +240,17 @@ class Decks:
         except OSError as e:
             return {"error": str(e)}
         here = os.path.relpath(d, os.path.realpath(root))
-        return {"path": "" if here == "." else here,
+        return {"src": src, "path": "" if here == "." else here,
                 "dirs": dirs[:500], "files": files[:DECKS_FILES_MAX]}
 
     def copy_start(self, d):
-        rel = d.get("path")
-        root = self.b.roots("sd")
+        rel, which = d.get("path"), d.get("src", "card")
+        root = self.source(which) if which in ("card", "usb") else None
         src = safe_join(root, rel) if isinstance(rel, str) and rel else None
         if root is None:
-            return 400, {"error": "no SD card in the box"}
+            return 400, {"error": "no USB stick in the box" if which == "usb" else "no SD card in the box"}
         if src is None or not os.path.exists(src) or src == os.path.realpath(root):
-            return 400, {"error": "a file or a folder on the card"}
+            return 400, {"error": "a file or a folder there"}
         if self.copy and self.copy["running"]:
             return 409, {"error": "still copying " + self.copy["name"]}
         if os.path.isfile(src):
@@ -276,8 +292,11 @@ class Decks:
         self.send("scan")
         self.b.broadcast(sse_event("decks_copy", self.copy))
 
-    async def upload(self, reader, n, name):
+    async def upload(self, reader, n, name, into=""):
         name = os.path.basename(urllib.parse.unquote(name)).strip()
+        parts = [p.strip() for p in urllib.parse.unquote(into).replace("\\", "/").split("/") if p.strip()]
+        if len(parts) > 8 or any(p.startswith(".") or len(p) > 100 or "\n" in p or "\r" in p for p in parts):
+            return 400, {"error": "dir: folders in the music folder, 8 deep at most"}
         if not name or name.startswith(".") or not name.lower().endswith(DECKS_EXT) or "\n" in name or "\r" in name:
             return 400, {"error": "name a music file (?name=track.mp3)"}
         free = self.free()
@@ -285,10 +304,11 @@ class Decks:
             return 400, {"error": "empty or over %d MB" % (DECKS_UPLOAD_MAX >> 20)}
         if free is not None and free - n < DECKS_KEEP_FREE:
             return 507, {"error": "the box is full"}
-        os.makedirs(self.music, exist_ok=True)
-        dest = os.path.join(self.music, name)
+        folder = os.path.join(self.music, *parts)
+        dest = os.path.join(folder, name)
         part = dest + ".part"
         try:
+            os.makedirs(folder, exist_ok=True)
             with open(part, "wb") as f:
                 left = n
                 while left:
@@ -305,7 +325,7 @@ class Decks:
                 pass
             return 400, {"error": str(e)}
         self.send("scan")
-        return 200, {"ok": True, "file": name}
+        return 200, {"ok": True, "file": "/".join(parts + [name])}
 
     # ---- from the engine ----
 
@@ -336,7 +356,14 @@ class Decks:
                     self.decks[d]["file"] = None
                     self.waves.pop(d + 1, None)
             elif k == "F":
-                self.decks[int(f[1]) - 1]["file"] = self.rel(line.split(" ", 3)[3])
+                path = line.split(" ", 3)[3]
+                rel, src = self.rel(path), "music"
+                if rel is None:                 # straight off the card or the stick
+                    for which in ("usb", "card"):
+                        root = self.source(which)
+                        if root and os.path.realpath(path).startswith(os.path.realpath(root) + os.sep):
+                            src = which
+                self.decks[int(f[1]) - 1].update(file=rel, src=src if rel is not None or src != "music" else None)
             elif k == "W":
                 self.waves[int(f[1])] = {"track": int(f[2]), "peaks": f[3]}
             elif k == "B":

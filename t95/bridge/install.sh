@@ -66,6 +66,7 @@ grep -q '^apcbox-bridge:' /etc/passwd || { systemctl stop apcbox-bridge.service 
 install -m 755 "$REPO/t95/helper/ghettorack_helper.py" "$DEST/ghettorack_helper.py"
 install -m 755 "$REPO/t95/helper/ghettorack-bt.sh" "$DEST/ghettorack-bt.sh"
 install -m 755 "$HERE/sdcard-mount.sh" "$DEST/sdcard-mount.sh"
+install -m 755 "$HERE/usb-mount.sh" "$DEST/usb-mount.sh"
 # This box's own arguments for the bridge (the unit reads the file). Never written over: it is the
 # box's to change. Made only where a board is known to need some: on a Raspberry Pi the sound
 # passed on to its own output ran up to 150 ms late with the defaults (pi4/README.md).
@@ -103,6 +104,7 @@ udevadm trigger --action=add --subsystem-match=lirc
 udevadm trigger --action=add --subsystem-match=usb --attr-match=idVendor=0483
 udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=vfat
 udevadm trigger --action=add --subsystem-match=block --property-match=ID_FS_TYPE=exfat
+udevadm trigger --action=add --subsystem-match=block --property-match=ID_BUS=usb
 systemctl daemon-reload
 systemctl enable ghettorack-helper.service
 systemctl restart ghettorack-helper.service

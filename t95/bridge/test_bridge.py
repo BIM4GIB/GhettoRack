@@ -17,6 +17,7 @@ reading while a controller floods, ping round trips.
 DecksTest: the Numark DJ module's bridge part, with the real deck engine
 (decks/build.sh first) and no sound card.
 """
+import base64
 import errno
 import json
 import os
@@ -5510,6 +5511,10 @@ class DecksTest(unittest.TestCase):
         make_wav(os.path.join(cls.card, "set", "deep", "b.wav"), secs=1.0, rate=44100)
         with open(os.path.join(cls.card, "set", "notes.txt"), "w") as f:
             f.write("not music")
+        cls.stick = os.path.join(cls.dir, "stick")                 # a USB stick in the box
+        os.makedirs(os.path.join(cls.stick, "mix"))
+        make_wav(os.path.join(cls.stick, "top.wav"), secs=1.0, rate=44100)
+        make_wav(os.path.join(cls.stick, "mix", "s1.wav"), secs=1.5, rate=44100)
         cls.env = dict(os.environ)
         if not shutil.which("ffmpeg"):       # the desk: a stand-in that reads what make_wav writes (44.1 kHz, 16 bit)
             bin_ = os.path.join(cls.dir, "bin")
@@ -5531,7 +5536,7 @@ class DecksTest(unittest.TestCase):
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
              "--midi", cls.numark.link + "=MixTrack Pro FX", "--midi", cls.keys.link + "=LPK25",
-             "--deckd", DECKD, "--decks-card", "null", "--music", cls.music, "--sdcard", cls.card, "--sdcard-any",
+             "--deckd", DECKD, "--decks-card", "null", "--music", cls.music, "--sdcard", cls.card, "--sdcard-any", "--usb", cls.stick,
              "--selector", os.path.join(REPO, "t95", "ui", "selector.html"), "--dj-page", os.path.join(REPO, "t95", "ui", "dj.html")] + list(more),
             stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"), env=cls.env)
         cls.addClassCleanup(p.kill)
@@ -5568,7 +5573,7 @@ class DecksTest(unittest.TestCase):
         d = self.decks()
         self.assertFalse(d["running"])
         self.assertEqual(d["files"], ["one.wav", os.path.join("sub", "two.wav")])
-        self.assertTrue(d["info"]["card"])
+        self.assertTrue(d["info"]["card"] and d["info"]["usb"])
         self.assertFalse(d["wanted"])
         self.assertNotIn("decks", json.loads(BridgeTest.get("/routes")[2])["destinations"])
 
@@ -5683,6 +5688,40 @@ class DecksTest(unittest.TestCase):
             self.assertEqual(up(bad, body)[0], 400, bad)
         d = self.wait_decks(lambda d: d["browse"]["count"] == 6)
         self.assertIn("sent track.wav", d["files"])
+        # a USB stick: listed, played straight off it, copied from; never out of it
+        c = json.loads(BridgeTest.get("/decks/card?src=usb")[2])
+        self.assertEqual((c["src"], c["path"], c["dirs"], c["files"]), ("usb", "", ["mix"], ["top.wav"]))
+        self.assertEqual(json.loads(BridgeTest.get("/decks/card?src=usb&path=mix")[2])["files"], ["s1.wav"])
+        self.post("/decks", {"a": "play 2 0"})
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "src": "usb", "file": "mix/s1.wav"})[0], 200)
+        d = self.wait_decks(lambda d: d["decks"][1].get("name") == "s1" and abs(d["decks"][1]["len"] - 1.5) < 0.05, 10)
+        self.assertEqual((d["decks"][1]["file"], d["decks"][1]["src"]), (None, "usb"))
+        self.assertNotIn("mix/s1.wav", d["files"])
+        for src, f in (("usb", "../music/one.wav"), ("usb", "nothere.wav"), ("usb", "mix"), ("nope", "top.wav"), ("card", "top.wav"), ("usb", "")):
+            self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "src": src, "file": f})[0], 400, (src, f))
+        self.assertEqual(self.post("/decks/copy", {"src": "usb", "path": "top.wav"})[0], 200)
+        self.wait_decks(lambda d: "top.wav" in d["files"] and not d["info"]["copy"]["running"])
+        self.assertEqual(self.post("/decks/copy", {"src": "usb", "path": "../card"})[0], 400)
+        self.assertEqual(self.post("/decks/copy", {"src": "floppy", "path": "top.wav"})[0], 400)
+        # a folder dropped on the page arrives with its folders
+        def up_in(name, folder):
+            req = urllib.request.Request("http://127.0.0.1:%d/decks/upload?name=%s&dir=%s" % (self.http, urllib.parse.quote(name), urllib.parse.quote(folder)),
+                                         data=body, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        self.assertEqual(up_in("x.wav", "House/Deep cuts"), (200, {"ok": True, "file": "House/Deep cuts/x.wav"}))
+        self.assertTrue(os.path.isfile(os.path.join(self.music, "House", "Deep cuts", "x.wav")))
+        for bad in ("../up", "a/../../b", ".hidden", "a/.b", "/".join("abcdefghi")):
+            self.assertEqual(up_in("y.wav", bad)[0], 400, bad)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "up")) or os.path.exists(os.path.join(self.dir, "b")))
+        self.wait_decks(lambda d: "House/Deep cuts/x.wav" in d["files"])
+        for f in ("top.wav", "House/Deep cuts/x.wav"):                      # as it was
+            self.assertEqual(self.post("/decks/delete", {"file": f})[0], 200)
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "file": "sub/two.wav"})[0], 200)
+        self.wait_decks(lambda d: d["decks"][1].get("name") == "two" and d["browse"]["count"] == 6, 10)
         # delete: not what is on a deck, never outside the folder
         self.assertEqual(self.post("/decks/delete", {"file": "one.wav"})[0], 409)
         self.assertEqual(self.post("/decks/delete", {"file": "../outside.wav"})[0], 400)
@@ -5947,21 +5986,45 @@ class DecksTest(unittest.TestCase):
             self.wait_decks(lambda d: "sent track.wav" not in d["files"] and d["browse"]["count"] == 4)
             pg.wait_for_function("![...document.querySelectorAll('.g-rows .g-nm')].some(e => e.textContent === 'sent track')")
             # the box's SD card
-            side("FROM CARD").click()
+            side("CARD / USB").click()                                              # both are in the box: which?
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('card and stick')")
+            self.assertEqual(names(), ["box SD card", "USB stick"])
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "LIB, card or stick")
+            pg.locator(".g-li", has_text="USB stick").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('USB stick')")
+            self.assertEqual(names(), ["..", "mix", "top.wav"])
+            self.assertTrue(side("COPY").is_disabled() and side("TO DECK 2").is_disabled(), "nothing picked")
+            pg.locator(".g-li", has_text="top.wav").click()                         # straight from the stick onto a deck
+            pg.wait_for_selector(".g-li.on >> text=top.wav")
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "LIB, stick")
+            side("TO DECK 2").click()
+            d = self.wait_decks(lambda d: d["decks"][1].get("name") == "top" and d["decks"][1]["len"] > 0, 10)
+            self.assertEqual((d["decks"][1]["file"], d["decks"][1]["src"]), (None, "usb"))
+            self.assertNotIn("top.wav", d["files"])                                 # played from there, not copied
+            pg.locator(".g-li.dir", has_text="mix").click()                         # a folder opens at a tap
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('USB stick / mix')")
+            self.assertEqual(names(), ["..", "s1.wav"])
+            shot("small-dj-card")
+            side("COPY ALL").click()                                                # the whole folder onto the box
+            self.wait_decks(lambda d: "mix/s1.wav" in d["files"])
+            pg.locator(".g-li", has_text="..").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('USB stick') && !document.querySelector('.g-djpath').textContent.includes('mix')")
+            pg.locator(".g-li", has_text="..").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('card and stick')")
+            pg.locator(".g-li", has_text="box SD card").click()
             pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('box SD card')")
-            self.assertEqual(names(), ["set", "loose.wav"])
-            self.assertTrue(side("COPY").is_disabled())
-            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "LIB, card")
+            self.assertEqual(names(), ["..", "set", "loose.wav"])
             pg.locator(".g-li", has_text="loose.wav").click()
             side("COPY").click()
             self.wait_decks(lambda d: "loose.wav" in d["files"])
             pg.locator(".g-li.dir", has_text="set").click()
-            side("OPEN").click()
             pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('box SD card / set')")
             self.assertEqual(names(), ["..", "deep", "a.wav"])
-            shot("small-dj-card")
             side("MUSIC").click()
             pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('music')")
+            self.assertEqual(self.post("/decks/delete", {"file": "mix/s1.wav"})[0], 200)        # as it was
+            self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "file": "sub/two.wav"})[0], 200)
+            self.wait_decks(lambda d: d["decks"][1].get("name") == "two", 10)
             # DECKS: the outline, play and stop
             pg.locator(".g-tab", has_text="DECKS").click()
             pg.wait_for_function("document.querySelectorAll('.g-djwave')[0].querySelectorAll('i').length === 138")
@@ -6144,6 +6207,16 @@ class DecksTest(unittest.TestCase):
                                                             "buffer": open(os.path.join(self.card, "loose.wav"), "rb").read()})
                     self.wait_decks(lambda d: "from mac.wav" in d["files"], 10)
                     pg.wait_for_function("document.querySelector('.msg').textContent.includes('is on the box')")
+                    # tracks dropped on the page: the ones that are music go up, the rest is left
+                    b64 = base64.b64encode(open(os.path.join(self.card, "loose.wav"), "rb").read()).decode()
+                    pg.evaluate("""b64 => { const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), dt = new DataTransfer();
+                        dt.items.add(new File([bytes], "dropped.wav", { type: "audio/wav" })); dt.items.add(new File(["hello"], "notes.txt", { type: "text/plain" }));
+                        window.__dt = dt; window.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt, bubbles: true, cancelable: true })); }""", b64)
+                    pg.wait_for_function("document.body.classList.contains('drop')")
+                    pg.evaluate("window.dispatchEvent(new DragEvent('drop', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))")
+                    self.wait_decks(lambda d: "dropped.wav" in d["files"], 10)
+                    pg.wait_for_function("!document.body.classList.contains('drop') && document.querySelector('.msg').textContent === 'dropped.wav is on the box'")
+                    self.assertNotIn("notes.txt", os.listdir(self.music))
                     w0, = pg.evaluate("[document.querySelector('.wave').getBoundingClientRect().width]")
                     pg.locator(".wave").nth(0).click(position={"x": w0 / 2, "y": 10})      # a click on the outline: there
                     self.wait_decks(lambda d: abs(d["decks"][0]["pos"] - 2.0) < 0.1)

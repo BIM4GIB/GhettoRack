@@ -296,7 +296,7 @@ class WebMixin:
                     writer.close()
                     return
                 if path == "/decks/upload":
-                    code, out = await self.decks.upload(reader, n, params.get("name", ""))
+                    code, out = await self.decks.upload(reader, n, params.get("name", ""), params.get("dir", ""))
                     await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
                     writer.close()
                     return
@@ -362,7 +362,8 @@ class WebMixin:
             elif path == "/dj":
                 await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["dj"])
             elif path == "/decks/card":
-                out = await asyncio.get_running_loop().run_in_executor(None, self.decks.card_list, urllib.parse.unquote(params.get("path", "")))
+                out = await asyncio.get_running_loop().run_in_executor(None, self.decks.card_list, urllib.parse.unquote(params.get("path", "")),
+                                                                         "usb" if params.get("src") == "usb" else "card")
                 await self.reply(writer, 400 if "error" in out else 200, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/decks":             # the DJ module's engine: what it is doing (decks.py)
                 out = await asyncio.get_running_loop().run_in_executor(None, self.decks.full)

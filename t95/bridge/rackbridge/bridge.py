@@ -244,6 +244,7 @@ def main(argv=None):
                     help="a module that has no page yet may be chosen all the same (POST /select); repeatable")
     ap.add_argument("--sdcard", default="/media/sdcard", help="where the T95's SD card is mounted (udev rule)")
     ap.add_argument("--sysblock", default="/sys/block", help="where the block devices are listed (is a card in the SD slot)")
+    ap.add_argument("--usb", default="/media/usb", help="where a USB stick in the box is mounted (udev rule): music for the decks")
     ap.add_argument("--sdcard-any", action="store_true", help="use --sdcard even if it isn't a mount point (tests)")
     ap.add_argument("--rtp-port", type=int, default=5004, help="network MIDI control port (data is +1); 0 = off")
     ap.add_argument("--net-name", help="the name other devices see (default GhettoRack)")

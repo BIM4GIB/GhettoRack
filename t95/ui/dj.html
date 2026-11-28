@@ -47,6 +47,8 @@ body.lay-tabs main{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax
 body.lay-tabs main>section:not(.show){display:none!important}
 .msg{flex:none;font-family:var(--mono);font-size:12px;color:var(--dim);padding:6px 18px 8px;height:30px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-top:1px solid var(--line)}
 .msg.bad{color:var(--red)}
+body.drop::after{content:"drop tracks or folders: they go onto the box";position:fixed;inset:10px;z-index:10;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600;
+  color:var(--green);background:#0b0c0de0;border:2px dashed var(--green);border-radius:14px;pointer-events:none}
 /* decks */
 #s-decks{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
 body.upright #s-decks{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
@@ -207,9 +209,14 @@ const start = () => post("/select", { module: "dj" }).then(full);
 /* The library: the music folder as folders and files, the same cursor as the Numark's browse
    knob (the engine's), and a second list for the box's SD card. `dir` and the card's folder are
    view choices; the cursor is the engine's. */
-const L = { dir: "", card: null, pick: null, seen: null, sure: false,
+const MUSIC_EXT = /\.(mp3|wav|wave|flac|aif|aiff|m4a|ogg|opus|aac)$/i;
+const SRC = { card: "box SD card", usb: "USB stick" };
+const L = { dir: "", card: null, pick: null, seen: null, sure: false,     /* card: a folder outside the music folder, on the box's SD card or a USB stick; { src: null }: which of the two */
+  sources() { return ["card", "usb"].filter(k => D.info[k]); },
   rows() {
-    if (this.card) { const c = this.card, out = c.path ? [{ kind: "up", name: "..", note: "up" }] : [];
+    if (this.card) { const c = this.card;
+      if (!c.src) return this.sources().map(k => ({ kind: "dir", name: SRC[k], src: k, path: k }));
+      const out = c.path || this.sources().length > 1 ? [{ kind: "up", name: "..", note: "up" }] : [];
       for (const n of c.dirs || []) out.push({ kind: "dir", name: n, path: (c.path ? c.path + "/" : "") + n });
       for (const n of c.files || []) out.push({ kind: "file", name: n, path: (c.path ? c.path + "/" : "") + n });
       return out; }
@@ -223,18 +230,39 @@ const L = { dir: "", card: null, pick: null, seen: null, sure: false,
   cursor() { return (D.S && D.S.browse && D.S.browse.file) || null; },
   follow() { const c = this.cursor(); if (c === this.seen) return false; this.seen = c; this.sure = false;      /* the knob moved it: show where it is */
     if (c && !this.card) this.dir = c.includes("/") ? c.slice(0, c.lastIndexOf("/") + 1) : ""; return true; },
-  where() { return this.card ? "box SD card" + (this.card.path ? " / " + this.card.path.split("/").join(" / ") : "") : "music" + (this.dir ? " / " + this.dir.slice(0, -1).split("/").join(" / ") : ""); },
+  where() { const c = this.card;
+    return c ? (c.src ? SRC[c.src] + (c.path ? " / " + c.path.split("/").join(" / ") : "") : "card and stick") : "music" + (this.dir ? " / " + this.dir.slice(0, -1).split("/").join(" / ") : ""); },
   count() { const r = this.rows().filter(x => x.kind === "file").length; return r + (r === 1 ? " track" : " tracks"); },
-  async openCard(path) { try { const r = await fetch("/decks/card?path=" + encodeURIComponent(path || "")), j = await r.json();
+  async openCard(path, src) { src = src || (this.card && this.card.src) || "card";
+    try { const r = await fetch("/decks/card?src=" + src + "&path=" + encodeURIComponent(path || "")), j = await r.json();
       if (j.error) return j.error; this.card = j; this.pick = null; return ""; } catch (e) { return "the box isn't answering"; } },
+  openExt() { const s = this.sources(); this.pick = null;         /* one thing plugged in: straight into it. Both: choose */
+    if (s.length === 1) return this.openCard("", s[0]);
+    if (!s.length) return "no SD card and no USB stick in the box";
+    this.card = { src: null, path: "" }; return ""; },
   tap(r) { this.sure = false;
-    if (this.card) { if (r.kind === "up") return this.openCard(this.card.path.includes("/") ? this.card.path.slice(0, this.card.path.lastIndexOf("/")) : "");
-      this.pick = r; return ""; }
+    if (this.card) { const c = this.card;
+      if (r.kind === "up") { this.pick = null; if (!c.path) { this.card = { src: null, path: "" }; return ""; }
+        return this.openCard(c.path.includes("/") ? c.path.slice(0, c.path.lastIndexOf("/")) : ""); }
+      if (r.kind === "dir") return r.src ? this.openCard("", r.src) : this.openCard(r.path);
+      this.pick = this.pick && this.pick.path === r.path ? null : r; return ""; }
     if (r.kind === "up") { const d = this.dir.slice(0, -1); this.dir = d.includes("/") ? d.slice(0, d.lastIndexOf("/") + 1) : ""; return ""; }
     if (r.kind === "dir") { this.dir = r.path; return ""; }
     return ask("at", { file: r.path }).then(j => j.error || ""); },
   copyLine() { const c = D.copy; if (!c) return "";
     return c.running ? "copying " + c.name + ": " + c.done + " of " + c.total : c.error ? "copying " + c.name + " stopped: " + c.error + " (" + c.done + " of " + c.total + " done)" : ""; } };
+
+/* What the buttons do in the card's or the stick's list, the same in every layout: a picked
+   track goes to a deck straight from there (it is read whole, the stick can come out after),
+   or onto the box; with none picked, COPY ALL puts the whole folder on the box. */
+const Ext = {
+  deckOk(n) { return !!(L.card && L.card.src && L.pick && L.pick.kind === "file" && D.S && D.S.running && !D.bad && !deck(n - 1).playing); },
+  load(n) { return ask("load", { deck: n, src: L.card.src, file: L.pick.path }); },
+  copyOk() { return !!(L.card && L.card.src && (L.pick || L.card.path) && !(D.copy && D.copy.running)); },
+  copyLabel() { return L.card && L.card.src && !L.pick && L.card.path ? "COPY ALL" : "COPY"; },
+  copy() { return post("/decks/copy", { src: L.card.src, path: L.pick ? L.pick.path : L.card.path }); },
+  fromLabel() { const s = L.sources(); return s.length === 1 ? (s[0] === "usb" ? "FROM USB" : "FROM CARD") : "CARD / USB"; },
+  hint() { const c = L.card; return !c ? "" : !c.src ? "the box's SD card, or the USB stick in it" : L.pick ? "TO DECK plays it straight from here, COPY puts it on the box" : c.path ? "pick a track; COPY ALL puts this folder on the box" : "pick a track or open a folder"; } };
 
 /* ---- the 480x320 touch screen (?small). DECKS: the two decks. LIB: the music folder, or the
    box's SD card. MIX: where the Numark's knobs stand, and the levels (read only: its knobs are
@@ -318,10 +346,14 @@ function small() {
     show();
   }
   /* LIB's four buttons: the music folder, or the card */
-  const side1 = () => L.card ? (L.pick && L.pick.kind === "dir" ? L.openCard(L.pick.path).then(e => { if (e) say(e, true); U.key = ""; show(); }) : 0) : ask("pick 1").then(done);
-  const side2 = () => L.card ? (L.pick ? post("/decks/copy", { path: L.pick.path }).then(done).then(j => { if (j.ok) say("copying " + j.total + (j.total === 1 ? " track" : " tracks")); }) : 0) : ask("pick 2").then(done);
-  const side3 = () => { L.sure = false; if (L.card) { L.card = null; L.pick = null; full(); U.key = ""; show(); } else L.openCard("").then(e => { if (e) say(e, true); U.key = ""; show(); }); };
-  const side4 = () => { const c = L.cursor(); if (L.card || !c) return;
+  const redo = e => { if (e) say(e, true); U.key = ""; show(); };
+  const side1 = () => L.card ? (Ext.deckOk(1) ? Ext.load(1).then(done) : 0) : ask("pick 1").then(done);
+  const side2 = () => L.card ? (Ext.deckOk(2) ? Ext.load(2).then(done) : 0) : ask("pick 2").then(done);
+  const side3 = () => { L.sure = false;
+    if (L.card) { if (Ext.copyOk()) Ext.copy().then(done).then(j => { if (j.ok) say("copying " + j.total + (j.total === 1 ? " track" : " tracks")); }); }
+    else Promise.resolve(L.openExt()).then(redo); };
+  const side4 = () => { if (L.card) { L.card = null; L.pick = null; full(); return redo(""); }
+    const c = L.cursor(); if (!c) return;
     if (!L.sure) { L.sure = true; return show(); }
     L.sure = false; post("/decks/delete", { file: c }).then(done).then(j => { if (j.ok) say("deleted " + c.split("/").pop()); full(); }); };
 
@@ -331,7 +363,8 @@ function small() {
     else if (L.copyLine()) { t = L.copyLine(); bad = !!(D.copy && D.copy.error); }
     else if (!live()) { t = tab === "decks" ? "" : why(); }
     else if (tab === "mix") { const h = (D.S && D.S.health) || {}; if (fxLine()) t = fxLine() + (h.xruns ? ". " + h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : ""); else if (h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts"); }
-    else if (tab === "lib" && !L.card && !D.files.length) t = "no music on the box: FROM CARD copies it from the SD card";
+    else if (tab === "lib" && L.card) t = Ext.hint();
+    else if (tab === "lib" && !D.files.length) t = "no music on the box: a USB stick or an SD card brings it";
     else if (tab === "pads") t = Pads.clear[pd - 1] ? "tap the pad to clear" : loopLine(deck(pd - 1)) || (deck(pd - 1).bpm ? "LOOP makes one of " + beatsText(deck(pd - 1).beats || 4) + (deck(pd - 1).beats === 1 ? " beat" : " beats") + " from here" : "");
     text(U.msg, t); cls(U.msg, "bad", bad);
   }
@@ -371,10 +404,10 @@ function small() {
       if (U.where.data !== L.where()) U.where.data = L.where(); text(U.count, L.count());
       if (key !== U.key) { U.key = key; if (moved && !L.card) { const k = rows.findIndex(r => r.path === L.cursor()); if (k >= 0) U.pg.page = Math.floor(k / 5); } U.pg.set(rows); }
       const c = L.cursor(), on = c ? [0, 1].some(i => deck(i).file === c) : false, [b1, b2, b3, b4] = U.b;
-      if (L.card) { text(b1, "OPEN"); b1.disabled = !(L.pick && L.pick.kind === "dir"); cls(b1, "go", false); text(b2, "COPY"); b2.disabled = !L.pick || !!(D.copy && D.copy.running); cls(b2, "go", !b2.disabled);
-        text(b3, "MUSIC"); b3.disabled = false; text(b4, "DELETE"); b4.disabled = true; cls(b4, "warn", false); }
+      if (L.card) { text(b1, "TO DECK 1"); b1.disabled = !Ext.deckOk(1); cls(b1, "go", !b1.disabled); text(b2, "TO DECK 2"); b2.disabled = !Ext.deckOk(2); cls(b2, "go", !b2.disabled);
+        text(b3, Ext.copyLabel()); b3.disabled = !Ext.copyOk(); text(b4, "MUSIC"); b4.disabled = false; cls(b4, "warn", false); }
       else { text(b1, "TO DECK 1"); b1.disabled = !live() || !c || !!deck(0).playing; cls(b1, "go", !b1.disabled); text(b2, "TO DECK 2"); b2.disabled = !live() || !c || !!deck(1).playing; cls(b2, "go", !b2.disabled);
-        text(b3, "FROM CARD"); b3.disabled = !D.info.card; text(b4, L.sure ? "SURE?" : "DELETE"); b4.disabled = !c || on; cls(b4, "warn", L.sure && !b4.disabled); }
+        text(b3, Ext.fromLabel()); b3.disabled = !L.sources().length; text(b4, L.sure ? "SURE?" : "DELETE"); b4.disabled = !c || on; cls(b4, "warn", L.sure && !b4.disabled); }
     } else {
       const M = (S && S.mix) || {};
       for (let i = 0; i < 2; i++) { const d = deck(i), u = U.strip[i]; cls(u.box, "play", d.playing); text(u.name, d.track ? d.name || "" : "no track"); cls(u.name, "g-dim", !d.track);
@@ -446,15 +479,39 @@ function big() {
   const lpath = el("div", "lpath"), lwhere = document.createTextNode(""), lcount = el("span"); lpath.append(lwhere, lcount);
   const rowsEl = el("div", "rows"), side = el("div", "side"), nav = el("div", "nav"), navN = el("span");
   const file = el("input"); file.type = "file"; file.multiple = true; file.accept = "audio/*,.mp3,.wav,.flac,.aif,.aiff,.m4a,.ogg,.opus,.aac"; file.style.display = "none";
-  file.onchange = async () => { const fs = [...file.files]; file.value = ""; let k = 0;
-    for (const f of fs) { k++; note = "sending " + f.name + " (" + k + " of " + fs.length + ")"; noteBad = false; noteTill = performance.now() + 600000; draw();
-      try { const j = await (await fetch("/decks/upload?name=" + encodeURIComponent(f.name), { method: "POST", body: f })).json(); if (j.error) { say(f.name + ": " + j.error, true); await full(); return; } }
-      catch (e) { say("the box isn't answering", true); return; } }
-    say(fs.length === 1 ? fs[0].name + " is on the box" : fs.length + " tracks are on the box"); full(); };
-  const B = { a: btn("", () => L.card ? (L.pick && L.pick.kind === "dir" ? L.openCard(L.pick.path).then(e => { say(e, true); libKey = ""; draw(); }) : 0) : ask("pick 1").then(done)),
-    b: btn("", () => L.card ? (L.pick ? post("/decks/copy", { path: L.pick.path }).then(done).then(j => { if (j.ok) say("copying " + j.total + (j.total === 1 ? " track" : " tracks")); }) : 0) : ask("pick 2").then(done)),
-    up: btn("UPLOAD", () => file.click()),
-    card: btn("", () => { L.sure = false; if (L.card) { L.card = null; L.pick = null; full(); } else L.openCard("").then(e => { say(e, true); libKey = ""; draw(); }); libKey = ""; draw(); }),
+  /* tracks from this device: picked with UPLOAD, or dropped on the page (files, or folders with what is in them) */
+  let sending = false;
+  async function send(list) {             /* [{ file, dir }]: one after the other, the folders kept */
+    list = list.filter(x => MUSIC_EXT.test(x.file.name) && !x.file.name.startsWith("."));
+    if (!list.length) return say("no music in that", true);
+    if (sending) return say("still sending", true);
+    sending = true; let k = 0;
+    for (const x of list) { k++; note = "sending " + k + " of " + list.length + ": " + x.file.name; noteBad = false; noteTill = performance.now() + 600000; draw();
+      try { const j = await (await fetch("/decks/upload?name=" + encodeURIComponent(x.file.name) + (x.dir ? "&dir=" + encodeURIComponent(x.dir) : ""), { method: "POST", body: x.file })).json();
+        if (j.error) { sending = false; say(x.file.name + ": " + j.error + (k > 1 ? " (" + (k - 1) + " sent)" : ""), true); await full(); return; } }
+      catch (e) { sending = false; say("the box isn't answering" + (k > 1 ? " (" + (k - 1) + " sent)" : ""), true); return; } }
+    sending = false; say(list.length === 1 ? list[0].file.name + " is on the box" : list.length + " tracks are on the box"); full(); }
+  file.onchange = () => { const fs = [...file.files]; file.value = ""; send(fs.map(x => ({ file: x, dir: "" }))); };
+  /* a dropped folder: everything in it, however deep */
+  const walk = (entry, dir, out) => new Promise(res => {
+    if (entry.isFile) return entry.file(x => { out.push({ file: x, dir }); res(); }, () => res());
+    const rd = entry.createReader(), next = () => rd.readEntries(async es => { if (!es.length) return res();
+      for (const e of es) await walk(e, (dir ? dir + "/" : "") + entry.name, out); next(); }, () => res());
+    next(); });
+  let over = 0;
+  const drag = e => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+  addEventListener("dragenter", e => { if (!drag(e)) return; e.preventDefault(); over++; document.body.classList.add("drop"); });
+  addEventListener("dragover", e => { if (drag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+  addEventListener("dragleave", e => { if (!drag(e)) return; if (--over <= 0) { over = 0; document.body.classList.remove("drop"); } });
+  addEventListener("drop", async e => { if (!drag(e)) return; e.preventDefault(); over = 0; document.body.classList.remove("drop");
+    const out = [], items = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry ? i.webkitGetAsEntry() : null), plain = [...e.dataTransfer.files];
+    if (items.some(x => x)) for (const en of items) { if (en) await walk(en, "", out); } else for (const x of plain) out.push({ file: x, dir: "" });
+    send(out); });
+  const redo = e => { say(e, true); libKey = ""; draw(); };
+  const B = { a: btn("", () => L.card ? (Ext.deckOk(1) ? Ext.load(1).then(done) : 0) : ask("pick 1").then(done)),
+    b: btn("", () => L.card ? (Ext.deckOk(2) ? Ext.load(2).then(done) : 0) : ask("pick 2").then(done)),
+    up: btn("UPLOAD", () => L.card ? (Ext.copyOk() ? Ext.copy().then(done).then(j => { if (j.ok) say("copying " + j.total + (j.total === 1 ? " track" : " tracks")); }) : 0) : file.click()),
+    card: btn("", () => { L.sure = false; if (L.card) { L.card = null; L.pick = null; full(); redo(""); } else Promise.resolve(L.openExt()).then(redo); }),
     del: btn("", () => { const c = L.cursor(); if (L.card || !c) return; if (!L.sure) { L.sure = true; return draw(); }
       L.sure = false; post("/decks/delete", { file: c }).then(done).then(j => { if (j.ok) say("deleted " + c.split("/").pop()); full(); }); }) };
   const pv = btn("‹", () => { page--; libKey = ""; draw(); }), nx = btn("›", () => { page++; libKey = ""; draw(); }); nav.append(pv, navN, nx);
@@ -539,13 +596,13 @@ function big() {
       for (const r of rows.slice(page * per, (page + 1) * per)) { const sel = L.card ? L.pick && L.pick.path === r.path && r.kind !== "up" : r.kind === "file" && r.path === L.cursor();
         const b = el("button", "li" + (r.kind !== "file" ? " dir" : "") + (sel ? " sel" : "")); b.append(el("span", "nm", r.name), el("span", "d", r.note || (r.kind === "dir" ? "folder" : "")));
         b.onclick = () => Promise.resolve(L.tap(r)).then(e => { say(e, true); libKey = ""; draw(); }); rowsEl.appendChild(b); }
-      if (!rows.length) rowsEl.appendChild(el("div", "", L.card ? "nothing here" : "No music on the box. UPLOAD sends tracks from this device; FROM CARD copies them from the box's SD card.")).style.color = "var(--dim)"; }
+      if (!rows.length) rowsEl.appendChild(el("div", "", L.card ? "nothing here" : "No music on the box. Drop tracks or folders on this page, or UPLOAD them; a USB stick or an SD card in the box shows up here too.")).style.color = "var(--dim)"; }
     text(navN, (page + 1) + " / " + pages); pv.disabled = page === 0; nx.disabled = page >= pages - 1;
     const c = L.cursor(), loaded = c ? [0, 1].some(i => deck(i).file === c) : false;
-    if (L.card) { text(B.a, "OPEN"); B.a.disabled = !(L.pick && L.pick.kind === "dir"); text(B.b, "COPY"); B.b.disabled = !L.pick || !!(D.copy && D.copy.running); cls(B.b, "go", !B.b.disabled); cls(B.a, "go", false);
-      text(B.card, "MUSIC"); B.card.disabled = false; text(B.del, "DELETE"); B.del.disabled = true; cls(B.del, "warn", false); }
+    if (L.card) { text(B.a, "TO DECK 1"); B.a.disabled = !Ext.deckOk(1); cls(B.a, "go", !B.a.disabled); text(B.b, "TO DECK 2"); B.b.disabled = !Ext.deckOk(2); cls(B.b, "go", !B.b.disabled);
+      text(B.up, Ext.copyLabel()); B.up.disabled = !Ext.copyOk(); text(B.card, "MUSIC"); B.card.disabled = false; text(B.del, "DELETE"); B.del.disabled = true; cls(B.del, "warn", false); }
     else { text(B.a, "TO DECK 1"); B.a.disabled = !on || !c || !!deck(0).playing; cls(B.a, "go", !B.a.disabled); text(B.b, "TO DECK 2"); B.b.disabled = !on || !c || !!deck(1).playing; cls(B.b, "go", !B.b.disabled);
-      text(B.card, "FROM CARD"); B.card.disabled = !D.info.card; text(B.del, L.sure ? "SURE?" : "DELETE"); B.del.disabled = !c || loaded; cls(B.del, "warn", L.sure && !B.del.disabled); }
+      text(B.up, "UPLOAD"); B.up.disabled = false; text(B.card, Ext.fromLabel()); B.card.disabled = !L.sources().length; text(B.del, L.sure ? "SURE?" : "DELETE"); B.del.disabled = !c || loaded; cls(B.del, "warn", L.sure && !B.del.disabled); }
     /* mixer */
     const M = (S && S.mix) || {};
     for (let i = 0; i < 2; i++) { const d = deck(i), u = US[i]; cls(u.box, "play", d.playing); text(u.name, d.track ? d.name || "" : "no track"); cls(u.name, "none", !d.track);
@@ -561,6 +618,7 @@ function big() {
     if (note && performance.now() < noteTill) { t = note; bad = noteBad; }
     else if (L.copyLine()) { t = L.copyLine(); bad = !!(D.copy && D.copy.error); }
     else if (Pads.clear[0] || Pads.clear[1]) t = "tap the pad to clear";
+    else if (L.card && (tab === "lib" || document.body.classList.contains("lay-wide"))) t = Ext.hint();
     else if (on && [0, 1].some(i => loopLine(deck(i)))) t = [0, 1].map(i => loopLine(deck(i)) ? "deck " + (i + 1) + ": " + loopLine(deck(i)) : "").filter(x => x).join("   ");
     else if (on && h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts") + (h.rt ? "" : ", no real-time priority");
     text(foot, t); cls(foot, "bad", bad);

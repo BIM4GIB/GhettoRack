@@ -22,3 +22,9 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", GROUP="dialou
 # recovery card) are left alone. Taking the card out unmounts it.
 # The script leaves out the card the box itself runs from (a Raspberry Pi's boot partition is FAT on an SD card).
 ACTION=="add", SUBSYSTEM=="block", KERNEL=="mmcblk*", ATTRS{type}=="SD", ENV{ID_FS_TYPE}=="vfat|exfat", RUN+="/opt/apcbox-bridge/sdcard-mount.sh $devnode"
+
+# A USB stick or disk: mounted read-only at /media/usb for the Numark DJ module's music.
+# Any partition with a file system the kernel reads (FAT, exFAT, NTFS, ext4, HFS+; not APFS).
+# The script leaves out the disk the box itself runs from, and a second stick while one is in.
+# Pulling it out unmounts it.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="partition|disk", ENV{ID_FS_USAGE}=="filesystem", RUN+="/opt/apcbox-bridge/usb-mount.sh $devnode"
