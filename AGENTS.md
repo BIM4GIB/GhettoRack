@@ -28,7 +28,7 @@ daisy/      ApcBox firmware (Makefile; kits.h: kits saved on the box; apcmap.h: 
             with the APC40 on the Mac), ui/ (monitor page, Chrome Web Serial),
             release/ApcBox.bin (latest built firmware)
 decks/      the deck engine for the Numark DJ module (deckd: two decks, mixer, the
-            Numark Mixtrack Pro FX's map in numark.h; build.sh, engine_test.cpp;
+            Numark Mixtrack Pro FX's map in numark.h, tempo.cpp finds a track's tempo; build.sh, engine_test.cpp;
             its README says what is built and measured). The bridge runs it
             (`t95/bridge/rackbridge/decks.py`); its page is `t95/ui/dj.html`
 t95/        companion box: findings, plan, bridge/ (Daisy link, controllers, a game controller,

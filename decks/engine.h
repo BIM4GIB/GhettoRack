@@ -24,6 +24,9 @@ constexpr int kRate  = 44100;
 constexpr int kDecks = 2;
 constexpr int kOuts  = 4;  // master L R, headphones L R
 constexpr int kChunk = 32; // frames between knob and speed updates (0.7 ms)
+constexpr int kHot   = 8;  // hot cues a deck
+constexpr int kXfade = 96; // frames a jump or a loop's wrap is blended over (2 ms): no click, no gap
+constexpr double kLoopMin = 256; // frames: the shortest loop
 
 /** One jog tick moves the record this far while scratching: the platter is
  *  taken as 1024 ticks a turn at 33 1/3 rpm (the figure Mixxx's mapping
@@ -35,6 +38,8 @@ struct Track
     const int16_t* pcm    = nullptr; // stereo, interleaved
     uint32_t       frames = 0;
     uint32_t       id     = 0;
+    float          bpm    = 0; // 0: not known (yet). The deck takes both at the load;
+    double         beat0  = 0; // frame of a beat; kEvGrid brings them later
 };
 
 enum EvType : uint8_t
@@ -47,6 +52,14 @@ enum EvType : uint8_t
     kEvTouch,   // a: 1 hand on the platter, 0 off
     kEvJog,     // a: ticks, signed
     kEvBend,    // a: speed offset while a pitch-bend button is held (0: let go)
+    kEvHot,     // a: which (0..7), d: 1 pressed, 0 let go. Empty: set here. Set: go there
+    kEvHotClear,// a: which
+    kEvHotSet,  // a: which, d: frame (under 0: none). What a track's file remembered
+    kEvLoopIn,  // the loop starts here
+    kEvLoopOut, // and ends here: it runs
+    kEvLoop,    // a: 0 leave it, 1 into it again, 2 the other of the two. d over 0: a new loop of d beats from here
+    kEvLoopScale, // a: its length times this (0.5, 2)
+    kEvGrid,    // a: bpm, d: frame of a beat. The track's tempo, when it is known or corrected
 };
 
 struct Ev
@@ -162,6 +175,15 @@ struct DeckState
     std::atomic<uint32_t> frames{0}, track{0};
     std::atomic<int>      playing{0}, cue_held{0}, touched{0};
     std::atomic<float>    speed{0}, peak{0}; // peak: before the fader, decaying
+    std::atomic<double>   hot[kHot];         // frames; under 0: empty
+    std::atomic<double>   loop_in{-1}, loop_out{-1}, beat0{0};
+    std::atomic<int>      loop_on{0};
+    std::atomic<float>    bpm{0};            // the track's, at speed 1
+    DeckState()
+    {
+        for(auto& h : hot)
+            h = -1;
+    }
 };
 
 class Engine
@@ -191,6 +213,10 @@ class Engine
     {
         const Track* trk = nullptr;
         double pos = 0, cue = 0, goal = 0, goal_s = 0, jump_to = 0;
+        double hot[kHot], loop_in = -1, loop_out = -1, xf_pos = 0, beat0 = 0;
+        int    hot_held = -1, xf_left = 0;
+        bool   loop_on = false;
+        float  bpm     = 0;
         bool   playing = false, cue_held = false, touched = false, jump = false;
         float  speed = 0, bend_acc = 0, bend_btn = 0;
         float  fade = 0, jgain = 1;
@@ -201,6 +227,7 @@ class Engine
     };
     void Handle(const Ev& e);
     void Jump(Deck& d, double to);
+    void Cut(Deck& d, double to);
     void RunDeck(int n, int frames, float* l, float* r);
 
     Deck                         deck_[kDecks];

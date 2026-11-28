@@ -162,3 +162,12 @@ button:focus,button:focus-visible{outline:none}
 .g-djx span:last-child{text-align:right}
 .g-djx .g-djbar{height:14px}
 .g-djx .g-djbar b{position:absolute;top:0;bottom:0;width:26px;margin-left:-13px;background:var(--blue);border-radius:2px}
+/* PADS: a deck's 8 hot cues, its loop, its tempo */
+.g-djpads{display:grid;grid-template-rows:40px 1fr 44px 18px;gap:4px;padding:4px;height:100%}
+.g-djptop{display:grid;grid-template-columns:62px 62px 1fr 58px 58px 62px;gap:4px;min-height:0}
+.g-djbpm{align-self:center;text-align:center;font-size:14px;white-space:nowrap;overflow:hidden}
+.g-djpgrid{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:1fr 1fr;gap:4px;min-height:0}
+.g-djpgrid .g-b{flex-direction:column;gap:3px}.g-djpgrid .g-b b{font-size:18px;font-weight:600}.g-djpgrid .g-b span{font-size:11px;min-height:13px}
+.g-djprow{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;min-height:0}.g-djprow .g-b{font-size:13px}
+.g-djhot{position:absolute;top:0;width:2px;height:8px;margin-left:-1px;background:var(--text)}
+.g-djloop{position:absolute;bottom:0;height:3px;background:var(--dim)}.g-djloop.on{background:var(--green)}

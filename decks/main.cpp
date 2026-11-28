@@ -14,12 +14,16 @@
  *             T d rate*10000 range*100 gain hi mid lo filter volume pfl scratch  (0..1000)
  *             G xfader master cue_mix cue_gain peak_l peak_r                     (0..1000)
  *             N d track name   F d track path   W d track peaks-hex   B cursor count path
+ *             Q d h1..h8 loop_in loop_out loop_on bpm*100 beat0 pad_mode          (ms; -1: none)
  *             H xruns worst_us period buffer rt channels dropped_events
  *  d is 1 or 2. See README.md.
  *
  *  Build: decks/build.sh */
 #include "engine.h"
 #include "numark.h"
+#include "tempo.h"
+#include <map>
+#include <sys/stat.h>
 #include <algorithm>
 #include <chrono>
 #include <csignal>
@@ -63,6 +67,20 @@ struct Loaded : Track
 {
     std::vector<int16_t> data;
     std::string          name, peaks;
+};
+
+/** What is remembered of a file between loads: its tempo (found once) and its hot cues */
+struct Kept
+{
+    long long size  = -1; // the file's, when this was written: another file under the name starts afresh
+    float     bpm   = -1; // under 0: not looked for yet. 0: looked, no steady beat
+    double    beat0 = 0;
+    double    hot[kHot];
+    Kept()
+    {
+        for(auto& h : hot)
+            h = -1;
+    }
 };
 
 Engine                eng;
@@ -228,7 +246,7 @@ bool IsAudio(const std::string& p)
 }
 
 /** A file, whatever it is, as 44.1 kHz stereo in memory. nullptr and `err` if not. */
-Loaded* Decode(const std::string& path, std::string& err)
+Loaded* Decode(const std::string& path, std::string& err, float known_bpm, double known_beat0)
 {
     int fd[2];
     if(pipe(fd) < 0)
@@ -288,6 +306,13 @@ Loaded* Decode(const std::string& path, std::string& err)
     (void)!mlock(t->data.data(), t->data.size() * 2); // keep it out of swap if the limits allow; it plays either way
 #endif
     t->name = std::filesystem::path(path).stem().string();
+    if(known_bpm >= 0)
+        t->bpm = known_bpm, t->beat0 = known_beat0;
+    else // about a tenth of a second a minute of music on a Pi 4: before the track is handed over, so it arrives whole
+    {
+        const Tempo r = FindTempo(t->pcm, t->frames);
+        t->bpm = r.bpm, t->beat0 = r.beat0;
+    }
     static const char hex[] = "0123456789abcdef";
     for(int b = 0; b < kPeaks; b++)
     {
@@ -308,6 +333,7 @@ struct Done
     uint32_t    gen;
     Loaded*     track;
     std::string err, path;
+    long long   size;
 };
 std::mutex           done_mu;
 std::vector<Done>    done;
@@ -315,12 +341,28 @@ std::atomic<uint32_t> load_gen[kDecks];
 int                  wake[2] = {-1, -1};
 uint32_t             next_track = 1;
 
+long long FileSize(const std::string& path)
+{
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 ? (long long)st.st_size : -1;
+}
+
+std::map<std::string, Kept> kept; // by path; the main thread's
+std::string                 store_path;
+bool                        store_dirty = false;
+std::chrono::steady_clock::time_point store_at;
+
 void StartLoad(int deck, const std::string& path)
 {
-    uint32_t g = ++load_gen[deck];
-    std::thread([deck, path, g] {
-        Done d{deck, g, nullptr, "", path};
-        d.track = Decode(path, d.err);
+    uint32_t        g    = ++load_gen[deck];
+    const long long size = FileSize(path);
+    auto            it   = kept.find(path);
+    const bool      have = it != kept.end() && it->second.size == size && it->second.bpm > 0; // none found last time: look again
+    const float     bpm  = have ? it->second.bpm : -1;
+    const double    b0   = have ? it->second.beat0 : 0;
+    std::thread([deck, path, g, size, bpm, b0] {
+        Done d{deck, g, nullptr, "", path, size};
+        d.track = Decode(path, d.err, bpm, b0);
         {
             std::lock_guard<std::mutex> l(done_mu);
             done.push_back(d);
@@ -343,6 +385,8 @@ std::vector<std::string> library;
 int                      cursor = 0;
 std::string              music_dir;
 std::string              deck_name[kDecks], deck_peaks[kDecks], deck_path[kDecks];
+bool                     hot_sync[kDecks]; // the deck shows what the file remembered: from here on a change is the player's
+std::string              last_q[kDecks];
 uint32_t                 deck_track[kDecks];
 std::string              last_d[kDecks], last_t[kDecks], last_g;
 
@@ -505,6 +549,8 @@ void SayAll()
         }
     }
     last_g.clear();
+    for(auto& q : last_q)
+        q.clear();
     SayBrowse();
 }
 
@@ -550,7 +596,8 @@ void Command(const std::string& line)
 {
     char   w[32] = "";
     int    used  = 0;
-    double a = 0, b = 0;
+    double a = 0, b = 0, c = 0;
+    int    nargs = 0;
     if(sscanf(line.c_str(), "%31s %n", w, &used) < 1)
         return;
     const char*       rest = line.c_str() + used;
@@ -626,6 +673,33 @@ void Command(const std::string& line)
             SayBrowse();
         }
     }
+    else if(cmd == "hot" && sscanf(rest, "%lf %lf %lf", &a, &b, &c) == 3) // hot d n 1|0: pad n (1..8) pressed, let go
+        Post(kEvHot, (int)a - 1, (float)(b - 1), c);
+    else if(cmd == "hotclear" && sscanf(rest, "%lf %lf", &a, &b) == 2)
+        Post(kEvHotClear, (int)a - 1, (float)(b - 1));
+    else if(cmd == "loopin")
+        Post(kEvLoopIn, atoi(rest) - 1, 0);
+    else if(cmd == "loopout")
+        Post(kEvLoopOut, atoi(rest) - 1, 0);
+    else if(cmd == "loop" && (nargs = sscanf(rest, "%lf %lf %lf", &a, &b, &c)) >= 2) // loop d 0|1|2 [beats]
+        Post(kEvLoop, (int)a - 1, (float)b, nargs == 3 && c > 0 ? c : 0);
+    else if(cmd == "loopx" && sscanf(rest, "%lf %lf", &a, &b) == 2 && (b == 0.5 || b == 2))
+        Post(kEvLoopScale, (int)a - 1, (float)b);
+    else if(cmd == "bpmx" && sscanf(rest, "%lf %lf", &a, &b) == 2 && (b == 0.5 || b == 2)) // the tempo found is half or twice the real one
+    {
+        const int d = (int)a - 1;
+        if(d >= 0 && d < kDecks && deck_track[d])
+        {
+            const float bpm = eng.state[d].bpm.load() * (float)b;
+            auto        it  = kept.find(deck_path[d]);
+            if(bpm >= 40 && bpm <= 320)
+            {
+                Post(kEvGrid, d, bpm, eng.state[d].beat0.load());
+                if(it != kept.end())
+                    it->second.bpm = bpm, store_dirty = true, store_at = std::chrono::steady_clock::now();
+            }
+        }
+    }
     else if(cmd == "set")
     {
         char name[32] = "";
@@ -671,8 +745,17 @@ void Loads()
         deck_track[d.deck] = d.track->id;
         deck_name[d.deck]  = d.track->name;
         deck_path[d.deck]  = d.path;
+        Kept& k = kept[d.path];
+        if(k.size != d.size) // not seen before, or another file under this name
+            k = Kept(), k.size = d.size;
+        if(k.bpm <= 0)
+            k.bpm = d.track->bpm, k.beat0 = d.track->beat0, store_dirty = true, store_at = std::chrono::steady_clock::now();
+        hot_sync[d.deck] = false;
         deck_peaks[d.deck] = d.track->peaks;
         Post(kEvLoad, d.deck, 0, 0, d.track);
+        for(int i = 0; i < kHot; i++)
+            if(k.hot[i] >= 0)
+                Post(kEvHotSet, d.deck, (float)i, k.hot[i]);
         Send("N %d %u %s", d.deck + 1, d.track->id, d.track->name.c_str());
         Send("F %d %u %s", d.deck + 1, d.track->id, d.path.c_str());
         Send("W %d %u %s", d.deck + 1, d.track->id, d.track->peaks.c_str());
@@ -707,6 +790,97 @@ void Reports()
         Send("%s", line), last_g = line;
 }
 
+/* ---------- what is remembered of each file ---------- */
+
+void StoreLoad()
+{
+    FILE* f = store_path.empty() ? nullptr : fopen(store_path.c_str(), "r");
+    if(!f)
+        return;
+    char line[4096];
+    while(fgets(line, sizeof(line), f))
+    {
+        Kept  k;
+        int   used = 0;
+        float bpm  = 0;
+        if(sscanf(line, "%lld %f %lf %lf %lf %lf %lf %lf %lf %lf %lf %n", &k.size, &bpm, &k.beat0, &k.hot[0], &k.hot[1], &k.hot[2], &k.hot[3], &k.hot[4], &k.hot[5],
+                  &k.hot[6], &k.hot[7], &used)
+               < 11
+           || !line[used])
+            continue;
+        k.bpm = bpm;
+        std::string path = line + used;
+        while(!path.empty() && (path.back() == '\n' || path.back() == '\r'))
+            path.pop_back();
+        if(!path.empty())
+            kept[path] = k;
+    }
+    fclose(f);
+}
+
+void StoreSave()
+{
+    store_dirty = false;
+    if(store_path.empty())
+        return;
+    const std::string tmp = store_path + ".tmp";
+    FILE*             f   = fopen(tmp.c_str(), "w");
+    if(!f)
+        return;
+    for(const auto& kv : kept)
+    {
+        const Kept& k = kv.second;
+        if(kv.first.find('\n') != std::string::npos)
+            continue;
+        fprintf(f, "%lld %.4f %.1f", k.size, k.bpm, k.beat0);
+        for(double h : k.hot)
+            fprintf(f, " %.0f", h);
+        fprintf(f, " %s\n", kv.first.c_str());
+    }
+    const bool ok = fflush(f) == 0;
+    fclose(f);
+    if(ok)
+        rename(tmp.c_str(), store_path.c_str());
+}
+
+/** Hot cues, loop, tempo and the pad mode, on change; and a changed hot cue goes to what is remembered */
+void PadReports()
+{
+    char line[320];
+    for(int d = 0; d < kDecks; d++)
+    {
+        const DeckState& s = eng.state[d];
+        auto             ms = [](double frames) { return frames < 0 ? -1L : lrint(frames * 1000 / kRate); };
+        int              n  = snprintf(line, sizeof(line), "Q %d", d + 1);
+        double           hot[kHot];
+        for(int i = 0; i < kHot; i++)
+        {
+            hot[i] = s.hot[i].load();
+            n += snprintf(line + n, sizeof(line) - n, " %ld", ms(hot[i]));
+        }
+        snprintf(line + n, sizeof(line) - n, " %ld %ld %d %ld %ld %d", ms(s.loop_in.load()), ms(s.loop_out.load()), s.loop_on.load(), lrint(s.bpm.load() * 100),
+                 ms(s.beat0.load()), numark.pads[d]);
+        if(last_q[d] != line)
+            Send("%s", line), last_q[d] = line;
+        if(!deck_track[d] || s.track.load() != deck_track[d])
+            continue;
+        auto it = kept.find(deck_path[d]);
+        if(it == kept.end())
+            continue;
+        bool same = true;
+        for(int i = 0; i < kHot; i++)
+            same = same && it->second.hot[i] == hot[i];
+        if(same)
+            hot_sync[d] = true;
+        else if(hot_sync[d])
+        {
+            for(int i = 0; i < kHot; i++)
+                it->second.hot[i] = hot[i];
+            store_dirty = true, store_at = std::chrono::steady_clock::now();
+        }
+    }
+}
+
 void Scan(const std::string& dir)
 {
     std::error_code ec;
@@ -733,6 +907,8 @@ int main(int argc, char** argv)
             sock_path = next();
         else if(a == "--music")
             music = next();
+        else if(a == "--store") // a file: each track's tempo and hot cues, kept between loads and runs
+            store_path = next();
         else if(a == "--midi") // the controller's port, opened here: for trying the engine without the bridge only
             midi_path = next();
         else if(a == "--period")
@@ -743,7 +919,7 @@ int main(int argc, char** argv)
             null_out = true;
         else
         {
-            fprintf(stderr, "deckd [--device hw:CARD=FX,DEV=0 | --null] [--socket path] [--music folder] [--period 128] [--buffer 384] [--midi /dev/snd/midiCxD0]\n");
+            fprintf(stderr, "deckd [--device hw:CARD=FX,DEV=0 | --null] [--socket path] [--music folder] [--store file] [--period 128] [--buffer 384] [--midi /dev/snd/midiCxD0]\n");
             return 2;
         }
     }
@@ -758,6 +934,7 @@ int main(int argc, char** argv)
     if(pipe(wake) < 0)
         return 1;
     fcntl(wake[0], F_SETFL, O_NONBLOCK);
+    StoreLoad();
     music_dir = music;
     if(!music.empty())
         Scan(music);
@@ -899,6 +1076,9 @@ int main(int argc, char** argv)
             uint8_t m[128];
             ToController(m, numark.Lights(m, sizeof(m)));
             Reports();
+            PadReports();
+            if(store_dirty && now - store_at >= std::chrono::seconds(1))
+                StoreSave();
         }
         if(now - last_health >= std::chrono::seconds(1))
         {
@@ -908,6 +1088,8 @@ int main(int argc, char** argv)
         Flush();
     }
 
+    if(store_dirty)
+        StoreSave();
     uint8_t m[16];
     ToController(m, Numark::Bye(m));
     Flush();

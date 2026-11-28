@@ -5466,7 +5466,27 @@ try:
 except Exception:
     sys.exit(1)
 """
-NUMARK_HELLO = bytes.fromhex("f07e000601f7" "f000207f0301f7")
+NUMARK_HELLO = bytes.fromhex("f07e000601f7" "f000207f03f7" "f000207f0301f7")
+
+
+def make_beat_wav(path, bpm, secs, rate=44100):
+    """A kick on every beat over a quiet tone: something with a tempo"""
+    import math
+    import wave
+    n, beat = int(secs * rate), 60.0 / bpm * rate
+    kick = [int(20000 * math.exp(-i / (0.02 * rate)) * math.sin(2 * math.pi * 70 * i / rate)) for i in range(int(0.12 * rate))]
+    out = [int(1500 * math.sin(2 * math.pi * 55 * i / rate)) for i in range(n)]
+    k = 0
+    while int(0.1 * rate + k * beat) + len(kick) < n:
+        at = int(0.1 * rate + k * beat)
+        for i, v in enumerate(kick):
+            out[at + i] += v
+        k += 1
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(struct.pack("<%dh" % n, *out))
 NUMARK_BYE = bytes.fromhex("f000207f02f7")
 
 
@@ -5672,6 +5692,92 @@ class DecksTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.dir, "outside.wav")))
         self.assertTrue(os.path.exists(os.path.join(self.music, "one.wav")))
 
+    def test_d6b_pads_loops_and_tempo(self):
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
+            self.skipTest("ffmpeg loads the tracks")
+        make_beat_wav(os.path.join(self.music, "beat 126.wav"), 126, 20)
+        was = self.decks()["browse"]["count"]
+        self.post("/decks", {"a": "scan"})
+        self.wait_decks(lambda d: d["browse"]["count"] == was + 1)
+        self.post("/decks", {"a": "play 1 0"})
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "beat 126.wav"})[0], 200)
+        d = self.wait_decks(lambda d: d["decks"][0].get("name") == "beat 126" and d["decks"][0].get("bpm"), 10)
+        self.assertAlmostEqual(d["decks"][0]["bpm"], 126.0, delta=0.02)        # found when it was loaded
+        self.assertEqual(d["decks"][0]["hot"], [None] * 8)
+        self.assertEqual(d["decks"][0]["pads"], "cue")
+        # a pad on the Numark: empty, so the hot cue is set where the record is, and its light comes
+        self.post("/decks", {"a": "seek 1 5"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] == 5.0)
+        self.numark.received(0.2)
+        self.numark.play([0x94, 0x14, 0x7F, 0x94, 0x14, 0x00])
+        d = self.wait_decks(lambda d: d["decks"][0]["hot"][0] is not None)
+        self.assertEqual(d["decks"][0]["hot"][0], 5.0)
+        self.assertIn(bytes([0x94, 0x14, 0x7F]), self.numark.received(0.4))
+        # a page: pad 3 at 8 s, then pad 1 again: back to 5 s
+        self.post("/decks", {"a": "seek 1 8"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] == 8.0)
+        self.assertEqual(self.post("/decks", {"a": "hot 1 3 1"})[0], 200)
+        self.post("/decks", {"a": "hot 1 3 0"})
+        self.wait_decks(lambda d: d["decks"][0]["hot"][2] == 8.0)
+        self.post("/decks", {"a": "hot 1 1 1"})
+        self.post("/decks", {"a": "hot 1 1 0"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] == 5.0 and not d["decks"][0]["playing"])
+        # the pad modes: in AUTO LOOP a pad sets no hot cue
+        self.numark.play([0x94, 0x0D, 0x7F, 0x94, 0x15, 0x7F, 0x94, 0x15, 0x00])
+        d = self.wait_decks(lambda d: d["decks"][0]["pads"] == "loop")
+        self.assertIsNone(d["decks"][0]["hot"][1])
+        self.numark.play([0x94, 0x00, 0x7F])
+        self.wait_decks(lambda d: d["decks"][0]["pads"] == "cue")
+        # LOOP with none set: 4 beats from here; 1/2 on the Numark, x2 from a page; off
+        self.numark.play([0x94, 0x40, 0x7F, 0x94, 0x40, 0x00])
+        d = self.wait_decks(lambda d: d["decks"][0]["loop_on"])
+        self.assertAlmostEqual(d["decks"][0]["loop_out"] - d["decks"][0]["loop_in"], 4 * 60 / 126, delta=0.002)
+        self.assertEqual(d["decks"][0]["loop_in"], 5.0)
+        self.numark.play([0x94, 0x34, 0x7F])
+        self.wait_decks(lambda d: abs(d["decks"][0]["loop_out"] - 5.0 - 2 * 60 / 126) < 0.002)
+        self.post("/decks", {"a": "loopx 1 2"})
+        self.wait_decks(lambda d: abs(d["decks"][0]["loop_out"] - 5.0 - 4 * 60 / 126) < 0.002)
+        self.post("/decks", {"a": "play 1 1"})               # it goes round: after 3 s still inside
+        time.sleep(3)
+        d = self.decks()
+        self.assertTrue(5.0 <= d["decks"][0]["pos"] < d["decks"][0]["loop_out"], d["decks"][0]["pos"])
+        self.post("/decks", {"a": "loop 1 0"})
+        self.wait_decks(lambda d: not d["decks"][0]["loop_on"] and d["decks"][0]["pos"] > d["decks"][0]["loop_out"])
+        self.post("/decks", {"a": "play 1 0"})
+        # loop in and out by hand, from a page
+        self.post("/decks", {"a": "seek 1 2"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] == 2.0)
+        self.post("/decks", {"a": "loopin 1"})
+        self.wait_decks(lambda d: d["decks"][0]["loop_in"] == 2.0 and d["decks"][0]["loop_out"] is None)
+        self.post("/decks", {"a": "seek 1 3.5"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] == 3.5)
+        self.post("/decks", {"a": "loopout 1"})
+        self.wait_decks(lambda d: d["decks"][0]["loop_out"] == 3.5 and d["decks"][0]["loop_on"])
+        # the tempo corrected, and remembered with the hot cues: after another load they are there again
+        self.post("/decks", {"a": "bpmx 1 0.5"})
+        self.wait_decks(lambda d: d["decks"][0]["bpm"] == 63.0)
+        self.numark.play([0x94, 0x1E, 0x7F, 0x94, 0x1E, 0x00])          # shift + pad 3: cleared
+        self.wait_decks(lambda d: d["decks"][0]["hot"][2] is None)
+        time.sleep(1.6)                                                 # written a second after the last change
+        with open(os.path.join(self.dir, "decks-tracks.txt")) as f:
+            kept = [l for l in f.read().splitlines() if l.endswith("beat 126.wav")]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].split(" ")[1], "63.0000")
+        self.post("/decks", {"a": "eject 1"})
+        self.wait_decks(lambda d: not d["decks"][0].get("track") and d["decks"][0]["hot"] == [None] * 8)
+        self.post("/decks", {"a": "load", "deck": 1, "file": "beat 126.wav"})
+        d = self.wait_decks(lambda d: d["decks"][0].get("name") == "beat 126" and d["decks"][0]["hot"][0] is not None, 10)
+        self.assertEqual((d["decks"][0]["hot"][0], d["decks"][0]["hot"][2], d["decks"][0]["bpm"]), (5.0, None, 63.0))
+        self.assertIsNone(d["decks"][0]["loop_in"])                     # a loop is not kept
+        for bad in ("hot 1 x 1", "loop one", "hot 1 2 3 4 5"):
+            self.assertEqual(self.post("/decks", {"a": bad})[0], 400, bad)
+        # as found
+        self.post("/decks", {"a": "eject 1"})
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
+        self.wait_decks(lambda d: d["decks"][0].get("name") == "one", 10)
+        self.assertEqual(self.post("/decks/delete", {"file": "beat 126.wav"})[0], 200)
+        self.wait_decks(lambda d: d["browse"]["count"] == was)
+
     def test_d7_the_controller_comes_back(self):
         self.numark.unplug()
         BridgeTest.wait_health(lambda h: h["decks"]["controllers"] == [], 5)
@@ -5723,7 +5829,7 @@ class DecksTest(unittest.TestCase):
             side = lambda t: pg.locator(".g-side .g-b", has_text=t)
             pg.goto("http://127.0.0.1:%d/dj?small=1" % self.http)
             pg.wait_for_selector(".g-djdeck")
-            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["DECKS", "LIB", "MIX", "HOME"])
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["DECKS", "PADS", "LIB", "MIX", "HOME"])
             self.assertEqual(pg.locator(".g-djdeck").count(), 2)
             self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "DECKS, empty")
             self.assertIn("no track", pg.locator(".g-djname").nth(0).text_content())
@@ -5792,6 +5898,54 @@ class DecksTest(unittest.TestCase):
             pg.locator(".g-djrow .g-b", has_text="CUE").nth(0).click()               # playing: back to the cue point, stopped
             self.wait_decks(lambda d: not d["decks"][0]["playing"] and d["decks"][0]["pos"] == 0.0)
             pg.wait_for_function("!document.querySelector('.g-djdeck.play')")
+            # PADS: hot cues, the loop, the tempo
+            pg.locator(".g-tab", has_text="PADS").click()
+            pg.wait_for_selector(".g-djpgrid .g-b")
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "PADS")
+            self.assertEqual(pg.locator(".g-djbpm").text_content(), "no beat found")       # a plain tone
+            pad = lambda k: pg.locator(".g-djpgrid .g-b").nth(k - 1)
+            top = lambda t: pg.locator(".g-djptop .g-b", has_text=t)
+            lrow = lambda t: pg.locator(".g-djprow .g-b", has_text=re.compile("^%s$" % re.escape(t)))
+            self.assertTrue(top("CLEAR").is_disabled() and lrow("LOOP").is_disabled() and lrow("OUT").is_disabled())
+            self.post("/decks", {"a": "seek 1 1.5"})
+            self.wait_decks(lambda d: d["decks"][0]["pos"] == 1.5)
+            pad(4).click()                                                          # empty: set here
+            self.wait_decks(lambda d: d["decks"][0]["hot"][3] == 1.5)
+            pg.wait_for_function("document.querySelectorAll('.g-djpgrid .g-b')[3].classList.contains('on') && document.querySelectorAll('.g-djpgrid .g-b')[3].textContent === '40:01.5'")
+            self.post("/decks", {"a": "seek 1 3"})
+            self.wait_decks(lambda d: d["decks"][0]["pos"] == 3.0)
+            pad(4).click()                                                          # set: go there
+            self.wait_decks(lambda d: d["decks"][0]["pos"] == 1.5)
+            lrow("IN").click()
+            self.wait_decks(lambda d: d["decks"][0]["loop_in"] == 1.5)
+            self.post("/decks", {"a": "seek 1 2.5"})
+            self.wait_decks(lambda d: d["decks"][0]["pos"] == 2.5)
+            pg.wait_for_function("!document.querySelectorAll('.g-djprow .g-b')[1].disabled")
+            lrow("OUT").click()
+            self.wait_decks(lambda d: d["decks"][0]["loop_on"] and d["decks"][0]["loop_out"] == 2.5)
+            pg.wait_for_selector(".g-djprow .g-b.go >> text=LOOP")
+            pg.wait_for_function("document.querySelector('.g-msg').textContent === 'loop on: 1.00 s'")
+            lrow("1/2").click()
+            self.wait_decks(lambda d: d["decks"][0]["loop_out"] == 2.0)
+            lrow("x2").click()
+            self.wait_decks(lambda d: d["decks"][0]["loop_out"] == 2.5)
+            shot("small-dj-pads")
+            lrow("LOOP").click()
+            self.wait_decks(lambda d: not d["decks"][0]["loop_on"])
+            top("DECK 2").click()                                                   # the other deck's pads
+            pg.wait_for_function("!document.querySelectorAll('.g-djpgrid .g-b')[3].classList.contains('on')")
+            pad(1).click()
+            self.wait_decks(lambda d: d["decks"][1]["hot"][0] is not None)
+            top("DECK 1").click()
+            pg.wait_for_function("document.querySelectorAll('.g-djpgrid .g-b')[3].classList.contains('on')")
+            top("CLEAR").click()                                                    # CLEAR, then the pad
+            pg.wait_for_selector(".g-djptop .g-b.warn >> text=CLEAR")
+            self.assertEqual(self.decks()["decks"][0]["hot"][3], 1.5)
+            pad(4).click()
+            self.wait_decks(lambda d: d["decks"][0]["hot"][3] is None)
+            pg.wait_for_function("!document.querySelector('.g-djptop .g-b.warn')")
+            self.post("/decks", {"a": "hotclear 2 1"})
+            self.post("/decks", {"a": "seek 1 0"})
             # MIX: the Numark's knobs are shown, PHONES and SCRATCH are buttons
             pg.locator(".g-tab", has_text="MIX").click()
             pg.wait_for_selector(".g-djstrip")
@@ -5903,6 +6057,27 @@ class DecksTest(unittest.TestCase):
                     pg.locator(".wave").nth(0).click(position={"x": w0 / 2, "y": 10})      # a click on the outline: there
                     self.wait_decks(lambda d: abs(d["decks"][0]["pos"] - 2.0) < 0.1)
                     self.post("/decks", {"a": "seek 1 0"})
+                # pads: in the deck when wide, on their own tab on a phone
+                if tabs:
+                    pg.locator(".tabs button", has_text="PADS").click()
+                    pg.wait_for_selector("#s-pads.show .padbox .pads")
+                    self.assertEqual(pg.evaluate(fits), [[], True, True], name + ", pads")
+                    if shots:
+                        pg.screenshot(path=os.path.join(shots, "dj-%s-pads.png" % name))
+                else:
+                    self.assertTrue(pg.locator(".deck .pads").first.is_visible(), name)
+                    self.assertFalse(pg.locator("#s-pads").is_visible(), name)
+                self.post("/decks", {"a": "seek 1 1"})
+                self.wait_decks(lambda d: d["decks"][0]["pos"] == 1.0)
+                pg.locator(".pads").nth(0).locator("button").nth(4).click()             # deck 1, pad 5
+                self.wait_decks(lambda d: d["decks"][0]["hot"][4] == 1.0)
+                pg.wait_for_function("document.querySelector('.pads').children[4].classList.contains('on')")
+                pg.locator(".pads").nth(0).locator("button", has_text="CLEAR").click()
+                pg.locator(".pads").nth(0).locator("button").nth(4).click()
+                self.wait_decks(lambda d: d["decks"][0]["hot"][4] is None)
+                pg.locator(".pads").nth(0).locator("button", has_text=re.compile("^IN$")).click()
+                self.wait_decks(lambda d: d["decks"][0]["loop_in"] == 1.0)
+                self.post("/decks", {"a": "seek 1 0"})
                 if tabs:
                     pg.locator(".tabs button", has_text="MIX").click()
                     pg.wait_for_selector("#s-mix.show")

@@ -36,7 +36,7 @@ button.go{color:var(--green);border-color:var(--green);box-shadow:0 0 12px #35d0
 button.warn{color:#0b0c0d;background:var(--yellow);border-color:var(--yellow)}
 button:focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
 #home{min-height:36px}
-.tabs{display:none;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 12px 0}
+.tabs{display:none;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px 12px 0}
 .tabs button.sel{color:var(--text);border-color:var(--yellow)}
 main{flex:1;min-height:0;min-width:0;padding:12px;display:grid;gap:12px}
 section{min-height:0;min-width:0}
@@ -50,7 +50,7 @@ body.lay-tabs main>section:not(.show){display:none!important}
 /* decks */
 #s-decks{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
 body.upright #s-decks{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
-.deck{display:grid;grid-template-rows:auto minmax(40px,1fr) auto;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:0;min-width:0}
+.deck{display:grid;grid-template-rows:auto minmax(40px,1fr) auto auto;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:0;min-width:0}
 .deck.play{border-color:var(--green)}
 .dhead{display:flex;align-items:center;gap:10px;min-width:0}
 .dn{width:28px;height:28px;border-radius:6px;background:var(--off);color:var(--dim);display:flex;align-items:center;justify-content:center;font-weight:700;flex:none}
@@ -67,6 +67,19 @@ body.upright #s-decks{grid-template-columns:minmax(0,1fr);grid-template-rows:min
 .vu i{position:absolute;left:0;right:0;bottom:0;height:0;background:var(--green)}.vu i.over{background:var(--red)}
 .nodecks{grid-column:1 / -1;grid-row:1 / -1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;color:var(--dim);padding:0 20px}
 .nodecks button{min-width:200px;min-height:48px;font-size:15px}
+/* pads: 8 hot cues and the loop, a deck. Inside the deck when wide, a tab of their own on a phone */
+.pads{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));grid-auto-rows:40px;gap:6px;min-width:0}
+.pads button{padding:0;font-size:12px;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.15}
+.pads button span{font-family:var(--mono);font-size:10px;font-weight:400;color:var(--dim)}
+.pads button.on span{color:var(--text)}
+#s-pads{display:grid;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:12px}
+body.lay-wide #s-pads{display:none}
+body.short #s-pads{grid-template-rows:none;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.padbox{display:grid;grid-template-rows:auto auto;gap:8px;align-content:start;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;min-width:0;min-height:0}
+.padbox.play{border-color:var(--green)}
+.padbox .pads{grid-template-columns:repeat(4,minmax(0,1fr));grid-auto-rows:minmax(44px,56px)}
+body.short .padbox .pads{grid-template-columns:repeat(8,minmax(0,1fr));grid-auto-rows:44px}
+body.short .padbox .pads button{font-size:11px}
 /* library */
 #s-lib{display:grid;grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:auto minmax(0,1fr);gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
 .lpath{grid-column:1 / -1;display:flex;align-items:baseline;gap:10px;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden}
@@ -160,6 +173,16 @@ function why() {              /* the line under a deck that is not there */
   if (/sound card/.test(S.error || "")) return "Plug in the Numark. The decks play through its outputs.";
   return S.error || "The decks are starting.";
 }
+const bpmNow = d => d.bpm ? (d.bpm * (1 + (d.rate || 0))).toFixed(1) : "";        /* as it plays: the track's tempo and the pitch slider */
+const tms = s => { const m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(1).padStart(4, "0"); };
+const loopLine = d => { if (d.loop_in == null || d.loop_out == null) return d.loop_in != null ? "loop in is set: OUT closes it" : "";
+  const len = d.loop_out - d.loop_in, beats = d.bpm ? len * d.bpm / 60 : 0, whole = beats && Math.abs(beats - Math.round(beats * 32) / 32) < 0.002;
+  const b = !whole ? "" : beats >= 1 ? beats + (beats === 1 ? " beat, " : " beats, ") : "1/" + Math.round(1 / beats) + " beat, ";
+  return "loop " + (d.loop_on ? "on: " : "off: ") + b + len.toFixed(len < 1 ? 3 : 2) + " s"; };
+/* a pad, tapped: set here if empty, else go there (a held pad is the Numark's to do); clearing is a tap on CLEAR first */
+const Pads = { clear: [false, false],
+  tap(n, i) { if (this.clear[n - 1]) { this.clear[n - 1] = false; return ask("hotclear " + n + " " + i); }
+    ask("hot " + n + " " + i + " 1"); return ask("hot " + n + " " + i + " 0"); } };
 const cue = n => { ask("cue " + n + " 1"); ask("cue " + n + " 0"); };      /* a tap: to the cue point, or the cue point set here */
 const start = () => post("/select", { module: "dj" }).then(full);
 
@@ -200,8 +223,8 @@ const L = { dir: "", card: null, pick: null, seen: null, sure: false,
    absolute, a value dragged here would disagree with the knob). Frame and parts: small.js. ---- */
 function small() {
   const el = Small.el, WAVE = 138;
-  let tab = "decks", U = {}, note = "", noteBad = false, noteTill = 0, said = -1, vuAt = 0;
-  const F = Small.frame({ title: "Numark DJ", tabs: [["decks", "DECKS"], ["lib", "LIB"], ["mix", "MIX"]], onTab: id => { tab = id; L.sure = false; if (id === "lib") full(); build(); } });
+  let tab = "decks", U = {}, note = "", noteBad = false, noteTill = 0, said = -1, vuAt = 0, pd = 1;
+  const F = Small.frame({ title: "Numark DJ", tabs: [["decks", "DECKS"], ["pads", "PADS"], ["lib", "LIB"], ["mix", "MIX"]], onTab: id => { tab = id; L.sure = false; Pads.clear = [false, false]; if (id === "lib") full(); build(); } });
   const say = (t, bad) => { if (!t) return; note = t; noteBad = !!bad; noteTill = performance.now() + (bad ? 6000 : 3000); msg(); };
   const done = j => { if (j && j.error) say(j.error, true); return j; };
   const text = (e, t) => { if (e.textContent !== t) e.textContent = t; };
@@ -228,6 +251,7 @@ function small() {
           u.box = box; u.name = el("span", "g-djname"); u.left = document.createTextNode(""); u.len = el("span"); time.append(u.left, u.len);
           head.append(el("span", "g-djn", String(n)), u.name, time);
           u.wave = el("div", "g-djwave"); u.cue = el("div", "g-djcue"); u.play = el("div", "g-djplay"); u.track = -1;
+          u.loop = el("div", "g-djloop"); u.hot = []; for (let k = 0; k < 8; k++) u.hot.push(el("div", "g-djhot"));
           u.cueB = Small.btn("CUE", () => cue(n)); u.playB = Small.btn("PLAY", () => ask("play " + n + " 2").then(done));
           u.pitch = el("b"); u.range = el("span"); pitch.append(u.pitch, u.range); u.vu = vu();
           u.load = Small.btn("LOAD " + n, () => { F.tab("lib"); });
@@ -235,6 +259,18 @@ function small() {
         }
       }
       U.msg = el("div", "g-msg"); root.appendChild(U.msg); F.view.appendChild(root);
+    } else if (tab === "pads") {
+      const root = el("div", "g-djpads"), top = el("div", "g-djptop"), grid = el("div", "g-djpgrid"), lrow = el("div", "g-djprow"); U.pad = [];
+      const go = j => done(j);
+      U.d1 = Small.btn("DECK 1", () => { pd = 1; show(); }); U.d2 = Small.btn("DECK 2", () => { pd = 2; show(); }); U.bpm = el("span", "g-djbpm");
+      U.half = Small.btn("BPM /2", () => ask("bpmx " + pd + " 0.5").then(go)); U.dbl = Small.btn("BPM x2", () => ask("bpmx " + pd + " 2").then(go));
+      U.clr = Small.btn("CLEAR", () => { Pads.clear[pd - 1] = !Pads.clear[pd - 1]; show(); });
+      top.append(U.d1, U.d2, U.bpm, U.half, U.dbl, U.clr);
+      for (let k = 1; k <= 8; k++) { const b = Small.btn("", () => Promise.resolve(Pads.tap(pd, k)).then(go).then(() => show())); b.append(el("b", "", String(k)), el("span")); grid.appendChild(b); U.pad.push(b); }
+      U.lin = Small.btn("IN", () => ask("loopin " + pd).then(go)); U.lout = Small.btn("OUT", () => ask("loopout " + pd).then(go)); U.lon = Small.btn("LOOP", () => ask("loop " + pd + " 2").then(go));
+      U.lhalf = Small.btn("1/2", () => ask("loopx " + pd + " 0.5").then(go)); U.ldbl = Small.btn("x2", () => ask("loopx " + pd + " 2").then(go));
+      lrow.append(U.lin, U.lout, U.lon, U.lhalf, U.ldbl);
+      U.msg = el("div", "g-msg"); root.append(top, grid, lrow, U.msg); F.view.appendChild(root);
     } else if (tab === "lib") {
       const root = el("div", "g-djlib"), side = el("div", "g-side"); U.path = el("div", "g-djpath"); U.where = document.createTextNode(""); U.count = el("span", "g-dim"); U.path.append(U.where, U.count);
       U.pg = Small.pager(5, r => { const sel = L.card ? L.pick && L.pick.path === r.path && r.kind !== "up" : r.kind === "file" && r.path === L.cursor();
@@ -276,6 +312,7 @@ function small() {
     else if (!live()) { t = tab === "decks" ? "" : why(); }
     else if (tab === "mix") { const h = (D.S && D.S.health) || {}; if (h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts"); }
     else if (tab === "lib" && !L.card && !D.files.length) t = "no music on the box: FROM CARD copies it from the SD card";
+    else if (tab === "pads") t = Pads.clear[pd - 1] ? "tap the pad to clear" : loopLine(deck(pd - 1));
     text(U.msg, t); cls(U.msg, "bad", bad);
   }
   function show(force) {
@@ -290,12 +327,24 @@ function small() {
         const t = has ? "-" + tm(d.len - d.pos) : ""; if (u.left.data !== t) u.left.data = t; text(u.len, has ? "  of " + tm(d.len) : "");
         if (u.track !== (d.track || 0) && (!has || D.waves[i + 1])) { u.track = d.track || 0; u.wave.textContent = "";
           for (const p of peaks(i, WAVE)) { const b = el("i"); b.style.height = Math.max(4, Math.round(p * 100)) + "%"; u.wave.appendChild(b); }
-          if (has) u.wave.append(u.cue, u.play); }
-        if (has && d.len) { sty(u.play, "left", Math.round(d.pos / d.len * 429) + "px"); sty(u.cue, "left", Math.round(d.cue / d.len * 429) + "px"); }
+          if (has) u.wave.append(u.loop, ...u.hot, u.cue, u.play); }
+        if (has && d.len) { sty(u.play, "left", Math.round(d.pos / d.len * 429) + "px"); sty(u.cue, "left", Math.round(d.cue / d.len * 429) + "px");
+          for (let k = 0; k < 8; k++) { const h = (d.hot || [])[k]; sty(u.hot[k], "display", h == null ? "none" : ""); if (h != null) sty(u.hot[k], "left", Math.round(h / d.len * 429) + "px"); }
+          const lp = d.loop_in != null && d.loop_out != null; sty(u.loop, "display", lp ? "" : "none"); cls(u.loop, "on", d.loop_on);
+          if (lp) { sty(u.loop, "left", Math.round(d.loop_in / d.len * 429) + "px"); sty(u.loop, "width", Math.max(2, Math.round((d.loop_out - d.loop_in) / d.len * 429)) + "px"); } }
         cls(u.cueB, "on", has && (d.cue_held || (!d.playing && Math.abs(d.pos - d.cue) < 0.01))); cls(u.playB, "go", d.playing);
         u.cueB.disabled = u.playB.disabled = !has; u.load.disabled = !!d.playing;
-        text(u.pitch, pct(d.rate || 0)); text(u.range, "pitch, range " + (d.range || 8) + "%");
+        text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(d.rate || 0)); text(u.range, has && d.bpm ? pct(d.rate || 0) + ", range " + (d.range || 8) + "%" : "pitch, range " + (d.range || 8) + "%");
         if (meters) setVu(u.vu, d.playing ? d.peak : 0); }
+    } else if (tab === "pads") {
+      const d = deck(pd - 1), has = !!d.track && live();
+      cls(U.d1, "on", pd === 1); cls(U.d2, "on", pd === 2);
+      text(U.bpm, !has ? "no track" : d.bpm ? bpmNow(d) + " bpm" : "no beat found");
+      U.half.disabled = U.dbl.disabled = !has || !d.bpm; U.clr.disabled = !has || !(d.hot || []).some(h => h != null); cls(U.clr, "warn", Pads.clear[pd - 1] && !U.clr.disabled);
+      for (let k = 0; k < 8; k++) { const h = (d.hot || [])[k], b = U.pad[k]; b.disabled = !has; cls(b, "on", h != null); text(b.lastChild, h == null ? "" : tms(h)); }
+      const lp = d.loop_in != null && d.loop_out != null;
+      U.lin.disabled = !has; U.lout.disabled = !has || d.loop_in == null; U.lon.disabled = !has || (!lp && !d.bpm); U.lhalf.disabled = U.ldbl.disabled = !has || !lp;
+      cls(U.lon, "go", d.loop_on); cls(U.lin, "on", d.loop_in != null && !lp);
     } else if (tab === "lib") {
       const moved = L.follow(), rows = L.rows(), key = JSON.stringify([rows, L.cursor(), L.pick && L.pick.path, L.card && L.card.path]);
       if (U.where.data !== L.where()) U.where.data = L.where(); text(U.count, L.count());
@@ -322,7 +371,7 @@ function small() {
   /* a remote or a game controller: 1 and 2 start and stop a deck; BACK leaves the card's list first; the rest walks the buttons */
   Small.remote(es, { act: a => { if (a !== "1" && a !== "2") return false; ask("play " + a + " 2").then(done); return true; },
     back: () => { if (tab === "lib" && L.card) { side3(); return true; } return false; } });
-  window.djSmall = { tab: () => tab, L };
+  window.djSmall = { tab: () => tab, L, Pads };
   F.tab("decks");
   full();
 }
@@ -342,9 +391,9 @@ function big() {
   const header = el("header"), chip = el("span", "chip", "?"), home = btn("Modules", () => { location.href = "/" + (tv ? "?tv=1" : ""); }); home.id = "home";
   const sp = el("span"); sp.style.flex = "1"; header.append(el("h1", "", "NUMARK DJ"), chip, sp, home);
   const tabs = el("nav", "tabs"), tb = {};
-  for (const [id, t] of [["decks", "DECKS"], ["lib", "LIBRARY"], ["mix", "MIX"]]) { tb[id] = btn(t, () => { tab = id; L.sure = false; if (id === "lib") full(); lay(); draw(); }); tabs.appendChild(tb[id]); }
-  const main = el("main"), sDecks = el("section"), sLib = el("section"), sMix = el("section"), foot = el("div", "msg");
-  sDecks.id = "s-decks"; sLib.id = "s-lib"; sMix.id = "s-mix"; main.append(sDecks, sLib, sMix);
+  for (const [id, t] of [["decks", "DECKS"], ["pads", "PADS"], ["lib", "LIBRARY"], ["mix", "MIX"]]) { tb[id] = btn(t, () => { tab = id; L.sure = false; Pads.clear = [false, false]; if (id === "lib") full(); lay(); draw(); }); tabs.appendChild(tb[id]); }
+  const main = el("main"), sDecks = el("section"), sPads = el("section"), sLib = el("section"), sMix = el("section"), foot = el("div", "msg");
+  sDecks.id = "s-decks"; sPads.id = "s-pads"; sLib.id = "s-lib"; sMix.id = "s-mix"; main.append(sDecks, sPads, sLib, sMix);
   document.body.append(header, tabs, main, foot);
 
   /* decks */
@@ -358,6 +407,16 @@ function big() {
     u.cueB = btn("CUE", () => cue(n)); u.playB = btn("PLAY", () => ask("play " + n + " 2").then(done)); u.pitch = el("b"); u.range = el("span"); pitch.append(u.pitch, u.range);
     u.vu = el("div", "vu"); u.vu.appendChild(el("i")); u.load = btn("LOAD " + n, () => ask("pick " + n).then(done));
     row.append(u.cueB, u.playB, pitch, u.vu, u.load); box.append(head, u.wave, row); sDecks.appendChild(box); UD.push(u);
+    /* its pads: 8 hot cues, then the loop and the tempo's correction */
+    const go = j => { done(j); draw(); };
+    u.pads = el("div", "pads"); u.pad = [];
+    for (let k = 1; k <= 8; k++) { const b = btn("", () => Promise.resolve(Pads.tap(n, k)).then(go)); b.append(el("b", "", String(k)), el("span")); u.pads.appendChild(b); u.pad.push(b); }
+    u.lin = btn("IN", () => ask("loopin " + n).then(go)); u.lout = btn("OUT", () => ask("loopout " + n).then(go)); u.lon = btn("LOOP", () => ask("loop " + n + " 2").then(go));
+    u.lhalf = btn("1/2", () => ask("loopx " + n + " 0.5").then(go)); u.ldbl = btn("x2", () => ask("loopx " + n + " 2").then(go));
+    u.clr = btn("CLEAR", () => { Pads.clear[i] = !Pads.clear[i]; draw(); });
+    u.bhalf = btn("BPM /2", () => ask("bpmx " + n + " 0.5").then(go)); u.bdbl = btn("BPM x2", () => ask("bpmx " + n + " 2").then(go));
+    u.pads.append(u.lin, u.lout, u.lon, u.lhalf, u.ldbl, u.clr, u.bhalf, u.bdbl);
+    u.padbox = el("div", "padbox"); u.padname = el("span", "dname"); const ph = el("div", "dhead"); ph.append(el("span", "dn", String(n)), u.padname); u.padbox.appendChild(ph); sPads.appendChild(u.padbox);
   }
   sDecks.appendChild(off);
   /* library */
@@ -400,18 +459,22 @@ function big() {
   function lay() {
     const w = innerWidth, h = innerHeight, upright = h > w, short = !upright && h < 520 * (tv ? 1.5 : 1), wide = !upright && !short;
     cls(document.body, "lay-wide", wide); cls(document.body, "lay-tabs", !wide); cls(document.body, "upright", upright); cls(document.body, "short", short);
-    for (const [id, s] of [["decks", sDecks], ["lib", sLib], ["mix", sMix]]) { cls(s, "show", id === tab); cls(tb[id], "sel", id === tab); }
+    if (wide && tab === "pads") tab = "decks";
+    for (const [id, s] of [["decks", sDecks], ["pads", sPads], ["lib", sLib], ["mix", sMix]]) { cls(s, "show", id === tab); cls(tb[id], "sel", id === tab); }
+    for (const u of UD) { const home = wide ? u.box : u.padbox; if (u.pads.parentNode !== home) home.appendChild(u.pads); }      /* the pads: in the deck, or on their tab */
     const n = Math.max(1, Math.floor((rowsEl.clientHeight + 4) / 48)); if (n !== per) { per = n; libKey = ""; }
   }
   function wave(i) {             /* the track's outline, what has played dimmer, the playhead and the cue point */
     const u = UD[i], d = deck(i), cv = u.cv, r = u.wave.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
     if (!W || !H) return;
     const pos = d.track && d.len ? Math.min(d.len, d.pos + (d.playing ? (performance.now() - D.at) / 1000 * (d.speed || 0) : 0)) : 0, px = d.len ? Math.round(pos / d.len * W) : 0;
-    const key = [W, H, d.track || 0, px, Math.round((d.cue || 0) * 10), !!D.waves[i + 1]].join();
+    const key = [W, H, d.track || 0, px, Math.round((d.cue || 0) * 10), !!D.waves[i + 1], d.hot, d.loop_in, d.loop_out, d.loop_on].join();
     if (key === u.key) return; u.key = key; cv.width = W; cv.height = H;
     const g = cv.getContext("2d"), n = Math.max(1, Math.floor(W / (3 * dpr))), pk = peaks(i, n), bw = W / n;
     for (let k = 0; k < pk.length; k++) { const hh = Math.max(2 * dpr, pk[k] * H * 0.92); g.fillStyle = (k + 0.5) * bw < px ? "#27507a" : "#4aa3ff"; g.fillRect(k * bw, (H - hh) / 2, Math.max(1, bw - dpr), hh); }
-    if (!d.track) return;
+    if (!d.track || !d.len) return;
+    if (d.loop_in != null && d.loop_out != null) { g.fillStyle = d.loop_on ? "#35d05a" : "#7d848c"; g.fillRect(d.loop_in / d.len * W, H - 4 * dpr, Math.max(2 * dpr, (d.loop_out - d.loop_in) / d.len * W), 4 * dpr); }
+    g.fillStyle = "#d9dcdf"; for (const h of d.hot || []) if (h != null) g.fillRect(h / d.len * W - dpr, 0, 2 * dpr, 9 * dpr);
     const cx = d.len ? d.cue / d.len * W : 0; g.fillStyle = "#d9dcdf"; g.beginPath(); g.moveTo(cx - 5 * dpr, 0); g.lineTo(cx + 5 * dpr, 0); g.lineTo(cx, 8 * dpr); g.fill();
     g.fillStyle = "#ffb833"; g.fillRect(px - dpr, 0, 2 * dpr, H);
   }
@@ -426,7 +489,14 @@ function big() {
       if (u.left.data !== t) u.left.data = t; text(u.len, has ? "  of " + tm(d.len) : "");
       cls(u.cueB, "on", has && (d.cue_held || (!d.playing && Math.abs(d.pos - d.cue) < 0.01))); cls(u.playB, "go", d.playing);
       u.cueB.disabled = u.playB.disabled = !has; u.load.disabled = !!d.playing || !L.cursor();
-      text(u.pitch, pct(d.rate || 0)); text(u.range, "pitch, range " + (d.range || 8) + "%"); setVu(u.vu, d.playing ? d.peak : 0); wave(i); }
+      text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(d.rate || 0)); text(u.range, has && d.bpm ? pct(d.rate || 0) + ", range " + (d.range || 8) + "%" : has ? "no steady beat, range " + (d.range || 8) + "%" : "pitch, range " + (d.range || 8) + "%");
+      setVu(u.vu, d.playing ? d.peak : 0); wave(i);
+      const hp = has && on, lp = d.loop_in != null && d.loop_out != null;
+      for (let k = 0; k < 8; k++) { const h = (d.hot || [])[k], b = u.pad[k]; b.disabled = !hp; cls(b, "on", h != null); text(b.lastChild, h == null ? "" : tms(h)); }
+      u.lin.disabled = !hp; u.lout.disabled = !hp || d.loop_in == null; u.lon.disabled = !hp || (!lp && !d.bpm); u.lhalf.disabled = u.ldbl.disabled = !hp || !lp;
+      cls(u.lon, "go", d.loop_on); cls(u.lin, "on", d.loop_in != null && !lp); u.bhalf.disabled = u.bdbl.disabled = !hp || !d.bpm;
+      u.clr.disabled = !hp || !(d.hot || []).some(h => h != null); cls(u.clr, "warn", Pads.clear[i] && !u.clr.disabled);
+      cls(u.padbox, "play", d.playing); text(u.padname, has ? d.name || "" : "no track"); cls(u.padname, "none", !has); }
     /* library */
     const moved = L.follow(), rows = L.rows(), pages = Math.max(1, Math.ceil(rows.length / per));
     if (moved && !L.card) { const k = rows.findIndex(r => r.path === L.cursor()); if (k >= 0) page = Math.floor(k / per); }
@@ -455,6 +525,8 @@ function big() {
     let t = "", bad = false; const h = (S && S.health) || {};
     if (note && performance.now() < noteTill) { t = note; bad = noteBad; }
     else if (L.copyLine()) { t = L.copyLine(); bad = !!(D.copy && D.copy.error); }
+    else if (Pads.clear[0] || Pads.clear[1]) t = "tap the pad to clear";
+    else if (on && [0, 1].some(i => loopLine(deck(i)))) t = [0, 1].map(i => loopLine(deck(i)) ? "deck " + (i + 1) + ": " + loopLine(deck(i)) : "").filter(x => x).join("   ");
     else if (on && h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts") + (h.rt ? "" : ", no real-time priority");
     text(foot, t); cls(foot, "bad", bad);
   }
@@ -474,7 +546,7 @@ function big() {
     draw();
   }
   es.addEventListener("ir", e => { try { action(JSON.parse(e.data).action); } catch (err) {} });
-  window.djBig = { L, per: () => per, tab: () => tab };
+  window.djBig = { L, Pads, per: () => per, tab: () => tab };
   lay(); draw(); full().then(() => { lay(); draw(); });
 }
 if (Small.on) small(); else big();

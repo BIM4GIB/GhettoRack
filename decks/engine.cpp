@@ -121,8 +121,12 @@ float SoftClip(float x)
 Engine::Engine()
 {
     for(auto& d : deck_)
+    {
         for(auto& e : d.eq)
             e.Init(kEqLoHz, kEqHiHz);
+        for(auto& h : d.hot)
+            h = -1;
+    }
 }
 
 bool Engine::Post(const Ev& e)
@@ -154,6 +158,18 @@ void Engine::Jump(Deck& d, double to)
     d.jump_to = to;
 }
 
+/** There at once and without a click: what was playing runs on for 2 ms
+ *  under what plays now. For a hot cue and a loop, where a gap would be heard. */
+void Engine::Cut(Deck& d, double to)
+{
+    const double n = d.trk ? d.trk->frames : 0;
+    to             = to < 0 ? 0 : (to > n ? n : to);
+    if(d.fade > 0 && d.jgain > 0 && !d.jump)
+        d.xf_pos = d.pos, d.xf_left = kXfade;
+    d.pos = d.goal = d.goal_s = to;
+    d.jump         = false;
+}
+
 void Engine::Handle(const Ev& e)
 {
     if(e.deck < 0 || e.deck >= kDecks)
@@ -169,6 +185,12 @@ void Engine::Handle(const Ev& e)
             d.playing = d.cue_held = d.jump = false;
             d.speed = d.bend_acc = d.fade = 0;
             d.jgain                       = 1;
+            for(auto& h : d.hot)
+                h = -1;
+            d.hot_held = -1, d.xf_left = 0;
+            d.loop_in = d.loop_out = -1, d.loop_on = false;
+            d.bpm   = d.trk ? d.trk->bpm : 0;
+            d.beat0 = d.trk ? d.trk->beat0 : 0;
             break;
         case kEvPlay:
         {
@@ -179,7 +201,7 @@ void Engine::Handle(const Ev& e)
                 break; // at the end: nothing to play
             d.playing = on;
             if(on)
-                d.cue_held = false; // play pressed while cue is held: it keeps running
+                d.cue_held = false, d.hot_held = -1; // play pressed while a cue is held: it keeps running
             break;
         }
         case kEvCue:
@@ -217,6 +239,92 @@ void Engine::Handle(const Ev& e)
                 d.bend_acc = Clamp(d.bend_acc + e.a * kNudge, -0.5f, 0.5f);
             break;
         case kEvBend: d.bend_btn = Clamp(e.a, -0.5f, 0.5f); break;
+        case kEvHot:
+        {
+            const int i = (int)e.a;
+            if(!d.trk || i < 0 || i >= kHot)
+                break;
+            if(e.d >= 1)
+            {
+                if(d.hot[i] < 0)
+                    d.hot[i] = std::floor((d.jump ? d.jump_to : d.pos) + 0.5); // empty: this place
+                else if(d.playing)
+                    Cut(d, d.hot[i]); // playing: on from there
+                else
+                {
+                    Jump(d, d.hot[i]); // stopped: plays from there while held
+                    d.hot_held = i;
+                }
+            }
+            else if(d.hot_held == i)
+            {
+                d.hot_held = -1;
+                Jump(d, d.hot[i]);
+            }
+            break;
+        }
+        case kEvHotClear:
+        case kEvHotSet:
+        {
+            const int i = (int)e.a;
+            if(!d.trk || i < 0 || i >= kHot)
+                break;
+            d.hot[i] = e.type == kEvHotSet && e.d >= 0 && e.d <= d.trk->frames ? std::floor(e.d + 0.5) : -1;
+            if(d.hot_held == i)
+                d.hot_held = -1;
+            break;
+        }
+        case kEvLoopIn:
+            if(!d.trk)
+                break;
+            d.loop_in  = std::floor((d.jump ? d.jump_to : d.pos) + 0.5);
+            d.loop_out = -1, d.loop_on = false;
+            break;
+        case kEvLoopOut:
+            if(!d.trk || d.loop_in < 0 || d.pos - d.loop_in < kLoopMin)
+                break;
+            d.loop_out = std::floor(d.pos + 0.5);
+            d.loop_on  = true;
+            Cut(d, d.loop_in);
+            break;
+        case kEvLoop:
+        {
+            if(!d.trk)
+                break;
+            const bool have = d.loop_in >= 0 && d.loop_out > d.loop_in;
+            if(e.d > 0 || (e.a >= 1 && !have)) // a new one: so many beats from here (4 if not said)
+            {
+                if(d.bpm <= 0)
+                    break; // no tempo, no beats
+                const double len = std::floor((e.d > 0 ? e.d : 4.0) * 60.0 / d.bpm * kRate + 0.5);
+                const double in  = std::floor((d.jump ? d.jump_to : d.pos) + 0.5);
+                if(len < kLoopMin || in + len > d.trk->frames)
+                    break;
+                d.loop_in = in, d.loop_out = in + len, d.loop_on = true;
+                break;
+            }
+            const bool on = e.a >= 2 ? !d.loop_on : e.a >= 1;
+            if(on && !d.loop_on && (d.pos < d.loop_in || d.pos >= d.loop_out))
+                Cut(d, d.loop_in); // into it again, from wherever the record is
+            d.loop_on = on;
+            break;
+        }
+        case kEvLoopScale:
+        {
+            if(!d.trk || d.loop_in < 0 || d.loop_out <= d.loop_in || e.a <= 0)
+                break;
+            double len = std::floor((d.loop_out - d.loop_in) * e.a + 0.5);
+            if(len < kLoopMin || d.loop_in + len > d.trk->frames)
+                break; // as short, or as long, as it gets
+            d.loop_out = d.loop_in + len;
+            if(d.loop_on && d.pos >= d.loop_out) // halved behind the needle: where it would be by now
+                Cut(d, d.loop_in + std::fmod(d.pos - d.loop_in, len));
+            break;
+        }
+        case kEvGrid:
+            if(d.trk)
+                d.bpm = e.a > 0 ? e.a : 0, d.beat0 = e.d;
+            break;
         default: break;
     }
 }
@@ -230,7 +338,7 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
     const auto       rx = std::memory_order_relaxed;
 
     const bool scratch = d.touched && k.scratch.load(rx) > 0.5f;
-    const bool run     = d.trk && (d.playing || d.cue_held);
+    const bool run     = d.trk && (d.playing || d.cue_held || d.hot_held >= 0);
     if(!d.trk)
         d.speed = 0;
     else if(scratch)
@@ -291,14 +399,28 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
         if(d.trk && g > 0)
         {
             Read(d.trk, d.pos, sl, sr);
+            if(d.xf_left > 0) // just cut here: what played before fades out under it
+            {
+                float ol, orr;
+                Read(d.trk, d.xf_pos, ol, orr);
+                const float a = d.xf_left * (1.f / kXfade);
+                sl += (ol - sl) * a, sr += (orr - sr) * a;
+            }
             sl *= g, sr *= g;
         }
+        if(d.xf_left > 0)
+            d.xf_left--, d.xf_pos += d.speed;
         d.pos += d.speed;
+        if(d.loop_on && !scratch && d.speed > 0 && d.pos >= d.loop_out && d.pos - d.speed < d.loop_out)
+        {
+            d.xf_pos = d.pos, d.xf_left = kXfade; // the loop's end: round again
+            d.pos -= d.loop_out - d.loop_in;
+        }
         if(d.pos >= end)
         {
             d.pos = end;
             if(!scratch)
-                d.playing = d.cue_held = false; // ran off the end
+                d.playing = d.cue_held = false, d.hot_held = -1; // ran off the end
         }
         else if(d.pos < 0)
             d.pos = 0;
@@ -393,6 +515,13 @@ void Engine::Process(float* out, int frames)
         s.touched.store(k.touched, rx);
         s.speed.store(k.speed, rx);
         s.peak.store(k.peak, rx);
+        for(int i = 0; i < kHot; i++)
+            s.hot[i].store(k.hot[i], rx);
+        s.loop_in.store(k.loop_in, rx);
+        s.loop_out.store(k.loop_out, rx);
+        s.loop_on.store(k.loop_on, rx);
+        s.bpm.store(k.bpm, rx);
+        s.beat0.store(k.beat0, rx);
     }
     peak_l.store(pk_l_, rx);
     peak_r.store(pk_r_, rx);

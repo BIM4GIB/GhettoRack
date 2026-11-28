@@ -32,7 +32,9 @@ DECKS_UPLOAD_MAX = 512 * 1024 * 1024
 DECKS_KEEP_FREE = 256 * 1024 * 1024   # an upload or a copy leaves the box this much room
 DECKS_LOG_KEEP = 20
 DECKS_LINE_MAX = 8192         # W: 800 peaks, two hex digits each
-DECK_ACTIONS = {"eject", "play", "cue", "seek", "set", "browse", "pick", "scan"}
+DECK_ACTIONS = {"eject", "play", "cue", "seek", "set", "browse", "pick", "scan",
+                "hot", "hotclear", "loopin", "loopout", "loop", "loopx", "bpmx"}
+PAD_MODES = ("cue", "loop", "cuts", "sample")
 DECK_SET = {"gain", "hi", "mid", "lo", "filter", "volume", "pfl", "scratch", "rate",
             "xfader", "master", "cuemix", "cuegain"}
 SUN_PATH_MAX = 100            # sockaddr_un takes 104 (macOS) or 108 (Linux) bytes
@@ -340,6 +342,11 @@ class Decks:
                 rel = None if path == "-" else self.rel(path)
                 self.browse = {"at": int(f[1]), "count": int(f[2]), "file": rel,
                                "name": os.path.splitext(os.path.basename(path))[0] if rel else None}
+            elif k == "Q":
+                d, v = int(f[1]) - 1, [int(x) for x in f[2:16]]
+                sec = lambda ms: None if ms < 0 else ms / 1000
+                self.decks[d].update(hot=[sec(x) for x in v[:8]], loop_in=sec(v[8]), loop_out=sec(v[9]), loop_on=bool(v[10]),
+                                     bpm=v[11] / 100, beat0=v[12] / 1000, pads=PAD_MODES[v[13]] if 0 <= v[13] < len(PAD_MODES) else "cue")
             elif k == "H":
                 v = [int(x) for x in f[1:8]]
                 self.health = {"xruns": v[0], "worst_us": v[1], "period": v[2], "buffer": v[3], "rt": bool(v[4]),
@@ -386,6 +393,7 @@ class Decks:
         except OSError:
             pass
         cmd = [self.binary, "--socket", self.sock_path, "--music", self.music,
+               "--store", os.path.join(os.path.dirname(a.state), "decks-tracks.txt"),
                "--period", str(a.decks_period), "--buffer", str(a.decks_buffer)]
         cmd += ["--null"] if a.decks_card == "null" else ["--device", "hw:CARD=%s,DEV=0" % a.decks_card]
         try:

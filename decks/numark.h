@@ -10,8 +10,17 @@
  *  which is where the ones a state request does not show (buttons, jog,
  *  lights) come from. Lights: 0x7F on, 0x01 dim.
  *
- *  Channels: 1, 2 = deck transport and strip; 5, 6 = pads and loop (not
- *  mapped yet); 9, 10 = FX (not mapped yet); 15 = master section; 16 = browse. */
+ *  Channels: 1, 2 = deck transport and strip; 5, 6 = pads, their mode buttons
+ *  and the loop buttons; 9, 10 = FX (not mapped yet); 15 = master section;
+ *  16 = browse.
+ *
+ *  Pads: four mode buttons a deck. CUE: a pad sets its hot cue where the
+ *  record is, or goes to it; shift + pad clears it. AUTO LOOP and SAMPLE do
+ *  nothing yet. FADER CUTS is the controller's own doing (it cuts its own
+ *  sound, the engine hears nothing of it). Loop buttons: LOOP on / off (with
+ *  no loop yet: 4 beats from here, when the tempo is known), shift + LOOP
+ *  into the loop again, 1/2 and x2 its length, shift + 1/2 loop in, shift +
+ *  x2 loop out. */
 #pragma once
 #include "engine.h"
 #include <algorithm>
@@ -34,14 +43,19 @@ class Numark
 
     Numark(Engine& e, NumarkHost* h) : e_(e), host_(h) { ForgetLights(); }
 
+    enum PadMode { kPadCue, kPadLoop, kPadCuts, kPadSample };
+
     int  range[kDecks] = {0, 0}; // index into kRanges
+    int  pads[kDecks]  = {kPadCue, kPadCue};
     bool shift         = false;
 
     /** What to send when the controller appears: stop its demo, then ask for
      *  where every knob and fader stands. Returns the number of bytes. */
     static int Hello(uint8_t* out)
     {
-        static const uint8_t m[] = {0xF0, 0x7E, 0x00, 0x06, 0x01, 0xF7, 0xF0, 0x00, 0x20, 0x7F, 0x03, 0x01, 0xF7};
+        static const uint8_t m[] = {0xF0, 0x7E, 0x00, 0x06, 0x01, 0xF7,        // out of its demo
+                                    0xF0, 0x00, 0x20, 0x7F, 0x03, 0xF7,        // FADER CUTS: its own to do
+                                    0xF0, 0x00, 0x20, 0x7F, 0x03, 0x01, 0xF7}; // where is everything?
         for(unsigned i = 0; i < sizeof(m); i++)
             out[i] = m[i];
         return sizeof(m);
@@ -76,8 +90,10 @@ class Numark
                 host_->BrowsePress(a == 0x07);
             return;
         }
+        if(ch == 4 || ch == 5)
+            return Pads(ch - 4, a, down);
         if(ch > 1)
-            return; // pads, loop, FX: not mapped yet
+            return; // FX: not mapped yet
         const int d = ch;
         switch(a)
         {
@@ -161,6 +177,22 @@ class Numark
                 out[n++]  = level;
                 meter_[d] = level;
             }
+            /* the pad section: the mode in use, in CUE the pads that hold a cue, and LOOP while one runs */
+            uint8_t pw[kPadLights];
+            for(int i = 0; i < 4; i++)
+                pw[i] = pads[d] == i ? 0x7F : 0x01;
+            for(int i = 0; i < kHot; i++)
+                pw[4 + i] = pads[d] == kPadCue && s.hot[i].load() >= 0 ? 0x7F : 0x01;
+            pw[12] = s.loop_on.load() ? 0x7F : 0x01;
+            static const uint8_t pnote[kPadLights] = {0x00, 0x0D, 0x07, 0x0B, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x40};
+            for(int i = 0; i < kPadLights; i++)
+                if(pw[i] != psent_[d][i] && n + 3 <= cap)
+                {
+                    out[n++]     = 0x94 | d;
+                    out[n++]     = pnote[i];
+                    out[n++]     = pw[i];
+                    psent_[d][i] = pw[i];
+                }
         }
         return n;
     }
@@ -171,12 +203,46 @@ class Numark
         {
             for(int i = 0; i < kLights; i++)
                 sent_[d][i] = 0xFF;
+            for(int i = 0; i < kPadLights; i++)
+                psent_[d][i] = 0xFF;
             meter_[d] = 0xFF;
         }
     }
 
   private:
-    static constexpr int kLights = 5;
+    static constexpr int kLights = 5, kPadLights = 13;
+
+    void Pads(int d, int a, bool down)
+    {
+        if(a >= 0x14 && a <= 0x1B) // a pad
+        {
+            if(pads[d] == kPadCue)
+                Post(kEvHot, d, (float)(a - 0x14), down ? 1 : 0);
+            return;
+        }
+        if(!down)
+            return;
+        if(a >= 0x1C && a <= 0x23) // shift + pad
+        {
+            if(pads[d] == kPadCue)
+                Post(kEvHotClear, d, (float)(a - 0x1C));
+            return;
+        }
+        switch(a)
+        {
+            case 0x00: pads[d] = kPadCue; break;
+            case 0x0D: pads[d] = kPadLoop; break;
+            case 0x07: pads[d] = kPadCuts; break;
+            case 0x0B: pads[d] = kPadSample; break;
+            case 0x40: Post(kEvLoop, d, 2); break;
+            case 0x41: Post(kEvLoop, d, 1); break; // shift + LOOP: into it again
+            case 0x34: Post(kEvLoopScale, d, 0.5f); break;
+            case 0x35: Post(kEvLoopScale, d, 2.f); break;
+            case 0x36: Post(kEvLoopIn, d, 0); break; // shift + 1/2
+            case 0x37: Post(kEvLoopOut, d, 0); break; // shift + x2
+            default: break;
+        }
+    }
 
     void Post(uint8_t type, int deck, float a, double dd = 0)
     {
@@ -246,7 +312,7 @@ class Numark
     Engine&     e_;
     NumarkHost* host_;
     int         pitch_msb_[kDecks] = {64, 64}, pitch_lsb_[kDecks] = {0, 0};
-    uint8_t     sent_[kDecks][kLights], meter_[kDecks];
+    uint8_t     sent_[kDecks][kLights], psent_[kDecks][kPadLights], meter_[kDecks];
 };
 
 } // namespace dk
