@@ -80,7 +80,7 @@ IR_ACTIONS = ["up", "down", "left", "right", "ok", "back", "home", "menu",
               "play", "stop", "next", "prev", "vol_up", "vol_down",
               "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
 IR_REPEATABLE = {"up", "down", "left", "right", "vol_up", "vol_down"}
-IR_PROFILES = ["all", "selector", "apcbox", "midihub", "clock"]
+IR_PROFILES = ["all", "selector", "apcbox", "midihub", "clock", "dj"]
 # Remote actions the bridge plays on the Daisy itself, while a browser shows
 # the ApcBox page. Firmware with control protocol 2 (v13.7) takes them as UI
 # actions (ESC U): encoder, transport, track select. Older firmware: only
@@ -118,8 +118,8 @@ MODULES = [
      "about": "one tempo for everything: follow Cubase or Link, send MIDI clock", "routes": []},
     {"id": "dawsync", "name": "Cubase sync", "url": None, "ready": False, "needs": [], "profile": None,
      "about": "planned: a plugin in Cubase shares its transport (Link)", "routes": []},
-    {"id": "dj", "name": "Numark DJ", "url": None, "ready": False, "needs": [], "profile": None,
-     "about": "two decks on the box, played from a Numark Mixtrack Pro FX; no page yet",
+    {"id": "dj", "name": "Numark DJ", "url": "/dj", "ready": True, "needs": [], "profile": "dj",
+     "about": "two decks and a mixer on the box, played from a Numark Mixtrack Pro FX",
      "routes": [{"from": "MixTrack Pro FX", "to": "decks"}]},
 ]
 POST_MAX = 4096

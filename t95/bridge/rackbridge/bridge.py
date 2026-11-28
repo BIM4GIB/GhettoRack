@@ -70,7 +70,7 @@ class Bridge(DaisyMixin, PortsMixin, RouterMixin, NetMixin, SamplesMixin, WebMix
                 log.warning("no %s beside the start page: pages opened with ?small stay empty", name)
         self.pages = {}
         for name, path in (("clock", args.clock_page), ("apcbox", args.apcbox_page), ("settings", args.settings_page),
-                           ("jam", args.jam_page)):
+                           ("jam", args.jam_page), ("dj", args.dj_page)):
             try:
                 with open(path, "rb") as f:
                     self.pages[name] = f.read()
@@ -208,6 +208,9 @@ def main(argv=None):
     ap.add_argument("--jam-page", default=next((p for p in (os.path.join(here, "jam.html"),
                     os.path.join(here, "..", "ui", "jam.html")) if os.path.exists(p)), None),
                     help="the jam recorder's page (/jam)")
+    ap.add_argument("--dj-page", default=next((p for p in (os.path.join(here, "dj.html"),
+                    os.path.join(here, "..", "ui", "dj.html")) if os.path.exists(p)), None),
+                    help="the Numark DJ module's page (/dj)")
     ap.add_argument("--jams", help="where recorded takes go (default: jams, next to the state file)")
     ap.add_argument("--jam-min-free-mb", type=int, default=1024, help="recording stops when the T95 has less than this free")
     ap.add_argument("--jam-split-s", type=int, default=1800, help="a take is written as files of this many seconds")

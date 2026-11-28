@@ -198,6 +198,10 @@ class WebMixin:
             return self.ui_do(d.get("a"))
         if path == "/decks":
             return self.decks.do(d)
+        if path == "/decks/delete":
+            return self.decks.delete(d)
+        if path == "/decks/copy":
+            return self.decks.copy_start(d)
         if path == "/clock":
             return self.clock.set(d)
         if path == "/clock/transport":
@@ -291,6 +295,11 @@ class WebMixin:
                     await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
                     writer.close()
                     return
+                if path == "/decks/upload":
+                    code, out = await self.decks.upload(reader, n, params.get("name", ""))
+                    await self.reply(writer, code, "application/json", json.dumps(out).encode() + b"\n")
+                    writer.close()
+                    return
                 if path == "/samples/import":
                     body = await asyncio.wait_for(reader.readexactly(min(n, POST_MAX)), 10) if n else b""
                     try:
@@ -350,6 +359,11 @@ class WebMixin:
             elif path == "/clock":
                 body = dict(self.clock.info(), ports=[p.name for p in sorted(self.ports.values(), key=lambda p: p.num)])
                 await self.reply(writer, 200, "application/json", json.dumps(body, indent=1).encode() + b"\n")
+            elif path == "/dj":
+                await self.reply(writer, 200, "text/html; charset=utf-8", self.pages["dj"])
+            elif path == "/decks/card":
+                out = await asyncio.get_running_loop().run_in_executor(None, self.decks.card_list, urllib.parse.unquote(params.get("path", "")))
+                await self.reply(writer, 400 if "error" in out else 200, "application/json", json.dumps(out).encode() + b"\n")
             elif path == "/decks":             # the DJ module's engine: what it is doing (decks.py)
                 out = await asyncio.get_running_loop().run_in_executor(None, self.decks.full)
                 await self.reply(writer, 200, "application/json", json.dumps(out).encode() + b"\n")

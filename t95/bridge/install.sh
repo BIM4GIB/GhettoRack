@@ -47,6 +47,7 @@ install -m 644 "$REPO/t95/ui/clock.html" "$DEST/clock.html"
 install -m 644 "$REPO/t95/ui/apcbox.html" "$DEST/apcbox.html"
 install -m 644 "$REPO/t95/ui/settings.html" "$DEST/settings.html"
 install -m 644 "$REPO/t95/ui/jam.html" "$DEST/jam.html"
+install -m 644 "$REPO/t95/ui/dj.html" "$DEST/dj.html"
 # The deck engine for the Numark DJ module (decks/README.md), built here for this box.
 # Without it the module says so and everything else works.
 { command -v g++ >/dev/null && [ -f /usr/include/alsa/asoundlib.h ] || \

@@ -8,7 +8,7 @@ be tied to ApcBox.
 
 ## Status as of 2026-11-27
 
-**Steps 1 and 2 of 4: the engine and the bridge part. No page yet.** Built and
+**Steps 1 to 3 of 4: the engine, the bridge part and the page (`t95/ui/dj.html`, its row in `t95/ui/VIEWS.md`).** Built and
 tested on the desk and on the Pi 4. Rene played it once on the Pi rig from the
 Numark, through headphones on the Numark's jack (engine alone, bridge stopped):
 "ok enough to proceed". Nothing was judged in detail: scratch feel, the jog's
@@ -22,7 +22,7 @@ rig; nobody has played it that way yet. The T95 is untried.
 | Mixer | Trim, 3-band EQ (a band at zero is gone, +6 dB at full), one-knob filter, fader, crossfader (both decks full at the centre), master and headphone level, cue mix, a clipper that never passes full scale |
 | Loading | Any file `ffmpeg` reads, up to half an hour, decoded in a thread of its own. A playing deck refuses a load |
 | Numark | `numark.h`: transport, strips, master section, platters, browse and LOAD, lights for play / cue / scratch / headphones and the strip meters |
-| Bridge | `t95/bridge/rackbridge/decks.py`: runs `deckd` while the Numark DJ module is the active one and the card is there, starts it again if it dies, passes the Numark's MIDI in and the lights out, serves what the decks do (`GET /decks`, `decks` events) and takes a page's asks (`POST /decks`). The module has no page, so it is not offered: a box started with `--try-module dj` lets `POST /select` choose it |
+| Bridge | `t95/bridge/rackbridge/decks.py`: runs `deckd` while the Numark DJ module is the active one and the card is there, starts it again if it dies, passes the Numark's MIDI in and the lights out, serves what the decks do (`GET /decks`, `decks` events) and takes a page's asks (`POST /decks`). Also the music folder for the page: the cursor onto a file, delete, copy from the box's SD card, upload from a browser |
 | Not there | Pads (hot cues, loops, samples), SYNC and tempo detection, FX paddles, key lock, a library beyond a folder's file list, recording, anything on a screen |
 
 ## Build and test
@@ -60,7 +60,7 @@ dropped at 256 kB queued; it never holds the engine up. `d` is deck 1 or 2.
 | `cue d 1\|0` | the cue button pressed, let go |
 | `seek d seconds` | |
 | `set name [d] value` | 0..1: `gain hi mid lo filter volume pfl scratch` (with d), `xfader master cuemix cuegain`; `set rate d x` with x from -0.5 to 0.5 |
-| `browse steps`, `pick d` | walk the `--music` list, load the file under the cursor |
+| `browse steps`, `at path`, `pick d` | walk the `--music` list (every file under the folder, sorted by path), put the cursor on a file of it, load the file under the cursor |
 | `scan` | the `--music` folder has changed: read it again |
 | `R` | say everything again |
 
@@ -71,8 +71,8 @@ dropped at 256 kB queued; it never holds the engine up. `d` is deck 1 or 2.
 | `D d playing cue_held pos_ms len_ms speed cue_ms peak track` | speed and peak x1000; on change, at most 30 a second |
 | `T d rate range gain hi mid lo filter volume pfl scratch` | rate x10000, range in percent, the rest 0..1000 |
 | `G xfader master cue_mix cue_gain peak_l peak_r` | 0..1000 |
-| `N d track name`, `W d track hex` | a track arrived: its name, and 800 peaks (two hex digits each) |
-| `B cursor count name` | the browse cursor |
+| `N d track name`, `F d track path`, `W d track hex` | a track arrived: its name, its file, and 800 peaks (two hex digits each) |
+| `B cursor count path` | the browse cursor: the file it is on (`-`: the list is empty) |
 | `H xruns worst_us period buffer rt channels dropped` | once a second: dropouts so far, the slowest block since the last line, whether the audio thread got real-time priority |
 | `L text` | log |
 
@@ -117,6 +117,4 @@ ear; and the T95 has not been tried at all.
 
 ## Next
 
-3. The page, four layouts: DECKS, LIBRARY, MIX, and a way to get music onto
-   the box (now: files put into `music/` next to the bridge's state file).
 4. Pads, tempo and SYNC, FX, key lock, tempo shared with ApcBox.

@@ -8,8 +8,13 @@ MIDI goes to deckd whole and at once ("M hex"), deckd's lights come back
 decks are doing is kept as the last value of each line for pages to read.
 
     GET  /decks            what the decks are doing, the tracks' outlines, the music folder's files
-    POST /decks {"a": ..}  one of DECK_ACTIONS, or {"a": "load", "deck": 1, "file": "name in the music folder"}
+    POST /decks {"a": ..}  one of DECK_ACTIONS, or {"a": "load", "deck": 1, "file": "name in the music folder"},
+                           or {"a": "at", "file": ..}: the browse cursor onto that file
     SSE  "decks"           the same picture without outlines and files, at most DECKS_PUSH_HZ a second
+    GET  /decks/card?path= a folder of the box's SD card: its folders and audio files
+    POST /decks/copy       {"path": a file or folder on the card}: into the music folder, one at a time
+    POST /decks/delete     {"file": ..}: out of the music folder; not while it is on a deck
+    POST /decks/upload?name=  the body into the music folder (a phone or a Mac sends a track)
 
 A controller reaches the decks through a route to "decks" (the module's own:
 the Numark by name). Sysex and clock from it are not passed on.
@@ -22,6 +27,9 @@ DECKS_PUSH_HZ = 12            # the picture to browsers; a page moves its own pl
 DECKS_OUT_MAX = 64 * 1024     # bytes waiting for deckd before a controller's MIDI is dropped
 DECKS_MIDI_MAX = 3            # channel messages only
 DECKS_FILES_MAX = 2000
+DECKS_EXT = (".mp3", ".wav", ".flac", ".aif", ".aiff", ".m4a", ".ogg", ".opus", ".aac", ".wave")   # IsAudio in decks/main.cpp
+DECKS_UPLOAD_MAX = 512 * 1024 * 1024
+DECKS_KEEP_FREE = 256 * 1024 * 1024   # an upload or a copy leaves the box this much room
 DECKS_LOG_KEEP = 20
 DECKS_LINE_MAX = 8192         # W: 800 peaks, two hex digits each
 DECK_ACTIONS = {"eject", "play", "cue", "seek", "set", "browse", "pick", "scan"}
@@ -68,6 +76,8 @@ class Decks:
         self.greeted = set()          # controllers that have been sent the engine's hello
         self.lit = []                 # the ports the engine's lights go to: the ones routed to it when last looked
         self.dirty = False
+        self.said = [0, ""]           # the engine's last log line, numbered: a page shows each once
+        self.copy = None              # the card copy that runs or ran last: {"name", "done", "total", "error", "running"}
         self.clear()
 
     def clear(self):
@@ -103,22 +113,31 @@ class Decks:
         return {"wanted": self.wanted(), "running": self.running(), "connected": self.connected(),
                 "card": self.b.args.decks_card, "card_here": self.card_here(), "engine": bool(self.binary and os.path.exists(self.binary)),
                 "controllers": [p.name for p in self.controllers()], "starts": self.starts, "dropped": self.dropped,
-                "error": self.error, "health": self.health}
+                "error": self.error, "health": self.health, "card": self.b.sd_ready(), "copy": self.copy, "free": self.free()}
 
     def picture(self):
-        return {"running": self.connected(), "decks": self.decks, "mix": self.mix, "browse": self.browse,
+        return {"wanted": self.wanted(), "running": self.connected(), "error": self.error, "said": self.said, "decks": self.decks, "mix": self.mix, "browse": self.browse,
                 "health": self.health, "controllers": [p.name for p in self.controllers()]}
 
     def files(self):
+        """The music folder as the engine lists it: every audio file under it, sorted by path"""
         out = []
         for root, dirs, names in os.walk(self.music):
-            dirs[:] = sorted(d for d in dirs if not d.startswith("."))
-            for n in sorted(names):
-                if not n.startswith(".") and n.lower().endswith(AUDIO_EXT):
-                    out.append(os.path.relpath(os.path.join(root, n), self.music))
-                    if len(out) >= DECKS_FILES_MAX:
-                        return out
-        return out
+            for n in names:
+                if not n.startswith(".") and n.lower().endswith(DECKS_EXT):
+                    out.append(os.path.join(root, n))
+        return [os.path.relpath(p, self.music) for p in sorted(out)[:DECKS_FILES_MAX]]
+
+    def rel(self, path):
+        """A file of the music folder as pages name it, or None"""
+        root = os.path.realpath(self.music) + os.sep
+        return path[len(root):] if path.startswith(root) else os.path.relpath(path, self.music) if path.startswith(self.music + os.sep) else None
+
+    def free(self):
+        try:
+            return shutil.disk_usage(self.music).free
+        except OSError:
+            return None
 
     def full(self):
         """For GET /decks (runs off the loop: it walks the music folder)"""
@@ -144,7 +163,14 @@ class Decks:
         if not self.connected():
             return 503, {"error": "the decks are not running" + (": " + self.error if self.error else "")}
         a = d.get("a")
-        if a == "load":
+        if a == "at":
+            rel = d.get("file")
+            path = safe_join(self.music, rel) if isinstance(rel, str) and rel else None
+            if path is None or not os.path.isfile(path) or "\n" in path or "\r" in path:
+                return 400, {"error": "a file in the music folder"}
+            # as the engine lists it: under the folder it was given, whatever links lead there
+            line = "at " + os.path.join(self.music, os.path.relpath(path, os.path.realpath(self.music)))
+        elif a == "load":
             deck, rel = d.get("deck"), d.get("file")
             path = safe_join(self.music, rel) if isinstance(rel, str) and rel else None
             if deck not in (1, 2) or path is None or not os.path.isfile(path) or not path.lower().endswith(AUDIO_EXT) \
@@ -154,10 +180,128 @@ class Decks:
         else:
             line = deck_action(a)
             if line is None:
-                return 400, {"error": "one of: load, " + ", ".join(sorted(DECK_ACTIONS))}
+                return 400, {"error": "one of: at, load, " + ", ".join(sorted(DECK_ACTIONS))}
         if not self.send(line):
             return 503, {"error": "the decks are not taking lines"}
         return 200, {"ok": True}
+
+    # ---- the music folder ----
+
+    def delete(self, d):
+        rel = d.get("file")
+        path = safe_join(self.music, rel) if isinstance(rel, str) and rel else None
+        if path is None or not os.path.isfile(path):
+            return 400, {"error": "a file in the music folder"}
+        on = [i + 1 for i, k in enumerate(self.decks) if k.get("file") == self.rel(path)]
+        if on:
+            return 409, {"error": "%s is on deck %d" % (os.path.basename(path), on[0])}
+        try:
+            os.remove(path)
+        except OSError as e:
+            return 400, {"error": str(e)}
+        self.send("scan")
+        return 200, {"ok": True}
+
+    def card_list(self, rel):
+        root = self.b.roots("sd")
+        d = safe_join(root, rel)
+        if d is None or not os.path.isdir(d):
+            return {"error": "no SD card in the box" if root is None else "no such folder on the card"}
+        dirs, files = [], []
+        try:
+            for n in sorted(os.listdir(d), key=str.lower):
+                if n.startswith("."):
+                    continue
+                p = os.path.join(d, n)
+                if os.path.isdir(p):
+                    dirs.append(n)
+                elif n.lower().endswith(DECKS_EXT):
+                    files.append(n)
+        except OSError as e:
+            return {"error": str(e)}
+        here = os.path.relpath(d, os.path.realpath(root))
+        return {"path": "" if here == "." else here,
+                "dirs": dirs[:500], "files": files[:DECKS_FILES_MAX]}
+
+    def copy_start(self, d):
+        rel = d.get("path")
+        root = self.b.roots("sd")
+        src = safe_join(root, rel) if isinstance(rel, str) and rel else None
+        if root is None:
+            return 400, {"error": "no SD card in the box"}
+        if src is None or not os.path.exists(src) or src == os.path.realpath(root):
+            return 400, {"error": "a file or a folder on the card"}
+        if self.copy and self.copy["running"]:
+            return 409, {"error": "still copying " + self.copy["name"]}
+        if os.path.isfile(src):
+            items = [(src, os.path.basename(src))] if src.lower().endswith(DECKS_EXT) else []
+        else:
+            items = []
+            for dd, _, fs in os.walk(src):
+                for n in sorted(fs):
+                    if n.lower().endswith(DECKS_EXT) and not n.startswith("."):
+                        full = os.path.join(dd, n)
+                        items.append((full, os.path.relpath(full, os.path.dirname(src))))
+        if not items:
+            return 400, {"error": "no music there"}
+        self.copy = {"name": os.path.basename(src), "done": 0, "total": len(items), "error": None, "running": True}
+        asyncio.ensure_future(self.copy_run(items))
+        return 200, {"ok": True, "total": len(items)}
+
+    def copy_one(self, a, rel):
+        b = os.path.join(self.music, rel)
+        if os.path.exists(b) and os.path.getsize(b) == os.path.getsize(a):
+            return
+        free = self.free()
+        if free is not None and free - os.path.getsize(a) < DECKS_KEEP_FREE:
+            raise OSError("the box is full")
+        os.makedirs(os.path.dirname(b), exist_ok=True)
+        shutil.copyfile(a, b + ".part")
+        os.replace(b + ".part", b)
+
+    async def copy_run(self, items):
+        loop = asyncio.get_running_loop()
+        try:
+            for a, rel in items:
+                await loop.run_in_executor(None, self.copy_one, a, rel)
+                self.copy["done"] += 1
+                self.b.broadcast(sse_event("decks_copy", self.copy))
+        except OSError as e:
+            self.copy["error"] = str(e)
+        self.copy["running"] = False
+        self.send("scan")
+        self.b.broadcast(sse_event("decks_copy", self.copy))
+
+    async def upload(self, reader, n, name):
+        name = os.path.basename(urllib.parse.unquote(name)).strip()
+        if not name or name.startswith(".") or not name.lower().endswith(DECKS_EXT) or "\n" in name or "\r" in name:
+            return 400, {"error": "name a music file (?name=track.mp3)"}
+        free = self.free()
+        if not 0 < n <= DECKS_UPLOAD_MAX:
+            return 400, {"error": "empty or over %d MB" % (DECKS_UPLOAD_MAX >> 20)}
+        if free is not None and free - n < DECKS_KEEP_FREE:
+            return 507, {"error": "the box is full"}
+        os.makedirs(self.music, exist_ok=True)
+        dest = os.path.join(self.music, name)
+        part = dest + ".part"
+        try:
+            with open(part, "wb") as f:
+                left = n
+                while left:
+                    chunk = await asyncio.wait_for(reader.read(min(left, 65536)), 30)
+                    if not chunk:
+                        raise ConnectionError("upload cut off")
+                    f.write(chunk)
+                    left -= len(chunk)
+            os.replace(part, dest)
+        except (OSError, ConnectionError, asyncio.TimeoutError) as e:
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+            return 400, {"error": str(e)}
+        self.send("scan")
+        return 200, {"ok": True, "file": name}
 
     # ---- from the engine ----
 
@@ -185,17 +329,24 @@ class Decks:
                 d, track = int(f[1]) - 1, int(f[2])
                 self.decks[d].update(track=track, name=" ".join(f[3:]) if track else None)
                 if not track:
+                    self.decks[d]["file"] = None
                     self.waves.pop(d + 1, None)
+            elif k == "F":
+                self.decks[int(f[1]) - 1]["file"] = self.rel(line.split(" ", 3)[3])
             elif k == "W":
                 self.waves[int(f[1])] = {"track": int(f[2]), "peaks": f[3]}
             elif k == "B":
-                self.browse = {"at": int(f[1]), "count": int(f[2]), "name": " ".join(f[3:])}
+                path = line.split(" ", 3)[3]
+                rel = None if path == "-" else self.rel(path)
+                self.browse = {"at": int(f[1]), "count": int(f[2]), "file": rel,
+                               "name": os.path.splitext(os.path.basename(path))[0] if rel else None}
             elif k == "H":
                 v = [int(x) for x in f[1:8]]
                 self.health = {"xruns": v[0], "worst_us": v[1], "period": v[2], "buffer": v[3], "rt": bool(v[4]),
                                "channels": v[5], "events_dropped": v[6]}
             elif k == "L":
                 self.log.append(line[2:])
+                self.said = [self.said[0] + 1, line[2:]]
                 log.info("decks: %s", line[2:])
             elif k == "V":
                 self.version = int(f[1])

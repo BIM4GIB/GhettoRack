@@ -13,7 +13,7 @@
  *             D d playing cue_held pos_ms len_ms speed*1000 cue_ms peak*1000 track
  *             T d rate*10000 range*100 gain hi mid lo filter volume pfl scratch  (0..1000)
  *             G xfader master cue_mix cue_gain peak_l peak_r                     (0..1000)
- *             N d track name   W d track peaks-hex   B cursor count name
+ *             N d track name   F d track path   W d track peaks-hex   B cursor count path
  *             H xruns worst_us period buffer rt channels dropped_events
  *  d is 1 or 2. See README.md.
  *
@@ -342,7 +342,7 @@ int                      midi_fd = -1;
 std::vector<std::string> library;
 int                      cursor = 0;
 std::string              music_dir;
-std::string              deck_name[kDecks], deck_peaks[kDecks];
+std::string              deck_name[kDecks], deck_peaks[kDecks], deck_path[kDecks];
 uint32_t                 deck_track[kDecks];
 std::string              last_d[kDecks], last_t[kDecks], last_g;
 
@@ -408,7 +408,7 @@ void Scan(const std::string& dir);
 
 void SayBrowse()
 {
-    Send("B %d %d %s", cursor, (int)library.size(), library.empty() ? "-" : std::filesystem::path(library[cursor]).stem().c_str());
+    Send("B %d %d %s", cursor, (int)library.size(), library.empty() ? "-" : library[cursor].c_str());
 }
 
 void Load(int deck, const std::string& path)
@@ -500,6 +500,7 @@ void SayAll()
         if(deck_track[d])
         {
             Send("N %d %u %s", d + 1, deck_track[d], deck_name[d].c_str());
+            Send("F %d %u %s", d + 1, deck_track[d], deck_path[d].c_str());
             Send("W %d %u %s", d + 1, deck_track[d], deck_peaks[d].c_str());
         }
     }
@@ -616,6 +617,15 @@ void Command(const std::string& line)
         host.Browse(atoi(rest), false);
     else if(cmd == "pick")
         host.LoadDeck(atoi(rest) - 1);
+    else if(cmd == "at") // the cursor onto this file of the list
+    {
+        auto it = std::find(library.begin(), library.end(), std::string(rest));
+        if(it != library.end())
+        {
+            cursor = (int)(it - library.begin());
+            SayBrowse();
+        }
+    }
     else if(cmd == "set")
     {
         char name[32] = "";
@@ -660,9 +670,11 @@ void Loads()
         d.track->id        = next_track++;
         deck_track[d.deck] = d.track->id;
         deck_name[d.deck]  = d.track->name;
+        deck_path[d.deck]  = d.path;
         deck_peaks[d.deck] = d.track->peaks;
         Post(kEvLoad, d.deck, 0, 0, d.track);
         Send("N %d %u %s", d.deck + 1, d.track->id, d.track->name.c_str());
+        Send("F %d %u %s", d.deck + 1, d.track->id, d.path.c_str());
         Send("W %d %u %s", d.deck + 1, d.track->id, d.track->peaks.c_str());
     }
 }

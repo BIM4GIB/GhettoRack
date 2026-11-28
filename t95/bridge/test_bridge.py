@@ -3658,7 +3658,7 @@ class IrTest(unittest.TestCase):
     def test_i5_bad_requests(self):
         self.assertEqual(self.post("/ir/learn", {"profile": "nope", "action": "up"})[0], 400)
         self.assertEqual(self.post("/ir/learn", {"profile": "all", "action": "rm -rf"})[0], 400)
-        self.assertEqual(self.post("/select", {"module": "dj"})[0], 400)   # not ready
+        self.assertEqual(self.post("/select", {"module": "dawsync"})[0], 400)   # not ready
         self.assertEqual(self.post("/settings", {"autostart_s": 999})[0], 400)
         self.assertEqual(self.post("/nothing", {})[0], 404)
         req = urllib.request.Request("http://127.0.0.1:%d/select" % self.http, data=b"x" * 10000, method="POST")
@@ -5453,6 +5453,19 @@ class JamTest(unittest.TestCase):
 
 
 DECKD = os.path.join(REPO, "decks", "build", "deckd")
+FAKE_FFMPEG = """#!%s
+# ffmpeg -v error -nostdin -i FILE -vn -f s16le -ac 2 -ar 44100 -   for a 44.1 kHz 16-bit WAV
+import sys, wave
+try:
+    w = wave.open(sys.argv[sys.argv.index("-i") + 1], "rb")
+    assert w.getframerate() == 44100 and w.getsampwidth() == 2
+    d = w.readframes(w.getnframes())
+    if w.getnchannels() == 1:
+        d = b"".join(d[i:i + 2] * 2 for i in range(0, len(d), 2))
+    sys.stdout.buffer.write(d)
+except Exception:
+    sys.exit(1)
+"""
 NUMARK_HELLO = bytes.fromhex("f07e000601f7" "f000207f0301f7")
 NUMARK_BYE = bytes.fromhex("f000207f02f7")
 
@@ -5466,10 +5479,25 @@ class DecksTest(unittest.TestCase):
         cls.dir = tempfile.mkdtemp(dir="/tmp")      # short: the engine's socket sits in it
         cls.music = os.path.join(cls.dir, "music")
         os.makedirs(os.path.join(cls.music, "sub"))
-        make_wav(os.path.join(cls.music, "one.wav"), secs=4.0)
-        make_wav(os.path.join(cls.music, "sub", "two.wav"), secs=2.0)
+        make_wav(os.path.join(cls.music, "one.wav"), secs=4.0, rate=44100)
+        make_wav(os.path.join(cls.music, "sub", "two.wav"), secs=2.0, rate=44100)
         with open(os.path.join(cls.dir, "outside.wav"), "wb") as f:
             f.write(b"x")
+        cls.card = os.path.join(cls.dir, "card")                   # the box's SD card
+        os.makedirs(os.path.join(cls.card, "set", "deep"))
+        make_wav(os.path.join(cls.card, "loose.wav"), secs=1.0, rate=44100)
+        make_wav(os.path.join(cls.card, "set", "a.wav"), secs=1.0, rate=44100)
+        make_wav(os.path.join(cls.card, "set", "deep", "b.wav"), secs=1.0, rate=44100)
+        with open(os.path.join(cls.card, "set", "notes.txt"), "w") as f:
+            f.write("not music")
+        cls.env = dict(os.environ)
+        if not shutil.which("ffmpeg"):       # the desk: a stand-in that reads what make_wav writes (44.1 kHz, 16 bit)
+            bin_ = os.path.join(cls.dir, "bin")
+            os.makedirs(bin_)
+            with open(os.path.join(bin_, "ffmpeg"), "w") as f:
+                f.write(FAKE_FFMPEG % sys.executable)
+            os.chmod(os.path.join(bin_, "ffmpeg"), 0o755)
+            cls.env["PATH"] = bin_ + os.pathsep + cls.env.get("PATH", "")
         cls.numark = FakeController(os.path.join(cls.dir, "numark"))
         cls.keys = FakeController(os.path.join(cls.dir, "keys"))
         cls.http = free_port()
@@ -5483,8 +5511,9 @@ class DecksTest(unittest.TestCase):
             [sys.executable, BRIDGE, "--port", os.path.join(cls.dir, "nodaisy"), "--host", "127.0.0.1", "--https-port", "0",
              "--rtp-port", "0", "--http-port", str(cls.http), "--ui", UI, "--state", os.path.join(cls.dir, "state.json"),
              "--midi", cls.numark.link + "=MixTrack Pro FX", "--midi", cls.keys.link + "=LPK25",
-             "--deckd", DECKD, "--decks-card", "null", "--music", cls.music] + list(more),
-            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"))
+             "--deckd", DECKD, "--decks-card", "null", "--music", cls.music, "--sdcard", cls.card, "--sdcard-any",
+             "--selector", os.path.join(REPO, "t95", "ui", "selector.html"), "--dj-page", os.path.join(REPO, "t95", "ui", "dj.html")] + list(more),
+            stdout=subprocess.DEVNULL, stderr=open(os.path.join(cls.dir, "bridge.log"), "a"), env=cls.env)
         cls.addClassCleanup(p.kill)
         return p
 
@@ -5519,17 +5548,20 @@ class DecksTest(unittest.TestCase):
         d = self.decks()
         self.assertFalse(d["running"])
         self.assertEqual(d["files"], ["one.wav", os.path.join("sub", "two.wav")])
+        self.assertTrue(d["info"]["card"])
+        self.assertFalse(d["wanted"])
         self.assertNotIn("decks", json.loads(BridgeTest.get("/routes")[2])["destinations"])
 
-    def test_d2_a_module_without_a_page_is_not_offered(self):
-        code, out = self.post("/select", {"module": "dj"})
-        self.assertEqual(code, 400)
-        self.assertFalse(next(m for m in json.loads(BridgeTest.get("/state")[2])["modules"] if m["id"] == "dj")["ready"])
+    def test_d2_the_module_is_offered_with_its_page(self):
+        m = next(m for m in json.loads(BridgeTest.get("/state")[2])["modules"] if m["id"] == "dj")
+        self.assertEqual((m["ready"], m["url"]), (True, "/dj"))
+        code, ctype, body = BridgeTest.get("/dj")
+        self.assertEqual(code, 200)
+        self.assertIn(b"Numark DJ", body)
+        self.assertIn("dj", json.loads(BridgeTest.get("/state")[2])["ir"]["profile_names"])
+        self.assertEqual(self.post("/select", {"module": "nosuch"})[0], 400)
 
     def test_d3_chosen_the_engine_runs_and_greets_the_controller(self):
-        self.proc.terminate(); self.proc.wait(8)
-        type(self).proc = self.start("--try-module", "dj")
-        BridgeTest.wait_health(lambda h: len(h["controllers"]) == 2, 10)
         self.numark.received(0.2)
         self.keys.received(0.2)
         self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
@@ -5571,13 +5603,14 @@ class DecksTest(unittest.TestCase):
         self.assertEqual(self.wait_decks(lambda d: True)["mix"]["master"], 0.5)
 
     def test_d6_load_and_play(self):
-        if not shutil.which("ffmpeg"):
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
             self.skipTest("ffmpeg loads the tracks")
         self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
-        d = self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and "1" in d["waves"], 10)
+        d = self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and "1" in d["waves"] and d["decks"][0]["len"] > 0, 10)
         self.assertAlmostEqual(d["decks"][0]["len"], 4.0, delta=0.05)
         self.assertEqual(len(d["waves"]["1"]["peaks"]), 1600)
         self.assertEqual(d["waves"]["1"]["track"], d["decks"][0]["track"])
+        self.assertEqual(d["decks"][0]["file"], "one.wav")
         self.numark.received(0.2)
         self.numark.play([0x90, 0x00, 0x7F, 0x90, 0x00, 0x00])      # play, deck 1
         d = self.wait_decks(lambda d: d["decks"][0]["playing"] and d["decks"][0]["pos"] > 0.3)
@@ -5589,7 +5622,55 @@ class DecksTest(unittest.TestCase):
         self.wait_decks(lambda d: not d["decks"][0]["playing"])
         self.numark.play([0xBF, 0x00, 0x01, 0x9F, 0x03, 0x7F])      # browse one on, LOAD on deck 2
         d = self.wait_decks(lambda d: d["decks"][1].get("name") == "two", 10)
-        self.assertEqual(d["browse"]["name"], "two")
+        self.assertEqual((d["browse"]["name"], d["browse"]["file"], d["browse"]["count"]), ("two", "sub/two.wav", 2))
+        self.assertEqual(d["decks"][1]["file"], "sub/two.wav")
+        self.assertEqual(self.post("/decks", {"a": "at", "file": "one.wav"})[0], 200)     # a page puts the cursor on a file
+        self.wait_decks(lambda d: d["browse"]["file"] == "one.wav" and d["browse"]["at"] == 0)
+        for bad in ("../outside.wav", "nothere.wav", "", None):
+            self.assertEqual(self.post("/decks", {"a": "at", "file": bad})[0], 400, bad)
+
+    def test_d6a_music_from_the_card_from_a_browser_and_deleted(self):
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
+            self.skipTest("ffmpeg loads the tracks")
+        c = json.loads(BridgeTest.get("/decks/card")[2])
+        self.assertEqual((c["path"], c["dirs"], c["files"]), ("", ["set"], ["loose.wav"]))
+        c = json.loads(BridgeTest.get("/decks/card?path=set")[2])
+        self.assertEqual((c["path"], c["dirs"], c["files"]), ("set", ["deep"], ["a.wav"]))
+        with self.assertRaises(urllib.error.HTTPError):
+            BridgeTest.get("/decks/card?path=..%2Fmusic")
+        for bad in ("", "../music", "nothere", None):
+            self.assertEqual(self.post("/decks/copy", {"path": bad})[0], 400, bad)
+        code, out = self.post("/decks/copy", {"path": "set"})        # a folder: its music, its folders kept
+        self.assertEqual((code, out.get("total")), (200, 2), out)
+        d = self.wait_decks(lambda d: d["info"]["copy"] and not d["info"]["copy"]["running"] and d["browse"]["count"] == 4)
+        self.assertEqual(d["info"]["copy"], {"name": "set", "done": 2, "total": 2, "error": None, "running": False})
+        self.assertEqual(d["files"], ["one.wav", "set/a.wav", "set/deep/b.wav", "sub/two.wav"])
+        self.assertFalse(os.path.exists(os.path.join(self.music, "set", "notes.txt")))
+        # a browser sends a track
+        with open(os.path.join(self.card, "loose.wav"), "rb") as f:
+            body = f.read()
+        def up(name, data):
+            req = urllib.request.Request("http://127.0.0.1:%d/decks/upload?name=%s" % (self.http, urllib.parse.quote(name)), data=data, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        self.assertEqual(up("sent track.wav", body), (200, {"ok": True, "file": "sent track.wav"}))
+        self.assertEqual(up("../../evil.wav", body)[1].get("file"), "evil.wav")        # only ever into the music folder
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "evil.wav")))
+        for bad in ("notes.txt", ".hidden.wav", ""):
+            self.assertEqual(up(bad, body)[0], 400, bad)
+        d = self.wait_decks(lambda d: d["browse"]["count"] == 6)
+        self.assertIn("sent track.wav", d["files"])
+        # delete: not what is on a deck, never outside the folder
+        self.assertEqual(self.post("/decks/delete", {"file": "one.wav"})[0], 409)
+        self.assertEqual(self.post("/decks/delete", {"file": "../outside.wav"})[0], 400)
+        self.assertEqual(self.post("/decks/delete", {"file": "evil.wav"})[0], 200)
+        d = self.wait_decks(lambda d: d["browse"]["count"] == 5)
+        self.assertNotIn("evil.wav", d["files"])
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "outside.wav")))
+        self.assertTrue(os.path.exists(os.path.join(self.music, "one.wav")))
 
     def test_d7_the_controller_comes_back(self):
         self.numark.unplug()
@@ -5609,6 +5690,233 @@ class DecksTest(unittest.TestCase):
         self.numark.play([0xBF, 0x08, 0x00])
         self.wait_decks(lambda d: d["mix"].get("xfader") == 0.0)
 
+    DJ_INSIDE = """() => { const bad = [];
+        for (const e of document.querySelectorAll('.g-top, .g-tab, .g-b, .g-li, .g-msg, .g-djdeck, .g-djstrip, .g-djmaster, .g-djx, .g-djpath, .g-djwave, .g-none')) { const r = e.getBoundingClientRect();
+            if (r.width && (r.left < -1 || r.top < -1 || r.right > 481 || r.bottom > 321)) bad.push(e.className + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+        for (const e of document.querySelectorAll('.g-view .g-b, .g-view .g-li')) { const r = e.getBoundingClientRect();
+            if (r.width && (r.width < 36 || r.height < 40)) bad.push('small target ' + e.textContent + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)); }
+        return [bad, [document.documentElement.scrollWidth, document.documentElement.scrollHeight]]; }"""
+
+    def test_d8a_small_page(self):
+        """?small on the DJ page: DECKS, LIB (the music folder and the card) and MIX inside 480x320; each kind of control
+        does its thing on the engine, read back from the bridge"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
+            self.skipTest("ffmpeg loads the tracks")
+        self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
+        self.wait_decks(lambda d: d["running"] and d["browse"].get("count") == 5)
+        for n in (1, 2):
+            self.post("/decks", {"a": "play %d 0" % n}); self.post("/decks", {"a": "eject %d" % n})
+        self.wait_decks(lambda d: not d["decks"][0].get("track") and not d["decks"][1].get("track"))
+        shots = os.environ.get("APCBOX_SHOTS")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            errors = []
+            pg.on("pageerror", lambda e: errors.append(str(e)))
+            pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+            shot = lambda name: pg.screenshot(path=os.path.join(shots, name + ".png"), clip={"x": 0, "y": 0, "width": 480, "height": 320}) if shots else None
+            names = lambda: pg.locator(".g-rows .g-nm").all_text_contents()
+            side = lambda t: pg.locator(".g-side .g-b", has_text=t)
+            pg.goto("http://127.0.0.1:%d/dj?small=1" % self.http)
+            pg.wait_for_selector(".g-djdeck")
+            self.assertEqual(pg.locator(".g-tab").all_text_contents(), ["DECKS", "LIB", "MIX", "HOME"])
+            self.assertEqual(pg.locator(".g-djdeck").count(), 2)
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "DECKS, empty")
+            self.assertIn("no track", pg.locator(".g-djname").nth(0).text_content())
+            self.assertTrue(pg.locator(".g-djrow .g-b", has_text="PLAY").nth(0).is_disabled())
+            # LOAD 1 goes to the library: folders first, then the files, the engine's cursor in yellow
+            pg.locator(".g-djrow .g-b", has_text="LOAD 1").click()
+            pg.wait_for_selector(".g-djlib .g-li")
+            self.assertEqual(names(), ["set", "sub", "one", "sent track"])
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "LIB")
+            pg.locator(".g-li", has_text="one").click()
+            self.wait_decks(lambda d: d["browse"]["file"] == "one.wav")
+            pg.wait_for_selector(".g-li.on >> text=one")
+            side("TO DECK 1").click()
+            self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and d["decks"][0]["len"] > 0, 10)
+            pg.wait_for_selector(".g-li.on .g-d >> text=on deck 1")
+            self.assertTrue(side("DELETE").is_disabled(), "a track on a deck is not deleted")
+            # a folder, and the other deck
+            pg.locator(".g-li.dir", has_text="sub").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('music / sub')")
+            self.assertEqual(names(), ["..", "two"])
+            pg.locator(".g-li", has_text="two").click()
+            self.wait_decks(lambda d: d["browse"]["file"] == "sub/two.wav")
+            side("TO DECK 2").click()
+            self.wait_decks(lambda d: d["decks"][1].get("name") == "two", 10)
+            # the Numark's browse knob moves the same cursor, and the list follows it out of the folder
+            self.numark.play([0xBF, 0x00, 0x7F])
+            self.wait_decks(lambda d: d["browse"]["file"] == "set/deep/b.wav")
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('music / set / deep')")
+            pg.wait_for_selector(".g-li.on >> text=b")
+            # delete asks once
+            self.assertEqual(self.post("/decks", {"a": "at", "file": "sent track.wav"})[0], 200)
+            pg.wait_for_selector(".g-li.on >> text=sent track")
+            side("DELETE").click()
+            pg.wait_for_selector(".g-side .g-b.warn >> text=SURE?")
+            self.assertIn("sent track.wav", self.decks()["files"])
+            shot("small-dj-lib")
+            side("SURE?").click()
+            self.wait_decks(lambda d: "sent track.wav" not in d["files"] and d["browse"]["count"] == 4)
+            pg.wait_for_function("![...document.querySelectorAll('.g-rows .g-nm')].some(e => e.textContent === 'sent track')")
+            # the box's SD card
+            side("FROM CARD").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('box SD card')")
+            self.assertEqual(names(), ["set", "loose.wav"])
+            self.assertTrue(side("COPY").is_disabled())
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "LIB, card")
+            pg.locator(".g-li", has_text="loose.wav").click()
+            side("COPY").click()
+            self.wait_decks(lambda d: "loose.wav" in d["files"])
+            pg.locator(".g-li.dir", has_text="set").click()
+            side("OPEN").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('box SD card / set')")
+            self.assertEqual(names(), ["..", "deep", "a.wav"])
+            shot("small-dj-card")
+            side("MUSIC").click()
+            pg.wait_for_function("document.querySelector('.g-djpath').textContent.startsWith('music')")
+            # DECKS: the outline, play and stop
+            pg.locator(".g-tab", has_text="DECKS").click()
+            pg.wait_for_function("document.querySelectorAll('.g-djwave')[0].querySelectorAll('i').length === 138")
+            self.assertEqual(pg.locator(".g-djname").all_text_contents(), ["one", "two"])
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "DECKS")
+            pg.locator(".g-djrow .g-b", has_text="PLAY").nth(0).click()
+            self.wait_decks(lambda d: d["decks"][0]["playing"] and d["decks"][0]["pos"] > 0.2)
+            pg.wait_for_selector(".g-djdeck.play .g-b.go")
+            self.assertTrue(pg.locator(".g-djrow .g-b", has_text="LOAD 1").is_disabled(), "a playing deck takes no track")
+            shot("small-dj-decks")
+            pg.locator(".g-djrow .g-b", has_text="CUE").nth(0).click()               # playing: back to the cue point, stopped
+            self.wait_decks(lambda d: not d["decks"][0]["playing"] and d["decks"][0]["pos"] == 0.0)
+            pg.wait_for_function("!document.querySelector('.g-djdeck.play')")
+            # MIX: the Numark's knobs are shown, PHONES and SCRATCH are buttons
+            pg.locator(".g-tab", has_text="MIX").click()
+            pg.wait_for_selector(".g-djstrip")
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "MIX")
+            pg.locator(".g-djbtns .g-b", has_text="PHONES").nth(0).click()
+            self.wait_decks(lambda d: d["decks"][0]["pfl"] is True)
+            pg.wait_for_selector(".g-djstrip .g-b.on >> text=PHONES")
+            pg.locator(".g-djbtns .g-b", has_text="PHONES").nth(0).click()
+            self.wait_decks(lambda d: d["decks"][0]["pfl"] is False)
+            pg.locator(".g-djbtns .g-b", has_text="SCRATCH").nth(1).click()
+            self.wait_decks(lambda d: d["decks"][1]["scratch"] is False)
+            pg.wait_for_function("!document.querySelectorAll('.g-djstrip')[1].querySelectorAll('.g-b')[1].classList.contains('on')")
+            pg.locator(".g-djbtns .g-b", has_text="SCRATCH").nth(1).click()
+            self.wait_decks(lambda d: d["decks"][1]["scratch"] is True)
+            self.numark.play([0xBF, 0x08, 0x00])
+            pg.wait_for_function("document.querySelector('.g-djx b').style.left === '0%'")
+            self.numark.play([0xBF, 0x08, 0x7F])
+            pg.wait_for_function("document.querySelector('.g-djx b').style.left === '100%'")
+            pg.wait_for_function("document.querySelector('.g-msg').textContent.includes('ms of sound queued, no dropouts')")
+            shot("small-dj-mix")
+            self.assertEqual(errors, [])
+            # a remote: 1 starts deck 1 from any tab
+            pg.evaluate("Small.act('1')")
+            self.wait_decks(lambda d: d["decks"][0]["playing"])
+            pg.evaluate("Small.act('1')")
+            self.wait_decks(lambda d: not d["decks"][0]["playing"])
+            # and the TV page is still the TV page
+            other = b.new_context(viewport={"width": 1920, "height": 1080}).new_page()
+            other.goto("http://127.0.0.1:%d/dj" % self.http)
+            other.wait_for_selector(".deck")
+            self.assertEqual(other.locator("h1").text_content(), "NUMARK DJ")
+            self.assertEqual(other.locator(".g-app").count(), 0)
+            b.close()
+
+    def test_d8b_tv_and_phone_layouts(self):
+        """The DJ page wide (a TV), upright and on its side (a phone): nothing scrolls, every control in the window, and it plays"""
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
+            self.skipTest("ffmpeg loads the tracks")
+        self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
+        self.wait_decks(lambda d: d["running"])
+        self.post("/decks", {"a": "play 1 0"})
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
+        self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and d["decks"][0]["len"] > 0, 10)
+        fits = """() => { const bad = [], W = innerWidth, H = innerHeight;
+            for (const e of document.querySelectorAll('button, .deck, .strip, .master, .msg, .lpath, canvas')) { const r = e.getBoundingClientRect();
+                if (r.width && r.height && e.offsetParent && (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1)) bad.push((e.textContent || e.className).slice(0, 20) + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+            return [bad, document.documentElement.scrollWidth <= W && document.documentElement.scrollHeight <= H, document.body.scrollHeight <= H + 1]; }"""
+        shots = os.environ.get("APCBOX_SHOTS")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            for name, w, h, tabs in (("wide", 1920, 1080, False), ("ipad", 1180, 820, False), ("upright", 390, 844, True), ("short", 844, 390, True)):
+                pg = b.new_context(viewport={"width": w, "height": h}).new_page()
+                errors = []
+                pg.on("pageerror", lambda e: errors.append(str(e)))
+                pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+                pg.goto("http://127.0.0.1:%d/dj" % self.http)
+                pg.wait_for_selector(".deck")
+                pg.wait_for_function("document.querySelector('.dname').textContent === 'one'")
+                self.assertEqual(pg.evaluate(fits), [[], True, True], name)
+                self.assertEqual(pg.locator(".tabs").is_visible(), tabs, name)
+                if shots:
+                    pg.screenshot(path=os.path.join(shots, "dj-%s.png" % name))
+                play = pg.locator(".deck .drow button", has_text="PLAY").nth(0)
+                play.click()
+                self.wait_decks(lambda d: d["decks"][0]["playing"])
+                pg.wait_for_selector(".deck.play")
+                play.click()
+                self.wait_decks(lambda d: not d["decks"][0]["playing"])
+                if tabs:
+                    self.assertFalse(pg.locator("#s-lib").is_visible(), name)
+                    pg.locator(".tabs button", has_text="LIBRARY").click()
+                    pg.wait_for_selector("#s-lib .li")
+                    self.assertFalse(pg.locator("#s-decks").is_visible(), name)
+                else:
+                    self.assertTrue(pg.locator("#s-lib").is_visible() and pg.locator("#s-mix").is_visible(), name)
+                pg.wait_for_selector("#s-lib .li")
+                self.assertEqual(pg.evaluate(fits), [[], True, True], name + ", library")
+                if shots and tabs:
+                    pg.screenshot(path=os.path.join(shots, "dj-%s-lib.png" % name))
+                # a row is the engine's cursor; the list is paged, not scrolled
+                self.post("/decks", {"a": "at", "file": "one.wav"})
+                pg.wait_for_selector("#s-lib .li.sel >> text=one")
+                self.assertLessEqual(pg.locator("#s-lib .li").count(), pg.evaluate("djBig.per()"))
+                def row(text):               # the list is paged: turn pages until the row is there
+                    while pg.locator(".nav button").first.is_enabled():
+                        pg.locator(".nav button").first.click()
+                    for _ in range(12):
+                        r = pg.locator("#s-lib .li .nm", has_text=re.compile("^%s$" % re.escape(text)))
+                        if r.count():
+                            return r.first
+                        pg.locator(".nav button", has_text="›").click()
+                    self.fail("%s: no row %s" % (name, text))
+                while pg.locator(".lpath").text_content().strip().split(" ")[1:2] == ["/"]:      # back at the top folder
+                    row("..").click()
+                row("sub").click()
+                pg.wait_for_function("document.querySelector('.lpath').textContent.startsWith('music / sub')")
+                row("two").click()
+                self.wait_decks(lambda d: d["browse"]["file"] == "sub/two.wav")
+                if name == "wide":           # a track sent from this device
+                    pg.set_input_files("input[type=file]", {"name": "from mac.wav", "mimeType": "audio/wav",
+                                                            "buffer": open(os.path.join(self.card, "loose.wav"), "rb").read()})
+                    self.wait_decks(lambda d: "from mac.wav" in d["files"], 10)
+                    pg.wait_for_function("document.querySelector('.msg').textContent.includes('is on the box')")
+                    w0, = pg.evaluate("[document.querySelector('.wave').getBoundingClientRect().width]")
+                    pg.locator(".wave").nth(0).click(position={"x": w0 / 2, "y": 10})      # a click on the outline: there
+                    self.wait_decks(lambda d: abs(d["decks"][0]["pos"] - 2.0) < 0.1)
+                    self.post("/decks", {"a": "seek 1 0"})
+                if tabs:
+                    pg.locator(".tabs button", has_text="MIX").click()
+                    pg.wait_for_selector("#s-mix.show")
+                    self.assertEqual(pg.evaluate(fits), [[], True, True], name + ", mix")
+                    if shots:
+                        pg.screenshot(path=os.path.join(shots, "dj-%s-mix.png" % name))
+                pg.locator(".strip button", has_text="PHONES").nth(1).click()
+                self.wait_decks(lambda d: d["decks"][1]["pfl"] is True)
+                pg.wait_for_selector(".strip button.on >> text=PHONES")
+                pg.locator(".strip button", has_text="PHONES").nth(1).click()
+                self.wait_decks(lambda d: d["decks"][1]["pfl"] is False)
+                self.assertEqual(errors, [], name)
+            b.close()
+
     def test_d9_left_the_controller_is_put_back_and_the_engine_stops(self):
         self.numark.received(0.2)
         self.assertEqual(self.post("/select", {"module": "apcbox"})[0], 200)
@@ -5619,9 +5927,33 @@ class DecksTest(unittest.TestCase):
         self.assertFalse(self.decks()["running"])
         self.assertEqual(self.post("/decks", {"a": "play 1 1"})[0], 503)
 
+    def test_d9a_small_page_with_the_decks_off(self):
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            self.skipTest("playwright not installed")
+        with sync_playwright() as pw:
+            b = pw.chromium.launch()
+            pg = b.new_page(viewport={"width": 500, "height": 320})
+            pg.goto("http://127.0.0.1:%d/dj?small=1" % self.http)
+            pg.wait_for_selector(".g-djoff .g-b")
+            self.assertIn("another module is the active one", pg.locator(".g-none").text_content())
+            self.assertEqual(pg.locator(".g-led").text_content(), "decks off")
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "off")
+            if os.environ.get("APCBOX_SHOTS"):
+                pg.screenshot(path=os.path.join(os.environ["APCBOX_SHOTS"], "small-dj-off.png"), clip={"x": 0, "y": 0, "width": 480, "height": 320})
+            pg.locator(".g-b", has_text="START THE DECKS").click()
+            BridgeTest.wait_health(lambda h: h["decks"]["connected"], 10)
+            pg.wait_for_selector(".g-djdeck")
+            self.assertEqual(json.loads(BridgeTest.get("/state")[2])["module"], "dj")
+            b.close()
+        self.assertEqual(self.post("/select", {"module": "apcbox"})[0], 200)       # as test_d9 left it
+        BridgeTest.wait_health(lambda h: not h["decks"]["running"], 5)
+
+
     def test_da_no_engine_no_card(self):
         self.proc.terminate(); self.proc.wait(8)
-        type(self).proc = self.start("--try-module", "dj", "--decks-card", "NoSuchCard", "--asound", self.dir)
+        type(self).proc = self.start("--decks-card", "NoSuchCard", "--asound", self.dir)
         BridgeTest.wait_health(lambda h: "decks" in h, 10)
         self.assertEqual(self.post("/select", {"module": "dj"})[0], 200)
         h = BridgeTest.wait_health(lambda h: h["decks"]["error"], 5)
@@ -5632,7 +5964,7 @@ class DecksTest(unittest.TestCase):
 
     def test_db_stopping_the_bridge_stops_the_engine(self):
         self.proc.terminate(); self.proc.wait(8)
-        type(self).proc = self.start("--try-module", "dj")
+        type(self).proc = self.start()
         BridgeTest.wait_health(lambda h: h["decks"]["connected"], 10)   # the module chosen last is still the DJ one
         self.assertEqual(len(self.engines()), 1)
         self.proc.terminate()
