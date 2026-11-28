@@ -706,6 +706,15 @@ them one on the map (REC still arms a loop).
   shares it on Link (Cubase can't follow clock or speak Link). Pinned.
 - **Numark DJ**: a Mixtrack Pro FX, on an engine of our own (`decks/README.md`: what is built,
   measured and next). Not Mixxx: its window cannot be one of our pages.
+  **Getting tunes into it must be easy** (Rene, 2026-11-28: "i need easier ways to get tunes
+  into it"). There is: UPLOAD on the phone / iPad / Mac page (a batch of files picked by hand),
+  FROM CARD on the box. Offered, not chosen yet, cheapest first: drag and drop on the Mac page,
+  whole folders, with a count; a USB stick in the box, shown beside FROM CARD and played
+  straight off it (mounting goes through the helper); a watched folder on the Mac (a script
+  sends what is new); the box's music folder as a network drive (Finder, the iPhone's Files
+  app: a file-sharing service on the box, and a decision on who may write). Recommended: the
+  first two. Open question: where his tunes live. Not to be built: pulling from streaming
+  services or links.
 - Chaining: two modules at once (hub + ApcBox, clock + anything) with
   routes between them. The data model allows it; one is active today.
 - More Seeds: three exist; other bodies doing other things later.

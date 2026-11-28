@@ -11,16 +11,29 @@
  *  lights) come from. Lights: 0x7F on, 0x01 dim.
  *
  *  Channels: 1, 2 = deck transport and strip; 5, 6 = pads, their mode buttons
- *  and the loop buttons; 9, 10 = FX (not mapped yet); 15 = master section;
- *  16 = browse.
+ *  and the loop buttons; 9, 10 = FX; 15 = master section; 16 = browse.
+ *
+ *  SYNC: the deck takes the other deck's tempo (tempo only: the beats are
+ *  lined up by hand, with the platter) until SYNC is pressed again; shift +
+ *  SYNC ends it too. Refused while either track's tempo is not known.
+ *
+ *  FX: six buttons choose the effect for both decks (HPF, LPF, FLANGER on
+ *  channel 9 as notes 0 to 2, ECHO, REVERB, PHASER on channel 10 as notes 3
+ *  to 5: the order is taken from the panel, the mapping only says there are
+ *  six). A deck's paddle switches it in (up: stays, down: while held; CC 3 on
+ *  channel 9 / 10, value 0 off). The wet / dry knob is CC 4 on channel 9, the
+ *  beats knob CC 5 there, turning one way doubles and the other halves.
  *
  *  Pads: four mode buttons a deck. CUE: a pad sets its hot cue where the
- *  record is, or goes to it; shift + pad clears it. AUTO LOOP and SAMPLE do
- *  nothing yet. FADER CUTS is the controller's own doing (it cuts its own
- *  sound, the engine hears nothing of it). Loop buttons: LOOP on / off (with
- *  no loop yet: 4 beats from here, when the tempo is known), shift + LOOP
- *  into the loop again, 1/2 and x2 its length, shift + 1/2 loop in, shift +
- *  x2 loop out. */
+ *  record is, or goes to it; shift + pad clears it. AUTO LOOP: a pad makes a
+ *  loop of 1/16 to 8 beats from here (or changes the running one's length),
+ *  the lit pad ends it; shift + pad loops while held, and let go the record
+ *  is where it would have been. SAMPLE does nothing yet. FADER CUTS is the
+ *  controller's own doing (it cuts its own sound, the engine hears nothing of
+ *  it). Loop buttons: LOOP ends the running loop, or makes a new one from
+ *  here, as long as the last (4 beats at first; needs the tempo); shift +
+ *  LOOP goes into the last loop again; 1/2 and x2 its length (or, with none
+ *  running, what LOOP makes next); shift + 1/2 loop in, shift + x2 loop out. */
 #pragma once
 #include "engine.h"
 #include <algorithm>
@@ -92,8 +105,14 @@ class Numark
         }
         if(ch == 4 || ch == 5)
             return Pads(ch - 4, a, down);
+        if(ch == 8 || ch == 9)
+        {
+            if(down && a <= 0x05)
+                e_.fx_kind = a; // (0x09, TAP, is not used)
+            return;
+        }
         if(ch > 1)
-            return; // FX: not mapped yet
+            return;
         const int d = ch;
         switch(a)
         {
@@ -136,7 +155,22 @@ class Numark
                     e_.knobs[d].pfl = e_.knobs[d].pfl.load() > 0.5f ? 0.f : 1.f;
                 break;
             case 0x20: shift = down; break;
-            default: break; // 0x02, 0x03 sync: not yet
+            case 0x02: // SYNC: on (the other deck's goes off: one follows, one leads), or off again
+                if(down)
+                {
+                    const bool on = e_.knobs[d].sync.load() < 0.5f;
+                    if(on && (e_.state[d].bpm.load() <= 0 || e_.state[1 - d].bpm.load() <= 0))
+                        break; // a tempo is missing: nothing to match
+                    e_.knobs[d].sync = on ? 1.f : 0.f;
+                    if(on)
+                        e_.knobs[1 - d].sync = 0.f;
+                }
+                break;
+            case 0x03: // shift + SYNC
+                if(down)
+                    e_.knobs[d].sync = 0.f;
+                break;
+            default: break;
         }
     }
 
@@ -154,7 +188,7 @@ class Numark
             const uint8_t    want[kLights] = {
                 (uint8_t)(playing ? 0x7F : 0x01),
                 (uint8_t)(s.cue_held.load() || at_cue ? 0x7F : 0x01),
-                0x01, // sync: not yet
+                (uint8_t)(s.synced.load() ? 0x7F : 0x01),
                 (uint8_t)(e_.knobs[d].scratch.load() > 0.5f ? 0x7F : 0x01),
                 (uint8_t)(e_.knobs[d].pfl.load() > 0.5f ? 0x7F : 0x01),
             };
@@ -182,7 +216,10 @@ class Numark
             for(int i = 0; i < 4; i++)
                 pw[i] = pads[d] == i ? 0x7F : 0x01;
             for(int i = 0; i < kHot; i++)
-                pw[4 + i] = pads[d] == kPadCue && s.hot[i].load() >= 0 ? 0x7F : 0x01;
+                pw[4 + i] = (pads[d] == kPadCue && s.hot[i].load() >= 0)
+                                    || (pads[d] == kPadLoop && s.loop_on.load() && std::fabs(s.beats.load() - kAuto[i]) < 1e-4f)
+                                ? 0x7F
+                                : 0x01;
             pw[12] = s.loop_on.load() ? 0x7F : 0x01;
             static const uint8_t pnote[kPadLights] = {0x00, 0x0D, 0x07, 0x0B, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x40};
             for(int i = 0; i < kPadLights; i++)
@@ -193,6 +230,18 @@ class Numark
                     out[n++]     = pw[i];
                     psent_[d][i] = pw[i];
                 }
+        }
+        const int kind = e_.fx_kind.load();
+        for(int i = 0; i < kFxCount; i++) // the six FX buttons: the chosen one
+        {
+            const uint8_t want = i == kind ? 0x7F : 0x01;
+            if(want != fsent_[i] && n + 3 <= cap)
+            {
+                out[n++]  = i < 3 ? 0x98 : 0x99;
+                out[n++]  = (uint8_t)i;
+                out[n++]  = want;
+                fsent_[i] = want;
+            }
         }
         return n;
     }
@@ -207,35 +256,51 @@ class Numark
                 psent_[d][i] = 0xFF;
             meter_[d] = 0xFF;
         }
+        for(auto& f : fsent_)
+            f = 0xFF;
     }
 
   private:
     static constexpr int kLights = 5, kPadLights = 13;
 
+    static constexpr float kAuto[kHot] = {1.f / 16, 1.f / 8, 1.f / 4, 1.f / 2, 1, 2, 4, 8}; // AUTO LOOP: beats a pad
+
     void Pads(int d, int a, bool down)
     {
+        const DeckState& s = e_.state[d];
         if(a >= 0x14 && a <= 0x1B) // a pad
         {
+            const int i = a - 0x14;
             if(pads[d] == kPadCue)
-                Post(kEvHot, d, (float)(a - 0x14), down ? 1 : 0);
+                Post(kEvHot, d, (float)i, down ? 1 : 0);
+            else if(pads[d] == kPadLoop && down) // that many beats; the pad of the loop that runs ends it
+            {
+                if(s.loop_on.load() && !s.roll.load() && std::fabs(s.beats.load() - kAuto[i]) < 1e-4f)
+                    Post(kEvLoop, d, 0);
+                else
+                    Post(kEvLoop, d, 2, kAuto[i]);
+            }
+            return;
+        }
+        if(a >= 0x1C && a <= 0x23) // shift + pad
+        {
+            const int i = a - 0x1C;
+            if(pads[d] == kPadCue && down)
+                Post(kEvHotClear, d, (float)i);
+            else if(pads[d] == kPadLoop) // a loop while it is held
+                Post(kEvRoll, d, down ? 1 : 0, kAuto[i]);
             return;
         }
         if(!down)
             return;
-        if(a >= 0x1C && a <= 0x23) // shift + pad
-        {
-            if(pads[d] == kPadCue)
-                Post(kEvHotClear, d, (float)(a - 0x1C));
-            return;
-        }
         switch(a)
         {
             case 0x00: pads[d] = kPadCue; break;
             case 0x0D: pads[d] = kPadLoop; break;
             case 0x07: pads[d] = kPadCuts; break;
             case 0x0B: pads[d] = kPadSample; break;
-            case 0x40: Post(kEvLoop, d, 2); break;
-            case 0x41: Post(kEvLoop, d, 1); break; // shift + LOOP: into it again
+            case 0x40: Post(kEvLoop, d, 2); break; // LOOP: off, or a new one from here
+            case 0x41: Post(kEvLoop, d, 1); break; // shift + LOOP: into the last one again
             case 0x34: Post(kEvLoopScale, d, 0.5f); break;
             case 0x35: Post(kEvLoopScale, d, 2.f); break;
             case 0x36: Post(kEvLoopIn, d, 0); break; // shift + 1/2
@@ -265,6 +330,16 @@ class Numark
         if(a == 0x08 && (ch == 1 || ch == 15))
         {
             e_.xfader = x;
+            return;
+        }
+        if(ch == 8 || ch == 9) // the FX section
+        {
+            if(a == 0x03)
+                e_.knobs[ch - 8].fx = v ? 1.f : 0.f; // the paddle: 1 up and staying, 2 down and held, 0 back in the middle
+            else if(a == 0x04)
+                e_.fx_wet = x;
+            else if(a == 0x05)
+                e_.fx_beats = std::max(1.f / 16, std::min(8.f, e_.fx_beats.load() * (v < 0x40 ? 2.f : 0.5f)));
             return;
         }
         if(ch == 14)
@@ -312,7 +387,7 @@ class Numark
     Engine&     e_;
     NumarkHost* host_;
     int         pitch_msb_[kDecks] = {64, 64}, pitch_lsb_[kDecks] = {0, 0};
-    uint8_t     sent_[kDecks][kLights], psent_[kDecks][kPadLights], meter_[kDecks];
+    uint8_t     sent_[kDecks][kLights], psent_[kDecks][kPadLights], meter_[kDecks], fsent_[kFxCount];
 };
 
 } // namespace dk

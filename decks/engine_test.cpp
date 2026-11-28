@@ -116,6 +116,8 @@ static Tune* Beat(double bpm, double secs, double first_s = 0.1, double swing_ms
     return t;
 }
 
+constexpr double kEchoWant = 1.0; // the first repeat at full wet: about as loud as the click itself
+
 static void Post(Engine& e, uint8_t type, int deck, float a = 0, double d = 0, const Track* t = nullptr)
 {
     Ev ev;
@@ -464,7 +466,7 @@ int main()
         /* lights */
         uint8_t out[256];
         int     len = n.Lights(out, sizeof(out));
-        CHECK(len == 3 * (12 + 26), "first lights: %d bytes", len); // 5 and a meter a deck, 13 in each pad section
+        CHECK(len == 3 * (12 + 26 + 6), "first lights: %d bytes", len); // 5 and a meter a deck, 13 in each pad section, 6 FX buttons
         CHECK(n.Lights(out, sizeof(out)) == 0, "lights sent twice");
         Midi(n, 0x91, 0x00, 0x7F);
         Render(e, 0.05);
@@ -631,25 +633,49 @@ int main()
         for(int i = 0; i + 2 < len; i += 3)
             lit |= out[i] == 0x95 && out[i + 1] == 0x16 && out[i + 2] == 0x7F;
         CHECK(lit, "pad 3's light");
-        Midi(n, 0x95, 0x0D, 0x7F); // AUTO LOOP mode: pads do nothing yet, their lights go, the mode's light comes
-        Midi(n, 0x95, 0x14, 0x7F);
-        Midi(n, 0x95, 0x14, 0x00);
+        Midi(n, 0x95, 0x0D, 0x7F); // AUTO LOOP mode: a pad is a loop by the beat, not a hot cue
+        Midi(n, 0x95, 0x18, 0x7F); // pad 5: 1 beat, half a second at 120
+        Midi(n, 0x95, 0x18, 0x00);
         Render(e, 0.05);
         len       = n.Lights(out, sizeof(out));
-        bool mode = false, off = false;
+        bool mode = false, off = false, pad5 = false;
         for(int i = 0; i + 2 < len; i += 3)
         {
             mode |= out[i] == 0x95 && out[i + 1] == 0x0D && out[i + 2] == 0x7F;
             off |= out[i] == 0x95 && out[i + 1] == 0x16 && out[i + 2] == 0x01;
+            pad5 |= out[i] == 0x95 && out[i + 1] == 0x18 && out[i + 2] == 0x7F;
         }
-        CHECK(e.state[1].hot[0] < 0 && mode && off, "AUTO LOOP mode");
+        CHECK(e.state[1].hot[4] < 0 && mode && off && pad5, "AUTO LOOP mode and its lights");
+        CHECK(e.state[1].loop_on == 1 && std::fabs(e.state[1].loop_out - e.state[1].loop_in - 0.5 * kRate) < 1e-6, "auto loop of a beat");
+        const double ain = e.state[1].loop_in;
+        Midi(n, 0x95, 0x1A, 0x7F); // pad 7: 4 beats, from where the running loop starts
+        Render(e, 0.05);
+        CHECK(e.state[1].loop_in == ain && std::fabs(e.state[1].loop_out - ain - 2.0 * kRate) < 1e-6 && e.state[1].beats == 4, "auto loop: another length");
+        Midi(n, 0x95, 0x1A, 0x7F); // the lit pad ends it
+        Render(e, 0.05);
+        CHECK(e.state[1].loop_on == 0, "the lit pad ends the loop");
+        /* shift + pad: a loop while held; let go, the record is where it would have been */
+        Midi(n, 0x91, 0x00, 0x7F);
+        Render(e, 0.5);
+        const double r0 = e.state[1].pos;
+        Midi(n, 0x95, 0x1F, 0x7F); // shift + pad 4: half a beat
+        Render(e, 2.0);
+        CHECK(e.state[1].roll == 1 && e.state[1].pos < r0 + 0.26 * kRate, "roll: at %.3f s after %.3f", e.state[1].pos / kRate, r0 / kRate);
+        Midi(n, 0x95, 0x1F, 0x00);
+        Render(e, 0.5);
+        CHECK(e.state[1].roll == 0 && e.state[1].loop_on == 0 && std::fabs(e.state[1].pos - (r0 + 2.5 * kRate)) < 0.02 * kRate, "after the roll at %.3f s, not %.3f",
+              e.state[1].pos / kRate, (r0 + 2.5 * kRate) / kRate);
+        Midi(n, 0x91, 0x00, 0x7F);
+        Post(e, kEvSeek, 1, 0, 4.0 * kRate);
+        Render(e, 0.05);
         Midi(n, 0x95, 0x00, 0x7F); // CUE mode again
         Midi(n, 0x95, 0x1E, 0x7F); // shift + pad 3: cleared
         Render(e, 0.05);
         CHECK(e.state[1].hot[2] < 0, "shift + pad clears");
-        Midi(n, 0x95, 0x40, 0x7F); // LOOP with none: 4 beats from here
+        n.Lights(out, sizeof(out)); // (what changed until here: sent)
+        Midi(n, 0x95, 0x40, 0x7F); // LOOP: a new one from here, as long as the last (4 beats)
         Render(e, 0.05);
-        CHECK(e.state[1].loop_on == 1 && std::fabs(e.state[1].loop_out - e.state[1].loop_in - 2.0 * kRate) <= 1, "LOOP: 4 beats");
+        CHECK(e.state[1].loop_on == 1 && e.state[1].loop_in == 4.0 * kRate && std::fabs(e.state[1].loop_out - e.state[1].loop_in - 2.0 * kRate) <= 1, "LOOP: 4 beats");
         len       = n.Lights(out, sizeof(out));
         bool loop = false;
         for(int i = 0; i + 2 < len; i += 3)
@@ -665,6 +691,30 @@ int main()
         Midi(n, 0x95, 0x40, 0x7F);
         Render(e, 0.05);
         CHECK(e.state[1].loop_on == 0, "LOOP off");
+        /* what went wrong on the rig: LOOP later in the track took the record back to the old loop.
+           It makes a new one where the record is; only shift + LOOP goes back */
+        Post(e, kEvSeek, 1, 0, 20.0 * kRate);
+        Render(e, 0.05);
+        Midi(n, 0x95, 0x40, 0x7F);
+        Render(e, 0.05);
+        CHECK(e.state[1].loop_on == 1 && e.state[1].loop_in == 20.0 * kRate && e.state[1].pos >= 20.0 * kRate, "LOOP further on: loop at %.2f s, record at %.2f s",
+              e.state[1].loop_in / kRate, e.state[1].pos / kRate);
+        /* halved all the way down and doubled back up: the same loop to the frame (it drifted by 5 ms) */
+        const double l0 = e.state[1].loop_out - e.state[1].loop_in;
+        for(int i = 0; i < 12; i++)
+            Midi(n, 0x95, 0x34, 0x7F);
+        Render(e, 0.05);
+        const double tiny = e.state[1].loop_out - e.state[1].loop_in;
+        CHECK(tiny >= kLoopMin && tiny < 0.05 * kRate, "halved to %.1f ms", tiny * 1000 / kRate);
+        for(int i = 0; i < 12; i++)
+            Midi(n, 0x95, 0x35, 0x7F);
+        Render(e, 0.05);
+        const double l1 = e.state[1].loop_out - e.state[1].loop_in;
+        CHECK(std::fabs(std::log2(l1 / tiny) - std::round(std::log2(l1 / tiny))) < 1e-9 && std::fabs(std::log2(l1 / l0) - std::round(std::log2(l1 / l0))) < 1e-9,
+              "down and up again: %.3f frames against %.3f", l1, l0);
+        Midi(n, 0x95, 0x40, 0x7F);
+        Post(e, kEvSeek, 1, 0, 4.0 * kRate);
+        Render(e, 0.05);
         Midi(n, 0x91, 0x00, 0x7F); // play, then loop in and out by hand
         Render(e, 0.5);
         Midi(n, 0x95, 0x36, 0x7F);
@@ -684,6 +734,169 @@ int main()
         Post(e, kEvLoad, 1);
         Render(e, 0.05);
         Free(e);
+    }
+
+    /* SYNC: the other deck's tempo */
+    {
+        Engine e;
+        Host   h;
+        Numark n(e, &h);
+        Tune * a = Sine(1000, 30), *b = Sine(1000, 30);
+        a->bpm = 126, b->bpm = 140;
+        Post(e, kEvLoad, 0, 0, 0, a);
+        Post(e, kEvLoad, 1, 0, 0, b);
+        e.knobs[0].volume = 1, e.xfader = 0, e.master = 0.8f;
+        e.knobs[1].rate = 0.02f; // deck 2 plays at 142.8
+        Post(e, kEvPlay, 0, 1);
+        Post(e, kEvPlay, 1, 1);
+        Render(e, 0.3);
+        Midi(n, 0x90, 0x02, 0x7F); // SYNC on deck 1
+        auto out = Render(e, 1.0);
+        CHECK(e.state[0].synced == 1 && std::fabs(e.state[0].rate - (142.8f / 126 - 1)) < 1e-4f, "sync: rate %.4f", e.state[0].rate.load());
+        CHECK(std::fabs(Hz(out, 0, 0.3, 1.0) - 1000 * 142.8 / 126) < 3, "sync: %.1f Hz", Hz(out, 0, 0.3, 1.0));
+        e.knobs[1].rate = -0.05f; // the other deck's slider moves: it follows
+        Render(e, 0.3);
+        CHECK(std::fabs(e.state[0].rate - (133.f / 126 - 1)) < 1e-4f, "sync follows: rate %.4f", e.state[0].rate.load());
+        uint8_t lights[256];
+        int     len = n.Lights(lights, sizeof(lights));
+        bool    lit = false;
+        for(int i = 0; i + 2 < len; i += 3)
+            lit |= lights[i] == 0x90 && lights[i + 1] == 0x02 && lights[i + 2] == 0x7F;
+        CHECK(lit, "SYNC's light");
+        Midi(n, 0x91, 0x02, 0x7F); // SYNC on deck 2: deck 1 leads now
+        Render(e, 0.3);
+        CHECK(e.knobs[0].sync < 0.5f && e.state[1].synced == 1 && e.state[0].synced == 0 && e.state[0].rate == 0, "the other deck's SYNC");
+        CHECK(std::fabs(e.state[1].rate - (126.f / 140 - 1)) < 1e-4f, "deck 2 on deck 1's tempo: %.4f", e.state[1].rate.load());
+        Midi(n, 0x91, 0x03, 0x7F); // shift + SYNC: off, the slider counts again
+        Render(e, 0.3);
+        CHECK(e.state[1].synced == 0 && std::fabs(e.state[1].rate + 0.05f) < 1e-6f, "sync off");
+        Post(e, kEvGrid, 1, 70, 0); // half the tempo: matched an octave up, not by slowing to half speed
+        Midi(n, 0x90, 0x02, 0x7F);
+        e.knobs[1].rate = 0;
+        Render(e, 0.3);
+        CHECK(std::fabs(e.state[0].rate - (140.f / 126 - 1)) < 1e-4f, "sync to 70 bpm: rate %.4f", e.state[0].rate.load());
+        Midi(n, 0x90, 0x02, 0x7F);
+        Post(e, kEvGrid, 1, 0, 0); // no tempo: SYNC does not come on
+        Render(e, 0.1);
+        Midi(n, 0x90, 0x02, 0x7F);
+        Render(e, 0.1);
+        CHECK(e.knobs[0].sync < 0.5f && e.state[0].synced == 0, "SYNC without a tempo");
+        Post(e, kEvPlay, 0, 0);
+        Post(e, kEvPlay, 1, 0);
+        Post(e, kEvLoad, 0);
+        Post(e, kEvLoad, 1);
+        Render(e, 0.1);
+        Free(e);
+    }
+
+    /* effects */
+    {
+        Engine e;
+        Host   h;
+        Numark n(e, &h);
+        e.knobs[0].volume = 1, e.xfader = 0, e.master = 0.8f;
+        Tune* t = Beat(120, 20, 0.1, 0, true); // kicks and hats: something for every effect to change
+        t->bpm  = 120;
+        Post(e, kEvLoad, 0, 0, 0, t);
+        Post(e, kEvPlay, 0, 1);
+        auto dry = Render(e, 4.0);
+        for(int kind = 0; kind < kFxCount; kind++)
+        {
+            Midi(n, kind < 3 ? 0x98 : 0x99, kind, 0x7F); // its button
+            Midi(n, 0xB8, 0x04, 0x7F);                   // all wet
+            Post(e, kEvSeek, 0, 0, 0);
+            Render(e, 0.1);
+            auto off = Render(e, 1.0);
+            Midi(n, 0xB8, 0x03, 0x01); // paddle up
+            auto on = Render(e, 3.0);
+            Midi(n, 0xB8, 0x03, 0x00);
+            auto tail = Render(e, 0.5);
+            auto late = Render(e, 12.0);
+            double peak = 0, diff = 0;
+            bool   fine = true;
+            for(size_t i = 0; i < on.size(); i += kOuts)
+            {
+                fine = fine && std::isfinite(on[i]);
+                peak = std::max(peak, (double)std::fabs(on[i]));
+            }
+            CHECK(e.fx_kind == kind && fine && peak <= 1.0, "%s: peak %.2f", FxName(kind), peak);
+            CHECK(Rms(on, 0) > 0.02, "%s: no sound", FxName(kind));
+            /* against the same stretch played dry */
+            Post(e, kEvSeek, 0, 0, 0);
+            Render(e, 0.1);
+            Render(e, 1.0);
+            auto same = Render(e, 3.0);
+            for(size_t i = 0; i < on.size(); i += kOuts)
+                diff += (on[i] - same[i]) * (on[i] - same[i]);
+            diff = std::sqrt(diff / (on.size() / kOuts));
+            CHECK(diff > 0.004, "%s does nothing: differs by %.4f", FxName(kind), diff); // (a low-pass takes little from kicks and short hats)
+            (void)off, (void)tail, (void)late;
+            Render(e, 6.0); // whatever still rings: out
+        }
+        /* an echo of one beat: a click comes again half a second later, and again, quieter each time */
+        {
+            Tune* c = Sine(1000, 20, 0);
+            for(int i = 0; i < 200; i++)
+                c->data[2 * (kRate + i)] = c->data[2 * (kRate + i) + 1] = (int16_t)(20000 * std::sin(i * 0.3));
+            c->bpm = 120;
+            Post(e, kEvPlay, 0, 0);
+            Post(e, kEvLoad, 0, 0, 0, c);
+            Midi(n, 0x99, 0x03, 0x7F);
+            Midi(n, 0xB8, 0x04, 0x7F);
+            Midi(n, 0xB8, 0x03, 0x02); // paddle held down
+            Post(e, kEvPlay, 0, 1);
+            Render(e, 0.2); // (the track changes while the last test's echo may still ring)
+            Post(e, kEvSeek, 0, 0, 0.5 * kRate);
+            auto b  = Render(e, 3.0);
+            auto at = [&](double s) { return Rms(b, 0, s - 0.01, s + 0.03); };
+            /* the click is at 1.0 s of the track, 0.5 s into b (give or take the jump's 4 ms) */
+            CHECK(at(0.5) > 0.05 && at(1.0) > 0.4 * at(0.5) * kEchoWant && at(1.5) > 0.2 * at(1.0) && at(1.5) < at(1.0) && at(0.75) < 0.1 * at(1.0),
+                  "echo: %.4f %.4f %.4f, between %.4f", at(0.5), at(1.0), at(1.5), at(0.75));
+            Midi(n, 0xB8, 0x05, 0x7F); // the beats knob the other way: half a beat
+            CHECK(e.fx_beats == 0.5f, "beats knob: %.3f", e.fx_beats.load());
+            for(int i = 0; i < 10; i++)
+                Midi(n, 0xB8, 0x05, 0x01);
+            CHECK(e.fx_beats == 8.f, "beats knob up: %.3f", e.fx_beats.load());
+            for(int i = 0; i < 10; i++)
+                Midi(n, 0xB8, 0x05, 0x7F);
+            CHECK(e.fx_beats == 1.f / 16, "beats knob down: %.4f", e.fx_beats.load());
+            Midi(n, 0xB8, 0x03, 0x00); // paddle let go: what is in the echo rings out, nothing new goes in
+            Render(e, 20.0);
+            auto q = Render(e, 0.5);
+            CHECK(Rms(q, 0) < 1e-4, "the echo never ends: %.5f", Rms(q, 0));
+            Midi(n, 0xB9, 0x03, 0x01); // deck 2's paddle is deck 2's
+            CHECK(e.knobs[1].fx > 0.5f && e.knobs[0].fx < 0.5f, "paddles");
+            Midi(n, 0xB9, 0x03, 0x00);
+            uint8_t lights[256];
+            n.ForgetLights();
+            int  len = n.Lights(lights, sizeof(lights));
+            bool lit = false;
+            for(int i = 0; i + 2 < len; i += 3)
+                lit |= lights[i] == 0x99 && lights[i + 1] == 0x03 && lights[i + 2] == 0x7F;
+            CHECK(lit, "the ECHO button's light");
+        }
+        /* off, an effect leaves the sound alone to the last bit */
+        {
+            Engine a2, b2;
+            a2.knobs[0].volume = b2.knobs[0].volume = 1, a2.xfader = b2.xfader = 0;
+            Tune *x = Beat(120, 5), *y = Beat(120, 5);
+            Post(a2, kEvLoad, 0, 0, 0, x);
+            Post(b2, kEvLoad, 0, 0, 0, y);
+            b2.fx_kind = kFxFlanger, b2.fx_wet = 1;
+            Post(a2, kEvPlay, 0, 1);
+            Post(b2, kEvPlay, 0, 1);
+            auto p = Render(a2, 2.0), q = Render(b2, 2.0);
+            CHECK(p == q, "an effect that is off changes the sound");
+            Post(a2, kEvPlay, 0, 0), Post(b2, kEvPlay, 0, 0);
+            Post(a2, kEvLoad, 0), Post(b2, kEvLoad, 0);
+            Render(a2, 0.1), Render(b2, 0.1);
+            Free(a2), Free(b2);
+        }
+        Post(e, kEvPlay, 0, 0);
+        Post(e, kEvLoad, 0);
+        Render(e, 0.1);
+        Free(e);
+        (void)dry;
     }
 
     /* tempo */

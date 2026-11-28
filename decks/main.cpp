@@ -14,7 +14,8 @@
  *             T d rate*10000 range*100 gain hi mid lo filter volume pfl scratch  (0..1000)
  *             G xfader master cue_mix cue_gain peak_l peak_r                     (0..1000)
  *             N d track name   F d track path   W d track peaks-hex   B cursor count path
- *             Q d h1..h8 loop_in loop_out loop_on bpm*100 beat0 pad_mode          (ms; -1: none)
+ *             Q d h1..h8 loop_in loop_out loop_on bpm*100 beat0 pad_mode beats*10000 roll sync synced rate*10000 fx   (ms; -1: none)
+ *             E fx_kind wet beats*10000
  *             H xruns worst_us period buffer rt channels dropped_events
  *  d is 1 or 2. See README.md.
  *
@@ -386,7 +387,7 @@ int                      cursor = 0;
 std::string              music_dir;
 std::string              deck_name[kDecks], deck_peaks[kDecks], deck_path[kDecks];
 bool                     hot_sync[kDecks]; // the deck shows what the file remembered: from here on a change is the player's
-std::string              last_q[kDecks];
+std::string              last_q[kDecks], last_e;
 uint32_t                 deck_track[kDecks];
 std::string              last_d[kDecks], last_t[kDecks], last_g;
 
@@ -551,6 +552,7 @@ void SayAll()
     last_g.clear();
     for(auto& q : last_q)
         q.clear();
+    last_e.clear();
     SayBrowse();
 }
 
@@ -586,6 +588,20 @@ bool SetKnob(const std::string& name, int deck, float v)
             k.pfl = v;
         else if(name == "scratch")
             k.scratch = v;
+        else if(name == "fx")
+            k.fx = v > 0.5f ? 1.f : 0.f;
+        else if(name == "sync") // as the SYNC button: not without both tempos, and the other deck's goes off
+        {
+            const bool on = v > 0.5f;
+            if(on && (eng.state[deck].bpm.load() <= 0 || eng.state[1 - deck].bpm.load() <= 0))
+            {
+                Send("L deck %d: no SYNC without a tempo on both decks", deck + 1);
+                return true;
+            }
+            k.sync = on ? 1.f : 0.f;
+            if(on)
+                eng.knobs[1 - deck].sync = 0.f;
+        }
         else
             return false;
     }
@@ -683,6 +699,14 @@ void Command(const std::string& line)
         Post(kEvLoopOut, atoi(rest) - 1, 0);
     else if(cmd == "loop" && (nargs = sscanf(rest, "%lf %lf %lf", &a, &b, &c)) >= 2) // loop d 0|1|2 [beats]
         Post(kEvLoop, (int)a - 1, (float)b, nargs == 3 && c > 0 ? c : 0);
+    else if(cmd == "roll" && sscanf(rest, "%lf %lf %lf", &a, &b, &c) == 3) // roll d beats 1|0
+        Post(kEvRoll, (int)a - 1, (float)c, b);
+    else if(cmd == "fxkind" && sscanf(rest, "%lf", &a) == 1 && a >= 0 && a < kFxCount)
+        eng.fx_kind = (int)a;
+    else if(cmd == "fxwet" && sscanf(rest, "%lf", &a) == 1)
+        eng.fx_wet = (float)std::max(0.0, std::min(1.0, a));
+    else if(cmd == "fxbeats" && sscanf(rest, "%lf", &a) == 1)
+        eng.fx_beats = (float)std::max(1.0 / 16, std::min(8.0, a));
     else if(cmd == "loopx" && sscanf(rest, "%lf %lf", &a, &b) == 2 && (b == 0.5 || b == 2))
         Post(kEvLoopScale, (int)a - 1, (float)b);
     else if(cmd == "bpmx" && sscanf(rest, "%lf %lf", &a, &b) == 2 && (b == 0.5 || b == 2)) // the tempo found is half or twice the real one
@@ -847,6 +871,9 @@ void StoreSave()
 void PadReports()
 {
     char line[320];
+    snprintf(line, sizeof(line), "E %d %d %ld", eng.fx_kind.load(), K(eng.fx_wet), lrint(eng.fx_beats.load() * 10000));
+    if(last_e != line)
+        Send("%s", line), last_e = line;
     for(int d = 0; d < kDecks; d++)
     {
         const DeckState& s = eng.state[d];
@@ -858,8 +885,9 @@ void PadReports()
             hot[i] = s.hot[i].load();
             n += snprintf(line + n, sizeof(line) - n, " %ld", ms(hot[i]));
         }
-        snprintf(line + n, sizeof(line) - n, " %ld %ld %d %ld %ld %d", ms(s.loop_in.load()), ms(s.loop_out.load()), s.loop_on.load(), lrint(s.bpm.load() * 100),
-                 ms(s.beat0.load()), numark.pads[d]);
+        snprintf(line + n, sizeof(line) - n, " %ld %ld %d %ld %ld %d %ld %d %d %d %ld %d", ms(s.loop_in.load()), ms(s.loop_out.load()), s.loop_on.load(),
+                 lrint(s.bpm.load() * 100), ms(s.beat0.load()), numark.pads[d], lrint(s.beats.load() * 10000), s.roll.load(),
+                 eng.knobs[d].sync.load() > 0.5f, s.synced.load(), lrint(s.rate.load() * 10000), eng.knobs[d].fx.load() > 0.5f);
         if(last_q[d] != line)
             Send("%s", line), last_q[d] = line;
         if(!deck_track[d] || s.track.load() != deck_track[d])
@@ -1073,7 +1101,7 @@ int main(int argc, char** argv)
         if(now - last_report >= std::chrono::milliseconds(33))
         {
             last_report = now;
-            uint8_t m[128];
+            uint8_t m[192];
             ToController(m, numark.Lights(m, sizeof(m)));
             Reports();
             PadReports();

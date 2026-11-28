@@ -17,16 +17,17 @@
 #include <cmath>
 #include <cstdint>
 #include <mutex>
+#include "fx.h"
 
 namespace dk
 {
-constexpr int kRate  = 44100;
 constexpr int kDecks = 2;
 constexpr int kOuts  = 4;  // master L R, headphones L R
 constexpr int kChunk = 32; // frames between knob and speed updates (0.7 ms)
 constexpr int kHot   = 8;  // hot cues a deck
 constexpr int kXfade = 96; // frames a jump or a loop's wrap is blended over (2 ms): no click, no gap
-constexpr double kLoopMin = 256; // frames: the shortest loop
+constexpr double kLoopMin = 512; // frames: the shortest loop (12 ms; shorter is a tone, not a loop)
+constexpr float  kBeatsMin = 1.f / 32, kBeatsMax = 64; // a loop by the beat
 
 /** One jog tick moves the record this far while scratching: the platter is
  *  taken as 1024 ticks a turn at 33 1/3 rpm (the figure Mixxx's mapping
@@ -57,8 +58,11 @@ enum EvType : uint8_t
     kEvHotSet,  // a: which, d: frame (under 0: none). What a track's file remembered
     kEvLoopIn,  // the loop starts here
     kEvLoopOut, // and ends here: it runs
-    kEvLoop,    // a: 0 leave it, 1 into it again, 2 the other of the two. d over 0: a new loop of d beats from here
-    kEvLoopScale, // a: its length times this (0.5, 2)
+    kEvLoop,    // a: 0 leave it. 1: into the loop that was set, again. 2: the LOOP button: leave it, or (none
+                // running) a new one from here, as many beats as the last (4 at first); with no tempo, 1.
+                // d over 0: a loop of d beats: from here, or from where the running one starts
+    kEvLoopScale, // a: its length times this (0.5, 2); with none set, what LOOP will make
+    kEvRoll,    // a: 1 pressed, 0 let go; d: beats. A loop while held; let go, the record is where it would have been
     kEvGrid,    // a: bpm, d: frame of a beat. The track's tempo, when it is known or corrected
 };
 
@@ -100,55 +104,6 @@ class Ring
     std::atomic<uint32_t> w_{0}, r_{0};
 };
 
-struct Biquad
-{
-    float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1 = 0, z2 = 0;
-    inline float Run(float x)
-    {
-        float y = b0 * x + z1;
-        z1      = b1 * x - a1 * y + z2;
-        z2      = b2 * x - a2 * y;
-        return y;
-    }
-    void Butter(bool high, float hz);
-    void CopyCoefs(const Biquad& o) { b0 = o.b0, b1 = o.b1, b2 = o.b2, a1 = o.a1, a2 = o.a2; }
-};
-
-/** Three bands that add up to the input when all three are at 1: two
- *  4th-order Linkwitz-Riley splits, the low band passed through the upper
- *  split as well so the three stay in phase. A band at 0 is gone (kill). */
-struct Eq3
-{
-    Biquad lp1[2], hp1[2], lp2[2], hp2[2], alp[2], ahp[2];
-    void   Init(float lo_hz, float hi_hz);
-    inline float Run(float x, float gl, float gm, float gh)
-    {
-        float lo   = lp1[1].Run(lp1[0].Run(x));
-        float rest = hp1[1].Run(hp1[0].Run(x));
-        float low  = alp[1].Run(alp[0].Run(lo)) + ahp[1].Run(ahp[0].Run(lo));
-        float mid  = lp2[1].Run(lp2[0].Run(rest));
-        float high = hp2[1].Run(hp2[0].Run(rest));
-        return gl * low + gm * mid + gh * high;
-    }
-};
-
-/** State-variable filter (trapezoidal), low-pass and high-pass from one core */
-struct Svf
-{
-    float ic1 = 0, ic2 = 0, a1 = 0, a2 = 0, a3 = 0, k = 1;
-    void  Set(float hz, float q);
-    inline void Run(float x, float& lp, float& hp)
-    {
-        float v3 = x - ic2;
-        float v1 = a1 * ic1 + a2 * v3;
-        float v2 = ic2 + a2 * ic1 + a3 * v3;
-        ic1      = 2 * v1 - ic1;
-        ic2      = 2 * v2 - ic2;
-        lp       = v2;
-        hp       = x - k * v1 - v2;
-    }
-};
-
 /** What a knob at 0..1 means. Centre is "as it comes" for all but the faders. */
 float TrimGain(float knob);   // 0 off, 0.5 unity, 1 = x4 (+12 dB)
 float EqGain(float knob);     // 0 kill, 0.5 unity, 1 = x2 (+6 dB)
@@ -166,6 +121,8 @@ struct DeckKnobs
     std::atomic<float> volume{1};
     std::atomic<float> pfl{0};       // 1: this deck is in the headphones
     std::atomic<float> scratch{1};   // 1: a touched platter scratches, 0: it only nudges
+    std::atomic<float> sync{0};      // 1: its tempo is the other deck's (needs both tempos known); the pitch slider waits
+    std::atomic<float> fx{0};        // 1: through the effect
 };
 
 /** What a deck is doing, for the reader (written once a Process call) */
@@ -177,8 +134,11 @@ struct DeckState
     std::atomic<float>    speed{0}, peak{0}; // peak: before the fader, decaying
     std::atomic<double>   hot[kHot];         // frames; under 0: empty
     std::atomic<double>   loop_in{-1}, loop_out{-1}, beat0{0};
-    std::atomic<int>      loop_on{0};
+    std::atomic<int>      loop_on{0}, roll{0};
     std::atomic<float>    bpm{0};            // the track's, at speed 1
+    std::atomic<float>    beats{4};          // the loop's length in beats when it was made by the beat: what LOOP makes next
+    std::atomic<float>    rate{0};           // the speed offset in use: the slider's, or SYNC's
+    std::atomic<int>      synced{0};         // SYNC is on and has both tempos to work with
     DeckState()
     {
         for(auto& h : hot)
@@ -196,6 +156,9 @@ class Engine
     std::atomic<float> master{0.8f};
     std::atomic<float> cue_mix{0};   // headphones: 0 cue only, 1 master only
     std::atomic<float> cue_gain{0.8f};
+    std::atomic<int>   fx_kind{kFxEcho}; // which effect, for both decks
+    std::atomic<float> fx_wet{0.5f};     // 0..1
+    std::atomic<float> fx_beats{1};      // 1/16..8: a sweep's or an echo's length
 
     DeckState          state[kDecks];
     std::atomic<float> peak_l{0}, peak_r{0}; // master, after the clipper, decaying
@@ -214,9 +177,12 @@ class Engine
         const Track* trk = nullptr;
         double pos = 0, cue = 0, goal = 0, goal_s = 0, jump_to = 0;
         double hot[kHot], loop_in = -1, loop_out = -1, xf_pos = 0, beat0 = 0;
+        double roll_pos = 0;
         int    hot_held = -1, xf_left = 0;
-        bool   loop_on = false;
-        float  bpm     = 0;
+        bool   loop_on = false, roll = false;
+        float  bpm = 0, beats = 4, rate = 0;
+        bool   synced = false;
+        Fx     fx;
         bool   playing = false, cue_held = false, touched = false, jump = false;
         float  speed = 0, bend_acc = 0, bend_btn = 0;
         float  fade = 0, jgain = 1;

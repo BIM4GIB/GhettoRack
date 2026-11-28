@@ -33,9 +33,10 @@ DECKS_KEEP_FREE = 256 * 1024 * 1024   # an upload or a copy leaves the box this 
 DECKS_LOG_KEEP = 20
 DECKS_LINE_MAX = 8192         # W: 800 peaks, two hex digits each
 DECK_ACTIONS = {"eject", "play", "cue", "seek", "set", "browse", "pick", "scan",
-                "hot", "hotclear", "loopin", "loopout", "loop", "loopx", "bpmx"}
+                "hot", "hotclear", "loopin", "loopout", "loop", "loopx", "bpmx", "roll", "fxkind", "fxwet", "fxbeats"}
 PAD_MODES = ("cue", "loop", "cuts", "sample")
-DECK_SET = {"gain", "hi", "mid", "lo", "filter", "volume", "pfl", "scratch", "rate",
+FX_KINDS = ("HPF", "LPF", "FLANGER", "ECHO", "REVERB", "PHASER")
+DECK_SET = {"gain", "hi", "mid", "lo", "filter", "volume", "pfl", "scratch", "rate", "sync", "fx",
             "xfader", "master", "cuemix", "cuegain"}
 SUN_PATH_MAX = 100            # sockaddr_un takes 104 (macOS) or 108 (Linux) bytes
 
@@ -86,6 +87,7 @@ class Decks:
         self.version = None
         self.decks = [{}, {}]
         self.mix = {}
+        self.fx = {}
         self.browse = {}
         self.health = {}
         self.waves = {}
@@ -118,7 +120,7 @@ class Decks:
                 "error": self.error, "health": self.health, "card": self.b.sd_ready(), "copy": self.copy, "free": self.free()}
 
     def picture(self):
-        return {"wanted": self.wanted(), "running": self.connected(), "error": self.error, "said": self.said, "decks": self.decks, "mix": self.mix, "browse": self.browse,
+        return {"wanted": self.wanted(), "running": self.connected(), "error": self.error, "said": self.said, "decks": self.decks, "mix": self.mix, "fx": self.fx, "browse": self.browse,
                 "health": self.health, "controllers": [p.name for p in self.controllers()]}
 
     def files(self):
@@ -343,10 +345,16 @@ class Decks:
                 self.browse = {"at": int(f[1]), "count": int(f[2]), "file": rel,
                                "name": os.path.splitext(os.path.basename(path))[0] if rel else None}
             elif k == "Q":
-                d, v = int(f[1]) - 1, [int(x) for x in f[2:16]]
+                d, v = int(f[1]) - 1, [int(x) for x in f[2:22]]
                 sec = lambda ms: None if ms < 0 else ms / 1000
                 self.decks[d].update(hot=[sec(x) for x in v[:8]], loop_in=sec(v[8]), loop_out=sec(v[9]), loop_on=bool(v[10]),
-                                     bpm=v[11] / 100, beat0=v[12] / 1000, pads=PAD_MODES[v[13]] if 0 <= v[13] < len(PAD_MODES) else "cue")
+                                     bpm=v[11] / 100, beat0=v[12] / 1000, pads=PAD_MODES[v[13]] if 0 <= v[13] < len(PAD_MODES) else "cue",
+                                     beats=v[14] / 10000, roll=bool(v[15]), sync=bool(v[16]), synced=bool(v[17]), rate_now=v[18] / 10000,
+                                     fx=bool(v[19]))
+            elif k == "E":
+                kind = int(f[1])
+                self.fx = {"kind": FX_KINDS[kind] if 0 <= kind < len(FX_KINDS) else "-", "n": kind, "wet": int(f[2]) / 1000, "beats": int(f[3]) / 10000,
+                           "kinds": list(FX_KINDS)}
             elif k == "H":
                 v = [int(x) for x in f[1:8]]
                 self.health = {"xruns": v[0], "worst_us": v[1], "period": v[2], "buffer": v[3], "rt": bool(v[4]),

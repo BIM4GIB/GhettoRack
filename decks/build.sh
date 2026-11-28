@@ -10,7 +10,7 @@ CXX="${CXX:-g++}"
 FLAGS="-std=c++17 -O2 -Wall -Wextra"
 ALSA=""
 if [ "$(uname)" = Linux ] && [ -f /usr/include/alsa/asoundlib.h ]; then ALSA="-DHAVE_ALSA -lasound"; fi
-[ -n "${DECKD_ONLY:-}" ] || $CXX $FLAGS engine_test.cpp engine.cpp tempo.cpp -o "$OUT/engine_test"
-$CXX $FLAGS main.cpp engine.cpp tempo.cpp -o "$OUT/deckd.new" -lpthread $ALSA
+[ -n "${DECKD_ONLY:-}" ] || $CXX $FLAGS engine_test.cpp engine.cpp tempo.cpp fx.cpp -o "$OUT/engine_test"
+$CXX $FLAGS main.cpp engine.cpp tempo.cpp fx.cpp -o "$OUT/deckd.new" -lpthread $ALSA
 mv "$OUT/deckd.new" "$OUT/deckd"
 [ -n "$ALSA" ] && echo "built $OUT/deckd (ALSA)" || echo "built $OUT/deckd (no sound card support here: --null only)"

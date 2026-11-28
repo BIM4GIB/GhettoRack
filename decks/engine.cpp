@@ -126,6 +126,7 @@ Engine::Engine()
             e.Init(kEqLoHz, kEqHiHz);
         for(auto& h : d.hot)
             h = -1;
+        d.fx.Init();
     }
 }
 
@@ -164,8 +165,8 @@ void Engine::Cut(Deck& d, double to)
 {
     const double n = d.trk ? d.trk->frames : 0;
     to             = to < 0 ? 0 : (to > n ? n : to);
-    if(d.fade > 0 && d.jgain > 0 && !d.jump)
-        d.xf_pos = d.pos, d.xf_left = kXfade;
+    if(d.fade > 0 && d.jgain > 0 && !d.jump && d.xf_left == 0) // (a blend already under way stays as it is: starting
+        d.xf_pos = d.pos, d.xf_left = kXfade;                  // it over would be the click it is there to avoid)
     d.pos = d.goal = d.goal_s = to;
     d.jump         = false;
 }
@@ -188,7 +189,8 @@ void Engine::Handle(const Ev& e)
             for(auto& h : d.hot)
                 h = -1;
             d.hot_held = -1, d.xf_left = 0;
-            d.loop_in = d.loop_out = -1, d.loop_on = false;
+            d.loop_in = d.loop_out = -1, d.loop_on = d.roll = false;
+            d.beats = 4;
             d.bpm   = d.trk ? d.trk->bpm : 0;
             d.beat0 = d.trk ? d.trk->beat0 : 0;
             break;
@@ -278,7 +280,7 @@ void Engine::Handle(const Ev& e)
             if(!d.trk)
                 break;
             d.loop_in  = std::floor((d.jump ? d.jump_to : d.pos) + 0.5);
-            d.loop_out = -1, d.loop_on = false;
+            d.loop_out = -1, d.loop_on = d.roll = false;
             break;
         case kEvLoopOut:
             if(!d.trk || d.loop_in < 0 || d.pos - d.loop_in < kLoopMin)
@@ -292,35 +294,69 @@ void Engine::Handle(const Ev& e)
             if(!d.trk)
                 break;
             const bool have = d.loop_in >= 0 && d.loop_out > d.loop_in;
-            if(e.d > 0 || (e.a >= 1 && !have)) // a new one: so many beats from here (4 if not said)
+            if(e.d > 0 || (e.a >= 2 && !d.loop_on && d.bpm > 0)) // by the beat
             {
                 if(d.bpm <= 0)
                     break; // no tempo, no beats
-                const double len = std::floor((e.d > 0 ? e.d : 4.0) * 60.0 / d.bpm * kRate + 0.5);
-                const double in  = std::floor((d.jump ? d.jump_to : d.pos) + 0.5);
+                const float  beats = e.d > 0 ? Clamp((float)e.d, kBeatsMin, kBeatsMax) : d.beats;
+                const double len   = beats * 60.0 / d.bpm * kRate; // not rounded: halved and doubled it must come back the same
+                const double in    = d.loop_on && have ? d.loop_in : std::floor((d.jump ? d.jump_to : d.pos) + 0.5);
                 if(len < kLoopMin || in + len > d.trk->frames)
                     break;
-                d.loop_in = in, d.loop_out = in + len, d.loop_on = true;
+                d.beats   = beats;
+                d.loop_in = in, d.loop_out = in + len;
+                if(d.loop_on && d.pos >= d.loop_out) // shorter than where the needle is: where it would be by now
+                    Cut(d, in + std::fmod(d.pos - in, len));
+                d.loop_on = true;
                 break;
             }
             const bool on = e.a >= 2 ? !d.loop_on : e.a >= 1;
+            if(on && !have)
+                break;
             if(on && !d.loop_on && (d.pos < d.loop_in || d.pos >= d.loop_out))
                 Cut(d, d.loop_in); // into it again, from wherever the record is
             d.loop_on = on;
+            if(!on)
+                d.roll = false;
             break;
         }
         case kEvLoopScale:
         {
-            if(!d.trk || d.loop_in < 0 || d.loop_out <= d.loop_in || e.a <= 0)
+            if(!d.trk || (e.a != 0.5f && e.a != 2.f))
                 break;
-            double len = std::floor((d.loop_out - d.loop_in) * e.a + 0.5);
-            if(len < kLoopMin || d.loop_in + len > d.trk->frames)
-                break; // as short, or as long, as it gets
+            const bool   have = d.loop_in >= 0 && d.loop_out > d.loop_in;
+            const float  nb   = d.beats * e.a;
+            const double len  = have ? (d.loop_out - d.loop_in) * e.a : 0;
+            if(nb < kBeatsMin || nb > kBeatsMax || (have && (len < kLoopMin || d.loop_in + len > d.trk->frames)))
+                break; // as short, or as long, as it gets: nothing changes, so it can be undone step for step
+            d.beats = nb;
+            if(!have)
+                break;
             d.loop_out = d.loop_in + len;
             if(d.loop_on && d.pos >= d.loop_out) // halved behind the needle: where it would be by now
                 Cut(d, d.loop_in + std::fmod(d.pos - d.loop_in, len));
             break;
         }
+        case kEvRoll:
+            if(!d.trk)
+                break;
+            if(e.a >= 1)
+            {
+                const double len = Clamp((float)e.d, kBeatsMin, kBeatsMax) * 60.0 / (d.bpm > 0 ? d.bpm : 1) * kRate;
+                const double in  = std::floor(d.pos + 0.5);
+                if(d.bpm <= 0 || len < kLoopMin || in + len > d.trk->frames)
+                    break;
+                if(!d.roll)
+                    d.roll_pos = d.pos; // from the first pad on: where the record would be without all this
+                d.roll    = true;
+                d.loop_in = in, d.loop_out = in + len, d.loop_on = true;
+            }
+            else if(d.roll)
+            {
+                d.roll = d.loop_on = false;
+                Cut(d, d.roll_pos);
+            }
+            break;
         case kEvGrid:
             if(d.trk)
                 d.bpm = e.a > 0 ? e.a : 0, d.beat0 = e.d;
@@ -337,6 +373,24 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
     const DeckKnobs& k  = knobs[n];
     const auto       rx = std::memory_order_relaxed;
 
+    /* its speed offset: the pitch slider's, or with SYNC what makes its tempo the other deck's
+       (the other's as it plays now; halved or doubled when that is nearer) */
+    {
+        const Deck& o = deck_[1 - n];
+        d.rate   = k.rate.load(rx);
+        d.synced = false;
+        if(k.sync.load(rx) > 0.5f && d.bpm > 0 && o.bpm > 0)
+        {
+            const float theirs = knobs[1 - n].sync.load(rx) > 0.5f ? knobs[1 - n].rate.load(rx) : o.rate; // two on SYNC: no circle
+            float       ratio  = o.bpm * (1.f + theirs) / d.bpm;
+            while(ratio > 1.45f)
+                ratio *= 0.5f;
+            while(ratio < 0.7f)
+                ratio *= 2.f;
+            d.rate   = ratio - 1.f;
+            d.synced = true;
+        }
+    }
     const bool scratch = d.touched && k.scratch.load(rx) > 0.5f;
     const bool run     = d.trk && (d.playing || d.cue_held || d.hot_held >= 0);
     if(!d.trk)
@@ -348,7 +402,7 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
     }
     else
     {
-        const float v = run ? (1.f + k.rate.load(rx)) * (1.f + d.bend_acc + d.bend_btn) : 0.f;
+        const float v = run ? (1.f + d.rate) * (1.f + d.bend_acc + d.bend_btn) : 0.f;
         d.speed += (v - d.speed) * kSlew;
         if(std::fabs(v - d.speed) < 1e-4f)
             d.speed = v;
@@ -410,6 +464,8 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
         }
         if(d.xf_left > 0)
             d.xf_left--, d.xf_pos += d.speed;
+        if(d.roll)
+            d.roll_pos += d.speed;
         d.pos += d.speed;
         if(d.loop_on && !scratch && d.speed > 0 && d.pos >= d.loop_out && d.pos - d.speed < d.loop_out)
         {
@@ -434,8 +490,12 @@ void Engine::RunDeck(int n, int frames, float* l, float* r)
         d.svf[1].Run(yr, lp, hp);
         yr += wet * ((low ? lp : hp) - yr);
         l[i] = yl, r[i] = yr;
-        pk = std::max(pk, std::max(std::fabs(yl), std::fabs(yr)));
     }
+    /* the effect: by this deck's tempo as it plays */
+    const double beat = d.bpm > 0 ? 60.0 * kRate / (d.bpm * (1.0 + d.rate)) : 0;
+    d.fx.Run(l, r, frames, k.fx.load(rx) > 0.5f, fx_kind.load(rx), fx_wet.load(rx), fx_beats.load(rx), beat);
+    for(int i = 0; i < frames; i++)
+        pk = std::max(pk, std::max(std::fabs(l[i]), std::fabs(r[i])));
     d.g_trim = t_trim, d.g_lo = t_lo, d.g_mid = t_mid, d.g_hi = t_hi;
     d.peak   = std::max(d.peak * kPeakDecay, pk);
 }
@@ -520,6 +580,10 @@ void Engine::Process(float* out, int frames)
         s.loop_in.store(k.loop_in, rx);
         s.loop_out.store(k.loop_out, rx);
         s.loop_on.store(k.loop_on, rx);
+        s.roll.store(k.roll, rx);
+        s.beats.store(k.beats, rx);
+        s.rate.store(k.rate, rx);
+        s.synced.store(k.synced, rx);
         s.bpm.store(k.bpm, rx);
         s.beat0.store(k.beat0, rx);
     }

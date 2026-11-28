@@ -60,7 +60,9 @@ body.upright #s-decks{grid-template-columns:minmax(0,1fr);grid-template-rows:min
 .dtime{font-family:var(--mono);font-size:20px;white-space:nowrap}.dtime span{font-size:12px;color:var(--dim)}
 .wave{position:relative;min-height:0;background:#101214;border-radius:6px;overflow:hidden;cursor:pointer}
 .wave canvas{position:absolute;inset:0;width:100%;height:100%}
-.drow{display:grid;grid-template-columns:minmax(52px,90px) minmax(60px,120px) minmax(86px,1fr) 14px minmax(64px,110px);gap:8px;align-items:stretch;min-height:44px}
+.drow{display:grid;grid-template-columns:minmax(46px,90px) minmax(50px,120px) minmax(50px,90px) minmax(80px,1fr) 12px minmax(56px,110px);gap:8px;align-items:stretch;min-height:44px}
+.drow button{padding:0 2px}
+body.upright .drow button,body.short .drow button{font-size:12px;padding:0}
 .dpitch{display:flex;flex-direction:column;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap;min-width:0;overflow:hidden}
 .dpitch b{font-size:16px;color:var(--text)}
 .vu{background:var(--off);border-radius:3px;position:relative;overflow:hidden}
@@ -96,7 +98,12 @@ body.short #s-lib{grid-template-columns:minmax(0,1fr) 250px}
 body.short .side{grid-template-columns:1fr 1fr}
 body.short .side .nav{grid-column:1 / -1}
 /* mixer */
-#s-mix{display:grid;grid-template-columns:minmax(0,1fr) 120px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 34px;gap:8px}
+#s-mix{display:grid;grid-template-columns:minmax(0,1fr) 120px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 34px auto;gap:8px;container-type:inline-size}
+body.short #s-mix{grid-template-rows:minmax(0,1fr) 20px auto;gap:5px}
+body.short .strip,body.short .master{padding:5px 8px;gap:4px}
+body.short .sbtns{grid-template-columns:1fr 1fr 1fr}body.short .sbtns button:last-child{grid-column:auto}
+body.short .sbtns button,body.short .fxrow button{min-height:30px}
+body.short .fxrow button{font-size:11px;padding:0}
 .strip,.master{display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px;min-height:0;min-width:0}
 .strip.play{border-color:var(--green)}
 .strip .dname{font-size:14px}.strip .dn{width:22px;height:22px;font-size:13px}
@@ -107,14 +114,20 @@ body.short .side .nav{grid-column:1 / -1}
 .k.w{grid-template-columns:58px minmax(0,1fr)}
 .bar{height:10px;background:var(--off);border-radius:3px;position:relative;overflow:hidden}
 .bar i{position:absolute;top:0;bottom:0;background:var(--blue)}.bar u{position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--dim)}
-.sbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}.sbtns button{padding:0 4px}
+.sbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px}.sbtns button{padding:0 2px;font-size:12px}.sbtns button:last-child{grid-column:1 / -1}
+.fxrow{grid-column:1 / -1;display:grid;grid-template-columns:repeat(6,minmax(0,1fr)) minmax(0,1.6fr) minmax(0,1.6fr);gap:6px;min-width:0}
+.fxrow button{padding:0 2px;font-size:12px;min-height:34px}
+.fxrow .step{display:grid;grid-template-columns:30px minmax(0,1fr) 30px;gap:3px;align-items:center;text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);white-space:nowrap}
+.fxrow .step button{min-height:34px;padding:0}
+@container (max-width: 640px){.fxrow{grid-template-columns:repeat(6,minmax(0,1fr))}.fxrow .step{grid-column:span 3}.fxrow button{font-size:11px;padding:0}}
 .master .t{font-family:var(--mono);font-size:12px;color:var(--dim);text-align:center}
 .mm{display:grid;grid-template-columns:1fr 16px 16px 1fr;gap:5px;min-height:0;font-family:var(--mono);font-size:11px;color:var(--dim)}
 .mm span{align-self:end;text-align:center}
 .phones{display:grid;gap:4px}
 .xf{grid-column:1 / -1;display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:8px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--dim)}
 .xf span:last-child{text-align:right}
-body.upright #s-mix{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) 150px 34px}
+body.upright #s-mix{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) 130px 30px auto}
+body.upright #s-mix .fxrow{grid-row:4}
 body.upright #s-mix .master{grid-column:1 / -1;grid-row:2}
 body.upright #s-mix .xf{grid-row:3}
 .xf .bar{height:16px}.xf .bar b{position:absolute;top:0;bottom:0;width:30px;margin-left:-15px;background:var(--blue);border-radius:3px}
@@ -173,7 +186,12 @@ function why() {              /* the line under a deck that is not there */
   if (/sound card/.test(S.error || "")) return "Plug in the Numark. The decks play through its outputs.";
   return S.error || "The decks are starting.";
 }
-const bpmNow = d => d.bpm ? (d.bpm * (1 + (d.rate || 0))).toFixed(1) : "";        /* as it plays: the track's tempo and the pitch slider */
+const rateNow = d => d.rate_now === undefined ? d.rate || 0 : d.rate_now;                 /* the pitch slider's, or SYNC's */
+const bpmNow = d => d.bpm ? (d.bpm * (1 + rateNow(d))).toFixed(1) : "";            /* as it plays */
+const beatsText = b => b >= 1 ? String(Math.round(b * 100) / 100) : "1/" + Math.round(1 / b);
+const fxNow = () => (D.S && D.S.fx) || {};
+const fxLine = () => { const x = fxNow(); return x.kind ? x.kind + ", " + beatsText(x.beats) + (x.beats === 1 ? " beat, " : " beats, ") + Math.round(x.wet * 100) + "% wet" : ""; };
+const pitchLine = d => (d.synced ? "SYNC " : "") + pct(rateNow(d)) + (d.synced ? "" : ", range " + (d.range || 8) + "%");
 const tms = s => { const m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(1).padStart(4, "0"); };
 const loopLine = d => { if (d.loop_in == null || d.loop_out == null) return d.loop_in != null ? "loop in is set: OUT closes it" : "";
   const len = d.loop_out - d.loop_in, beats = d.bpm ? len * d.bpm / 60 : 0, whole = beats && Math.abs(beats - Math.round(beats * 32) / 32) < 0.002;
@@ -253,9 +271,10 @@ function small() {
           u.wave = el("div", "g-djwave"); u.cue = el("div", "g-djcue"); u.play = el("div", "g-djplay"); u.track = -1;
           u.loop = el("div", "g-djloop"); u.hot = []; for (let k = 0; k < 8; k++) u.hot.push(el("div", "g-djhot"));
           u.cueB = Small.btn("CUE", () => cue(n)); u.playB = Small.btn("PLAY", () => ask("play " + n + " 2").then(done));
+          u.syncB = Small.btn("SYNC", () => ask("set sync " + n + " " + (deck(i).sync ? 0 : 1)).then(done));
           u.pitch = el("b"); u.range = el("span"); pitch.append(u.pitch, u.range); u.vu = vu();
           u.load = Small.btn("LOAD " + n, () => { F.tab("lib"); });
-          row.append(u.cueB, u.playB, pitch, u.vu, u.load); box.append(head, u.wave, row); root.appendChild(box); U.deck.push(u);
+          row.append(u.cueB, u.playB, u.syncB, pitch, u.vu, u.load); box.append(head, u.wave, row); root.appendChild(box); U.deck.push(u);
         }
       }
       U.msg = el("div", "g-msg"); root.appendChild(U.msg); F.view.appendChild(root);
@@ -287,7 +306,8 @@ function small() {
         for (const [l, id] of [["GAIN", "gain"], ["HI", "hi"], ["MID", "mid"], ["LO", "lo"], ["FILT", "filter"]]) { const k = el("div", "g-djk"); u.k[id] = bar(true); k.append(el("span", "", l), u.k[id]); knobs.appendChild(k); }
         body.append(u.fader, u.vu, knobs);
         u.pfl = Small.btn("PHONES", () => ask("set pfl " + n + " " + (deck(n - 1).pfl ? 0 : 1)).then(done)); u.scr = Small.btn("SCRATCH", () => ask("set scratch " + n + " " + (deck(n - 1).scratch ? 0 : 1)).then(done));
-        bt.append(u.pfl, u.scr); s.append(head, body, bt); U.strip.push(u); return s; };
+        u.fx = Small.btn("FX", () => ask("set fx " + n + " " + (deck(n - 1).fx ? 0 : 1)).then(done)); u.fx.classList.add("g-djfx");
+        bt.append(u.pfl, u.scr, u.fx); s.append(head, body, bt); U.strip.push(u); return s; };
       const m = el("div", "g-djmaster"), mm = el("div", "g-djmm"), ph = el("div", "g-djphones"); U.mt = el("span", "g-djt"); U.ml = vu(); U.mr = vu();
       mm.append(el("span", "", "L"), U.ml, U.mr, el("span", "", "R")); U.ph = {};
       for (const [l, id] of [["LEVEL", "cue_gain"], ["CUE MIX", "cue_mix"]]) { const k = el("div", "g-djk wide"); U.ph[id] = bar(false); k.append(el("span", "", l), U.ph[id]); ph.appendChild(k); }
@@ -310,9 +330,9 @@ function small() {
     if (note && performance.now() < noteTill) { t = note; bad = noteBad; }
     else if (L.copyLine()) { t = L.copyLine(); bad = !!(D.copy && D.copy.error); }
     else if (!live()) { t = tab === "decks" ? "" : why(); }
-    else if (tab === "mix") { const h = (D.S && D.S.health) || {}; if (h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts"); }
+    else if (tab === "mix") { const h = (D.S && D.S.health) || {}; if (fxLine()) t = fxLine() + (h.xruns ? ". " + h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : ""); else if (h.buffer) t = (h.buffer / 44.1).toFixed(1) + " ms of sound queued, " + (h.xruns ? h.xruns + (h.xruns === 1 ? " dropout" : " dropouts") : "no dropouts"); }
     else if (tab === "lib" && !L.card && !D.files.length) t = "no music on the box: FROM CARD copies it from the SD card";
-    else if (tab === "pads") t = Pads.clear[pd - 1] ? "tap the pad to clear" : loopLine(deck(pd - 1));
+    else if (tab === "pads") t = Pads.clear[pd - 1] ? "tap the pad to clear" : loopLine(deck(pd - 1)) || (deck(pd - 1).bpm ? "LOOP makes one of " + beatsText(deck(pd - 1).beats || 4) + (deck(pd - 1).beats === 1 ? " beat" : " beats") + " from here" : "");
     text(U.msg, t); cls(U.msg, "bad", bad);
   }
   function show(force) {
@@ -334,7 +354,8 @@ function small() {
           if (lp) { sty(u.loop, "left", Math.round(d.loop_in / d.len * 429) + "px"); sty(u.loop, "width", Math.max(2, Math.round((d.loop_out - d.loop_in) / d.len * 429)) + "px"); } }
         cls(u.cueB, "on", has && (d.cue_held || (!d.playing && Math.abs(d.pos - d.cue) < 0.01))); cls(u.playB, "go", d.playing);
         u.cueB.disabled = u.playB.disabled = !has; u.load.disabled = !!d.playing;
-        text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(d.rate || 0)); text(u.range, has && d.bpm ? pct(d.rate || 0) + ", range " + (d.range || 8) + "%" : "pitch, range " + (d.range || 8) + "%");
+        text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(rateNow(d))); text(u.range, has && d.bpm ? pitchLine(d) : "pitch, range " + (d.range || 8) + "%");
+        cls(u.syncB, "go", d.synced); cls(u.syncB, "on", d.sync && !d.synced); u.syncB.disabled = !has || (!d.sync && !(d.bpm && deck(1 - i).bpm));
         if (meters) setVu(u.vu, d.playing ? d.peak : 0); }
     } else if (tab === "pads") {
       const d = deck(pd - 1), has = !!d.track && live();
@@ -343,8 +364,8 @@ function small() {
       U.half.disabled = U.dbl.disabled = !has || !d.bpm; U.clr.disabled = !has || !(d.hot || []).some(h => h != null); cls(U.clr, "warn", Pads.clear[pd - 1] && !U.clr.disabled);
       for (let k = 0; k < 8; k++) { const h = (d.hot || [])[k], b = U.pad[k]; b.disabled = !has; cls(b, "on", h != null); text(b.lastChild, h == null ? "" : tms(h)); }
       const lp = d.loop_in != null && d.loop_out != null;
-      U.lin.disabled = !has; U.lout.disabled = !has || d.loop_in == null; U.lon.disabled = !has || (!lp && !d.bpm); U.lhalf.disabled = U.ldbl.disabled = !has || !lp;
-      cls(U.lon, "go", d.loop_on); cls(U.lin, "on", d.loop_in != null && !lp);
+      U.lin.disabled = !has; U.lout.disabled = !has || d.loop_in == null; U.lon.disabled = !has || (!lp && !d.bpm); U.lhalf.disabled = U.ldbl.disabled = !has || (!lp && !d.bpm);
+      cls(U.lon, "go", d.loop_on); cls(U.lin, "on", d.loop_in != null && !lp); text(U.lon, has && d.bpm && d.beats ? "LOOP " + beatsText(d.beats) : "LOOP");
     } else if (tab === "lib") {
       const moved = L.follow(), rows = L.rows(), key = JSON.stringify([rows, L.cursor(), L.pick && L.pick.path, L.card && L.card.path]);
       if (U.where.data !== L.where()) U.where.data = L.where(); text(U.count, L.count());
@@ -358,7 +379,8 @@ function small() {
       const M = (S && S.mix) || {};
       for (let i = 0; i < 2; i++) { const d = deck(i), u = U.strip[i]; cls(u.box, "play", d.playing); text(u.name, d.track ? d.name || "" : "no track"); cls(u.name, "g-dim", !d.track);
         sty(u.fader.firstChild, "height", Math.round((d.volume || 0) * 100) + "%"); for (const id in u.k) setBar(u.k[id], d[id] === undefined ? 0.5 : d[id], true);
-        cls(u.pfl, "on", d.pfl); cls(u.scr, "on", d.scratch); u.pfl.disabled = u.scr.disabled = !live(); if (meters) setVu(u.vu, d.playing ? d.peak : 0); }
+        cls(u.pfl, "on", d.pfl); cls(u.scr, "on", d.scratch); cls(u.fx, "go", d.fx); text(u.fx, "FX " + (fxNow().kind || ""));
+        u.pfl.disabled = u.scr.disabled = u.fx.disabled = !live(); if (meters) setVu(u.vu, d.playing ? d.peak : 0); }
       text(U.mt, "MASTER " + Math.round((M.master || 0) * 100) + "%"); setBar(U.ph.cue_gain, M.cue_gain); setBar(U.ph.cue_mix, M.cue_mix);
       sty(U.x, "left", Math.round((M.xfader === undefined ? 0.5 : M.xfader) * 100) + "%");
       if (meters) { setVu(U.ml, (M.peak || [0, 0])[0]); setVu(U.mr, (M.peak || [0, 0])[1]); }
@@ -405,8 +427,9 @@ function big() {
     u.wave = el("div", "wave"); u.cv = el("canvas"); u.wave.appendChild(u.cv);
     u.wave.onclick = e => { const d = deck(i), r = u.wave.getBoundingClientRect(); if (d.track && d.len) ask("seek " + n + " " + (Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * d.len).toFixed(2)).then(done); };
     u.cueB = btn("CUE", () => cue(n)); u.playB = btn("PLAY", () => ask("play " + n + " 2").then(done)); u.pitch = el("b"); u.range = el("span"); pitch.append(u.pitch, u.range);
+    u.syncB = btn("SYNC", () => ask("set sync " + n + " " + (deck(i).sync ? 0 : 1)).then(done));
     u.vu = el("div", "vu"); u.vu.appendChild(el("i")); u.load = btn("LOAD " + n, () => ask("pick " + n).then(done));
-    row.append(u.cueB, u.playB, pitch, u.vu, u.load); box.append(head, u.wave, row); sDecks.appendChild(box); UD.push(u);
+    row.append(u.cueB, u.playB, u.syncB, pitch, u.vu, u.load); box.append(head, u.wave, row); sDecks.appendChild(box); UD.push(u);
     /* its pads: 8 hot cues, then the loop and the tempo's correction */
     const go = j => { done(j); draw(); };
     u.pads = el("div", "pads"); u.pad = [];
@@ -447,13 +470,20 @@ function big() {
     for (const [l, id] of [["GAIN", "gain"], ["HI", "hi"], ["MID", "mid"], ["LO", "lo"], ["FILTER", "filter"]]) { const k = el("div", "k"); u.k[id] = bar(true); k.append(el("span", "", l), u.k[id]); knobs.appendChild(k); }
     body.append(u.fader, u.vu, knobs);
     u.pfl = btn("PHONES", () => ask("set pfl " + n + " " + (deck(n - 1).pfl ? 0 : 1)).then(done)); u.scr = btn("SCRATCH", () => ask("set scratch " + n + " " + (deck(n - 1).scratch ? 0 : 1)).then(done));
-    bt.append(u.pfl, u.scr); s.append(head, body, bt); US.push(u); return s; };
+    u.fx = btn("FX", () => ask("set fx " + n + " " + (deck(n - 1).fx ? 0 : 1)).then(done));
+    bt.append(u.pfl, u.scr, u.fx); s.append(head, body, bt); US.push(u); return s; };
   const master = el("div", "master"), mt = el("div", "t"), mm = el("div", "mm"), ml = el("div", "vu"), mr = el("div", "vu"), ph = el("div", "phones"), PH = {};
   ml.appendChild(el("i")); mr.appendChild(el("i")); mm.append(el("span", "", "L"), ml, mr, el("span", "", "R"));
   for (const [l, id] of [["PHONES", "cue_gain"], ["CUE MIX", "cue_mix"]]) { const k = el("div", "k w"); PH[id] = bar(false); k.append(el("span", "", l), PH[id]); ph.appendChild(k); }
   master.append(mt, mm, ph);
   const xf = el("div", "xf"), xb = el("div", "bar"), xk = el("b"); xb.append(el("u"), xk); xf.append(el("span", "", "DECK 1"), xb, el("span", "", "DECK 2"));
-  sMix.append(strip(1), master, strip(2), xf);
+  /* the effect: which, how long a sweep or an echo, how much */
+  const fxrow = el("div", "fxrow"), FB = [], fbeats = el("span"), fwet = el("span");
+  for (let k = 0; k < 6; k++) { const b = btn(["HPF", "LPF", "FLANGER", "ECHO", "REVERB", "PHASER"][k], () => ask("fxkind " + k).then(done)); fxrow.appendChild(b); FB.push(b); }
+  const step = (lab, dn, up) => { const d = el("div", "step"); d.append(btn("‹", dn), lab, btn("›", up)); return d; };
+  fxrow.append(step(fbeats, () => ask("fxbeats " + Math.max(1 / 16, (fxNow().beats || 1) / 2)).then(done), () => ask("fxbeats " + Math.min(8, (fxNow().beats || 1) * 2)).then(done)),
+               step(fwet, () => ask("fxwet " + Math.max(0, Math.round(((fxNow().wet || 0) - 0.1) * 10) / 10)).then(done), () => ask("fxwet " + Math.min(1, Math.round(((fxNow().wet || 0) + 0.1) * 10) / 10)).then(done)));
+  sMix.append(strip(1), master, strip(2), xf, fxrow);
 
   /* which layout: wide (everything), or one section at a time (a phone, upright or on its side) */
   function lay() {
@@ -489,11 +519,13 @@ function big() {
       if (u.left.data !== t) u.left.data = t; text(u.len, has ? "  of " + tm(d.len) : "");
       cls(u.cueB, "on", has && (d.cue_held || (!d.playing && Math.abs(d.pos - d.cue) < 0.01))); cls(u.playB, "go", d.playing);
       u.cueB.disabled = u.playB.disabled = !has; u.load.disabled = !!d.playing || !L.cursor();
-      text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(d.rate || 0)); text(u.range, has && d.bpm ? pct(d.rate || 0) + ", range " + (d.range || 8) + "%" : has ? "no steady beat, range " + (d.range || 8) + "%" : "pitch, range " + (d.range || 8) + "%");
+      text(u.pitch, has && d.bpm ? bpmNow(d) + " bpm" : pct(rateNow(d))); text(u.range, has && d.bpm ? pitchLine(d) : has ? "no beat, range " + (d.range || 8) + "%" : "pitch, range " + (d.range || 8) + "%");
+      cls(u.syncB, "go", d.synced); cls(u.syncB, "on", d.sync && !d.synced); u.syncB.disabled = !has || !on || (!d.sync && !(d.bpm && deck(1 - i).bpm));
       setVu(u.vu, d.playing ? d.peak : 0); wave(i);
       const hp = has && on, lp = d.loop_in != null && d.loop_out != null;
       for (let k = 0; k < 8; k++) { const h = (d.hot || [])[k], b = u.pad[k]; b.disabled = !hp; cls(b, "on", h != null); text(b.lastChild, h == null ? "" : tms(h)); }
-      u.lin.disabled = !hp; u.lout.disabled = !hp || d.loop_in == null; u.lon.disabled = !hp || (!lp && !d.bpm); u.lhalf.disabled = u.ldbl.disabled = !hp || !lp;
+      u.lin.disabled = !hp; u.lout.disabled = !hp || d.loop_in == null; u.lon.disabled = !hp || (!lp && !d.bpm); u.lhalf.disabled = u.ldbl.disabled = !hp || (!lp && !d.bpm);
+      text(u.lon, hp && d.bpm && d.beats ? "LOOP " + beatsText(d.beats) : "LOOP");
       cls(u.lon, "go", d.loop_on); cls(u.lin, "on", d.loop_in != null && !lp); u.bhalf.disabled = u.bdbl.disabled = !hp || !d.bpm;
       u.clr.disabled = !hp || !(d.hot || []).some(h => h != null); cls(u.clr, "warn", Pads.clear[i] && !u.clr.disabled);
       cls(u.padbox, "play", d.playing); text(u.padname, has ? d.name || "" : "no track"); cls(u.padname, "none", !has); }
@@ -518,7 +550,10 @@ function big() {
     const M = (S && S.mix) || {};
     for (let i = 0; i < 2; i++) { const d = deck(i), u = US[i]; cls(u.box, "play", d.playing); text(u.name, d.track ? d.name || "" : "no track"); cls(u.name, "none", !d.track);
       u.fader.firstChild.style.height = (d.volume || 0) * 100 + "%"; for (const id in u.k) setBar(u.k[id], d[id] === undefined ? 0.5 : d[id], true);
-      cls(u.pfl, "on", d.pfl); cls(u.scr, "on", d.scratch); u.pfl.disabled = u.scr.disabled = !on; setVu(u.vu, d.playing ? d.peak : 0); }
+      cls(u.pfl, "on", d.pfl); cls(u.scr, "on", d.scratch); cls(u.fx, "go", d.fx); u.pfl.disabled = u.scr.disabled = u.fx.disabled = !on; setVu(u.vu, d.playing ? d.peak : 0); }
+    const X = fxNow(); FB.forEach((b, k) => { cls(b, "on", X.n === k); b.disabled = !on; });
+    text(fbeats, X.beats ? beatsText(X.beats) + (X.beats === 1 ? " beat" : " beats") : "beats"); text(fwet, X.wet === undefined ? "wet" : Math.round(X.wet * 100) + "% wet");
+    for (const b of fxrow.querySelectorAll(".step button")) b.disabled = !on;
     text(mt, "MASTER " + Math.round((M.master || 0) * 100) + "%"); setBar(PH.cue_gain, M.cue_gain); setBar(PH.cue_mix, M.cue_mix);
     xk.style.left = (M.xfader === undefined ? 0.5 : M.xfader) * 100 + "%"; setVu(ml, (M.peak || [0, 0])[0]); setVu(mr, (M.peak || [0, 0])[1]);
     /* the message line */

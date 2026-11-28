@@ -5722,13 +5722,16 @@ class DecksTest(unittest.TestCase):
         self.post("/decks", {"a": "hot 1 1 1"})
         self.post("/decks", {"a": "hot 1 1 0"})
         self.wait_decks(lambda d: d["decks"][0]["pos"] == 5.0 and not d["decks"][0]["playing"])
-        # the pad modes: in AUTO LOOP a pad sets no hot cue
-        self.numark.play([0x94, 0x0D, 0x7F, 0x94, 0x15, 0x7F, 0x94, 0x15, 0x00])
-        d = self.wait_decks(lambda d: d["decks"][0]["pads"] == "loop")
-        self.assertIsNone(d["decks"][0]["hot"][1])
+        # the pad modes: in AUTO LOOP a pad is a loop by the beat (pad 7: 4 beats), not a hot cue; the lit pad ends it
+        self.numark.play([0x94, 0x0D, 0x7F, 0x94, 0x1A, 0x7F, 0x94, 0x1A, 0x00])
+        d = self.wait_decks(lambda d: d["decks"][0]["pads"] == "loop" and d["decks"][0]["loop_on"])
+        self.assertIsNone(d["decks"][0]["hot"][6])
+        self.assertAlmostEqual(d["decks"][0]["loop_out"] - d["decks"][0]["loop_in"], 4 * 60 / 126, delta=0.002)
+        self.numark.play([0x94, 0x1A, 0x7F, 0x94, 0x1A, 0x00])
+        self.wait_decks(lambda d: not d["decks"][0]["loop_on"])
         self.numark.play([0x94, 0x00, 0x7F])
         self.wait_decks(lambda d: d["decks"][0]["pads"] == "cue")
-        # LOOP with none set: 4 beats from here; 1/2 on the Numark, x2 from a page; off
+        # LOOP with none running: a new one from here, as long as the last; 1/2 on the Numark, x2 from a page; off
         self.numark.play([0x94, 0x40, 0x7F, 0x94, 0x40, 0x00])
         d = self.wait_decks(lambda d: d["decks"][0]["loop_on"])
         self.assertAlmostEqual(d["decks"][0]["loop_out"] - d["decks"][0]["loop_in"], 4 * 60 / 126, delta=0.002)
@@ -5776,6 +5779,80 @@ class DecksTest(unittest.TestCase):
         self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
         self.wait_decks(lambda d: d["decks"][0].get("name") == "one", 10)
         self.assertEqual(self.post("/decks/delete", {"file": "beat 126.wav"})[0], 200)
+        self.wait_decks(lambda d: d["browse"]["count"] == was)
+
+    def test_d6c_sync_and_effects(self):
+        if not shutil.which("ffmpeg", path=self.env["PATH"]):
+            self.skipTest("ffmpeg loads the tracks")
+        make_beat_wav(os.path.join(self.music, "b120.wav"), 120, 20)
+        make_beat_wav(os.path.join(self.music, "b126.wav"), 126, 20)
+        was = self.decks()["browse"]["count"]
+        self.post("/decks", {"a": "scan"})
+        self.wait_decks(lambda d: d["browse"]["count"] == was + 2)
+        for n in (1, 2):
+            self.post("/decks", {"a": "play %d 0" % n})
+        self.post("/decks", {"a": "set rate 2 0"})
+        self.numark.play([0xB1, 0x09, 0x40, 0xB1, 0x29, 0x00, 0xB0, 0x09, 0x40, 0xB0, 0x29, 0x00])     # both pitch sliders at the centre
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "b120.wav"})[0], 200)
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "file": "b126.wav"})[0], 200)
+        d = self.wait_decks(lambda d: d["decks"][0].get("bpm") == 120.0 and d["decks"][1].get("bpm") == 126.0, 10)
+        self.assertEqual((d["decks"][0]["sync"], d["decks"][0]["synced"], d["decks"][0]["rate_now"]), (False, False, 0.0))
+        # SYNC on the Numark's deck 1: its tempo is deck 2's, and its light comes
+        self.numark.received(0.2)
+        self.numark.play([0x90, 0x02, 0x7F, 0x90, 0x02, 0x00])
+        d = self.wait_decks(lambda d: d["decks"][0]["synced"])
+        self.assertAlmostEqual(d["decks"][0]["rate_now"], 126 / 120 - 1, delta=0.0002)
+        self.assertIn(bytes([0x90, 0x02, 0x7F]), self.numark.received(0.4))
+        self.post("/decks", {"a": "play 1 1"})                      # and it runs that much faster
+        d = self.wait_decks(lambda d: d["decks"][0]["playing"] and abs(d["decks"][0]["speed"] - 1.05) < 0.002)
+        self.post("/decks", {"a": "play 1 0"})
+        # a page puts SYNC on deck 2: one follows, so deck 1's goes off
+        self.assertEqual(self.post("/decks", {"a": "set sync 2 1"})[0], 200)
+        d = self.wait_decks(lambda d: d["decks"][1]["synced"] and not d["decks"][0]["sync"])
+        self.assertAlmostEqual(d["decks"][1]["rate_now"], 120 / 126 - 1, delta=0.0002)
+        self.post("/decks", {"a": "set sync 2 0"})
+        self.wait_decks(lambda d: not d["decks"][1]["synced"] and d["decks"][1]["rate_now"] == 0.0)
+        # the FX section: a paddle, the six buttons, wet / dry, beats
+        d = self.decks()
+        self.assertEqual((d["fx"]["kind"], d["fx"]["wet"], d["fx"]["beats"], d["decks"][0]["fx"]), ("ECHO", 0.5, 1.0, False))
+        self.assertEqual(d["fx"]["kinds"], ["HPF", "LPF", "FLANGER", "ECHO", "REVERB", "PHASER"])
+        self.numark.received(0.2)
+        self.numark.play([0xB8, 0x03, 0x01])                        # deck 1's paddle up
+        self.wait_decks(lambda d: d["decks"][0]["fx"] and not d["decks"][1]["fx"])
+        self.numark.play([0x99, 0x04, 0x7F, 0x99, 0x04, 0x00])      # REVERB
+        self.wait_decks(lambda d: d["fx"]["kind"] == "REVERB")
+        got = self.numark.received(0.4)
+        self.assertIn(bytes([0x99, 0x04, 0x7F]), got)
+        self.assertIn(bytes([0x99, 0x03, 0x01]), got)               # ECHO's light goes
+        self.numark.play([0xB8, 0x04, 0x7F, 0xB8, 0x05, 0x01])      # all wet; beats one step up
+        self.wait_decks(lambda d: d["fx"]["wet"] == 1.0 and d["fx"]["beats"] == 2.0)
+        self.numark.play([0xB8, 0x03, 0x00, 0xB9, 0x03, 0x02])      # deck 1's paddle back, deck 2's held down
+        self.wait_decks(lambda d: not d["decks"][0]["fx"] and d["decks"][1]["fx"])
+        self.numark.play([0xB9, 0x03, 0x00])
+        self.wait_decks(lambda d: not d["decks"][1]["fx"])
+        for a in ("fxkind 5", "fxwet 0.3", "fxbeats 0.25", "set fx 2 1"):       # the same from a page
+            self.assertEqual(self.post("/decks", {"a": a})[0], 200, a)
+        d = self.wait_decks(lambda d: d["fx"]["kind"] == "PHASER" and d["decks"][1]["fx"])
+        self.assertEqual((d["fx"]["wet"], d["fx"]["beats"]), (0.3, 0.25))
+        # a loop while held, from a page: let go, the record is where it would have been
+        self.post("/decks", {"a": "play 1 1"})
+        self.wait_decks(lambda d: d["decks"][0]["pos"] > 1.0)
+        self.post("/decks", {"a": "roll 1 0.5 1"})
+        d = self.wait_decks(lambda d: d["decks"][0]["roll"] and d["decks"][0]["loop_on"])
+        at = d["decks"][0]["loop_in"]
+        time.sleep(2)
+        self.assertLess(self.decks()["decks"][0]["pos"], at + 0.26)
+        self.post("/decks", {"a": "roll 1 0.5 0"})
+        self.wait_decks(lambda d: not d["decks"][0]["roll"] and not d["decks"][0]["loop_on"] and d["decks"][0]["pos"] > at + 1.8)
+        # as found
+        for a in ("play 1 0", "set fx 2 0", "fxkind 3", "fxwet 0.5", "fxbeats 1", "eject 1", "eject 2"):
+            self.post("/decks", {"a": a})
+        self.wait_decks(lambda d: not d["decks"][0].get("track") and not d["decks"][1].get("track"))
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 1, "file": "one.wav"})[0], 200)
+        self.assertEqual(self.post("/decks", {"a": "load", "deck": 2, "file": "sub/two.wav"})[0], 200)
+        self.wait_decks(lambda d: d["decks"][0].get("name") == "one" and d["decks"][1].get("name") == "two", 10)
+        for f in ("b120.wav", "b126.wav"):
+            self.assertEqual(self.post("/decks/delete", {"file": f})[0], 200)
         self.wait_decks(lambda d: d["browse"]["count"] == was)
 
     def test_d7_the_controller_comes_back(self):
@@ -5894,6 +5971,7 @@ class DecksTest(unittest.TestCase):
             self.wait_decks(lambda d: d["decks"][0]["playing"] and d["decks"][0]["pos"] > 0.2)
             pg.wait_for_selector(".g-djdeck.play .g-b.go")
             self.assertTrue(pg.locator(".g-djrow .g-b", has_text="LOAD 1").is_disabled(), "a playing deck takes no track")
+            self.assertTrue(pg.locator(".g-djrow .g-b", has_text="SYNC").nth(0).is_disabled(), "no SYNC without a tempo")
             shot("small-dj-decks")
             pg.locator(".g-djrow .g-b", has_text="CUE").nth(0).click()               # playing: back to the cue point, stopped
             self.wait_decks(lambda d: not d["decks"][0]["playing"] and d["decks"][0]["pos"] == 0.0)
@@ -5964,7 +6042,14 @@ class DecksTest(unittest.TestCase):
             pg.wait_for_function("document.querySelector('.g-djx b').style.left === '0%'")
             self.numark.play([0xBF, 0x08, 0x7F])
             pg.wait_for_function("document.querySelector('.g-djx b').style.left === '100%'")
-            pg.wait_for_function("document.querySelector('.g-msg').textContent.includes('ms of sound queued, no dropouts')")
+            pg.wait_for_function("document.querySelector('.g-msg').textContent === 'ECHO, 1 beat, 50% wet'")
+            fxb = pg.locator(".g-djstrip").nth(0).locator(".g-b", has_text="FX ECHO")
+            fxb.click()                                                             # deck 1 through the effect
+            self.wait_decks(lambda d: d["decks"][0]["fx"] is True and d["decks"][1]["fx"] is False)
+            pg.wait_for_selector(".g-djstrip .g-b.go >> text=FX ECHO")
+            fxb.click()
+            self.wait_decks(lambda d: d["decks"][0]["fx"] is False)
+            self.assertEqual(pg.evaluate(self.DJ_INSIDE), [[], [500, 320]], "MIX")
             shot("small-dj-mix")
             self.assertEqual(errors, [])
             # a remote: 1 starts deck 1 from any tab
@@ -5996,6 +6081,12 @@ class DecksTest(unittest.TestCase):
         fits = """() => { const bad = [], W = innerWidth, H = innerHeight;
             for (const e of document.querySelectorAll('button, .deck, .strip, .master, .msg, .lpath, canvas')) { const r = e.getBoundingClientRect();
                 if (r.width && r.height && e.offsetParent && (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1)) bad.push((e.textContent || e.className).slice(0, 20) + ' ' + Math.round(r.right) + 'x' + Math.round(r.bottom)); }
+            const bs = [...document.querySelectorAll('button')].filter(e => e.offsetParent).map(e => [e, e.getBoundingClientRect()]).filter(x => x[1].width && x[1].height);
+            for (let i = 0; i < bs.length; i++) { const [e, r] = bs[i];                    /* no button under another, none cut short by its box */
+                if (e.scrollWidth > e.clientWidth + 1) bad.push('cut: ' + e.textContent);
+                for (let j = i + 1; j < bs.length; j++) { const q = bs[j][1];
+                    if (r.left < q.right - 1 && q.left < r.right - 1 && r.top < q.bottom - 1 && q.top < r.bottom - 1) bad.push('overlap: ' + e.textContent + ' / ' + bs[j][0].textContent); } }
+            for (const e of document.querySelectorAll('.sbody, .wave')) { const r = e.getBoundingClientRect(); if (e.offsetParent && r.height < 30) bad.push('squashed: ' + e.className + ' ' + Math.round(r.height)); }
             return [bad, document.documentElement.scrollWidth <= W && document.documentElement.scrollHeight <= H, document.body.scrollHeight <= H + 1]; }"""
         shots = os.environ.get("APCBOX_SHOTS")
         with sync_playwright() as pw:
@@ -6078,12 +6169,28 @@ class DecksTest(unittest.TestCase):
                 pg.locator(".pads").nth(0).locator("button", has_text=re.compile("^IN$")).click()
                 self.wait_decks(lambda d: d["decks"][0]["loop_in"] == 1.0)
                 self.post("/decks", {"a": "seek 1 0"})
+                self.assertTrue(pg.locator(".deck .drow button", has_text="SYNC").nth(0).is_disabled(), name)     # plain tones: no tempo
                 if tabs:
                     pg.locator(".tabs button", has_text="MIX").click()
                     pg.wait_for_selector("#s-mix.show")
                     self.assertEqual(pg.evaluate(fits), [[], True, True], name + ", mix")
                     if shots:
                         pg.screenshot(path=os.path.join(shots, "dj-%s-mix.png" % name))
+                # the effect: which, how much, how long; a deck through it
+                pg.locator(".fxrow button", has_text="REVERB").click()
+                self.wait_decks(lambda d: d["fx"]["kind"] == "REVERB")
+                pg.wait_for_selector(".fxrow button.on >> text=REVERB")
+                pg.locator(".fxrow .step").nth(1).locator("button").nth(1).click()
+                self.wait_decks(lambda d: d["fx"]["wet"] == 0.6)
+                pg.locator(".fxrow .step").nth(0).locator("button").nth(0).click()
+                self.wait_decks(lambda d: d["fx"]["beats"] == 0.5)
+                pg.wait_for_function("document.querySelector('.fxrow .step span').textContent === '1/2 beats'")
+                pg.locator(".strip button", has_text="FX").nth(0).click()
+                self.wait_decks(lambda d: d["decks"][0]["fx"] is True)
+                pg.wait_for_selector(".strip button.go >> text=FX")
+                for a in ("set fx 1 0", "fxkind 3", "fxwet 0.5", "fxbeats 1"):
+                    self.post("/decks", {"a": a})
+                self.wait_decks(lambda d: d["fx"]["kind"] == "ECHO" and d["fx"]["wet"] == 0.5 and d["fx"]["beats"] == 1.0 and not d["decks"][0]["fx"])
                 pg.locator(".strip button", has_text="PHONES").nth(1).click()
                 self.wait_decks(lambda d: d["decks"][1]["pfl"] is True)
                 pg.wait_for_selector(".strip button.on >> text=PHONES")
